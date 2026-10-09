@@ -244,8 +244,14 @@ it('returns safe identity and redacts library/dependency failures', async () => 
       new Response('secret-provider-error', { status: 500 }),
     );
     const callback = await server.inject('/api/auth/callback/github?code=test&state=test');
-    expect(callback.statusCode).toBe(503);
+    expect(callback.statusCode).toBe(303);
+    expect(callback.headers.location).toBe('http://localhost:5173/settings?authError=1');
     expect(callback.body).not.toContain('secret');
+    const error = await server.inject(
+      '/api/auth/error?error=private&callbackURL=https://evil.example',
+    );
+    expect(error.statusCode).toBe(303);
+    expect(error.headers.location).toBe('http://localhost:5173/settings?authError=1');
   } finally {
     await server.close();
     vi.restoreAllMocks();

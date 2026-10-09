@@ -6,7 +6,7 @@ The browser application is a client-side React SPA; a separate local Node 24 API
 
 The workspace has these boundaries:
 
-- apps/web: presentation and user interaction. Routes are thin composition points. Feature code will live together in src/features/<feature> when implemented; shared UI stays in src/components, foundational client utilities in src/lib.
+- apps/web: presentation and user interaction. Routes are thin composition points. Identity/session and workspace flows live in src/features; shared UI stays in src/components, foundational client utilities in src/lib.
 - apps/api: server-only Fastify JSON HTTP transport, explicit SQL migrations and node-postgres repositories for workspaces and scoped services. Native Node TypeScript runs the API; there is no separate server build pipeline. Better Auth owns GitHub login and PostgreSQL sessions; Clio owns transactional workspace membership, service authorization and member invitations. The auth transport exposes only login, callback and logout; /api/me returns safe identity.
 - packages/oems: platform-neutral integration with the pinned standard. Implements pinned local schema checks, separate semantic validation, immutable validated snapshots and all five per-service calculations. Bigint microsecond timestamps preserve ordering; nulls and provisional quality retain missing evidence. Runtime supports native Node 24 and browser bundling; normative changes still belong upstream.
 - packages/adapters: reserved server-side source collection/reconciliation boundary. Currently documentation only, not an implemented collector or package.
@@ -18,7 +18,7 @@ Internal TypeScript packages expose source to the workspace bundler and have no 
 
 Provider collection on a trusted server -> reconciled evidence snapshot -> pinned OEMS validation/calculation -> result API -> TanStack Query -> UI.
 
-Do not skip the validation/quality boundary or send provider credentials to the browser. The result must retain service, window, cutoff, version and provisional-quality information. Query clients must be scoped to an application/workspace/request rather than a cross-user global cache.
+Do not skip the validation/quality boundary or send provider credentials to the browser. The result must retain service, window, cutoff, version and provisional-quality information. Query clients must be scoped to an application/workspace/request rather than a cross-user global cache. Browser identity checks hide private workspace UI, cancel queries and clear caches on mount/focus identity changes and visibility transitions. Identity revisions and workspace scope guard late query and mutation results. Workspace selection and invitation tokens remain in memory, never browser storage.
 
 PostgreSQL workspace/service persistence and transactional, checksummed migrations are implemented for local development. ADR 0004 selects Fastify and node-postgres; Docker Compose binds PostgreSQL 17 to loopback. API startup does not migrate. Readiness requires database connectivity, current migration history and expected table columns. Internal repositories require workspace IDs; callers must establish membership before using them. Better Auth with GitHub login, PostgreSQL-backed sessions, and workspace membership is selected in ADR 0003; the server integration is implemented with cookie caching and implicit account linking disabled. ADR 0005 records owner/member policy and hashed invitations. Login OAuth tokens are discarded after identity retrieval. Deployment hosting and durable jobs remain undecided.
 
@@ -30,4 +30,4 @@ VITE_ values are public configuration. Keep browser/server TypeScript environmen
 
 ## Current limitations
 
-The UI honestly displays unconnected/empty states. It has no live measurements, collectors, connected login workflow or conformance designation. The API has protected workspace/service routes, GitHub sessions and membership/invitation authorization; no results API exists. OEMS validation/calculation is tested against pinned synthetic fixtures. A future adapter must establish source mapping, reconciliation and truthful coverage; there is no real provider evidence or results API yet.
+The UI honestly displays unconnected/empty states. GitHub login/logout, workspace/service workflows and manually shared invitations are connected. It has no live measurements, collectors or conformance designation. The API has protected workspace/service routes, GitHub sessions and membership/invitation authorization; no results API exists. OEMS validation/calculation is tested against pinned synthetic fixtures. A future adapter must establish source mapping, reconciliation and truthful coverage; there is no real provider evidence or results API yet.

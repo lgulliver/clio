@@ -74,7 +74,15 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       reply.header('cache-control', 'no-store');
       return payload;
     });
-    routes.setErrorHandler((error, _request, reply) => {
+    routes.setErrorHandler((error, request, reply) => {
+      if (
+        identity &&
+        new URL(request.url, identity.config.baseUrl).pathname === '/api/auth/callback/github'
+      )
+        return reply.redirect(
+          new URL('/settings?authError=1', identity.config.appOrigin).href,
+          303,
+        );
       if (error instanceof IdentityError)
         return reply.code(error.status).send({ error: error.message });
       if (
@@ -108,7 +116,11 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         if (!allowed.includes(path)) throw new IdentityError(404, 'not_found');
         if (request.method === 'POST' && request.headers.origin !== identity.config.appOrigin)
           throw new IdentityError(403, 'forbidden');
-        if (path === '/error') return reply.code(400).send({ error: 'authentication_failed' });
+        if (path === '/error')
+          return reply.redirect(
+            new URL('/settings?authError=1', identity.config.appOrigin).href,
+            303,
+          );
         let body: unknown = request.body ?? {};
         if (path === '/sign-in/social') {
           const parsed = object(request.body, ['provider', 'callbackURL', 'disableRedirect']);

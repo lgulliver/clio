@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login remains unconnected. Provider collection is not implemented. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Provider collection is not implemented. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -14,7 +14,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Vite prints the local development URL, normally http://localhost:5173. The supported runtime is Node 24.15.0 or later within the Node 24 line; CI uses the pinned current LTS patch. No environment variables or provider account are required for this shell.
+Vite prints the local development URL, normally http://localhost:5173. The supported runtime is Node 24.15.0 or later within the Node 24 line; CI uses the pinned current LTS patch. The overview remains viewable without a provider connection. Login and workspace flows require the local API with server-only GitHub OAuth configuration; see apps/api/README.md.
 
 ## Commands
 
@@ -46,7 +46,7 @@ docs/                      Architecture and recorded decisions
 .github/workflows/         CI checks and production artifact
 ```
 
-For PostgreSQL and API setup, read [apps/api/README.md](apps/api/README.md). API configuration is server-only; the browser remains an unconnected shell. CI runs the ordinary checks plus real PostgreSQL integration tests.
+For PostgreSQL and API setup, read [apps/api/README.md](apps/api/README.md). API configuration is server-only; the browser consumes the authenticated API. CI runs the ordinary checks plus real PostgreSQL integration tests.
 
 Read [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md), [stack decision](docs/decisions/0001-typescript-workspace.md) and [contribution guide](CONTRIBUTING.md). Scoped agent instructions describe the web and integration boundaries.
 

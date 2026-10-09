@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { IdentityControls } from '../features/identity/session';
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -30,6 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               Workspace
             </Link>
           </nav>
+          <IdentityControls />
         </div>
       </header>
       <main id="main-content" className="mx-auto max-w-6xl px-6 py-12">

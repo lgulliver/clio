@@ -1,12 +1,15 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router';
 import { AppShell } from '../components/app-shell';
+import { SessionProvider } from '../features/identity/session';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: () => (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <SessionProvider>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </SessionProvider>
   ),
   notFoundComponent: () => (
     <section>

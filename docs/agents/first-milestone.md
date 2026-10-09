@@ -1,10 +1,10 @@
 # First Clio milestone
 
-Status: backend foundation, OEMS fixtures and server identity foundation complete; remaining slices planned. Agent setup itself did not implement application behavior. Browser login integration and collectors are not implemented yet. All five OEMS calculations are exercised against the pinned fixtures.
+Status: backend foundation, OEMS fixtures and server/browser identity foundations complete; remaining slices planned. Agent setup itself did not implement application behavior. Provider collectors are not implemented yet. All five OEMS calculations are exercised against the pinned fixtures.
 
 Accepted: PostgreSQL; local is the development phase of a future hosted application. Clio is a personal open source project and Liam is sole maintainer. Better Auth with GitHub login, PostgreSQL sessions, and workspace membership is accepted in ADR 0003. Licence selection remains separate and pending.
 
-Selected in ADR 0004: Node 24/TypeScript + Fastify API, node-postgres, explicit transactional SQL migrations, local PostgreSQL 17. Implemented: health/readiness, workspace/service persistence, GitHub sessions and protected membership/invitation APIs. Proposed: separate worker entry point, PostgreSQL-backed jobs, GitHub-first collection. ADR 0005 selects initial owner/member and invitation policy. Collection credential storage, production evidence source and hosting need documented choices before dependent implementation. Do not treat previous suggestions about PATs or auth bypass as accepted decisions.
+Selected in ADR 0004: Node 24/TypeScript + Fastify API, node-postgres, explicit transactional SQL migrations, local PostgreSQL 17. Implemented: health/readiness, workspace/service persistence, GitHub sessions, protected membership/invitation APIs and browser workspace/service/invitation workflows. Proposed: separate worker entry point, PostgreSQL-backed jobs, GitHub-first collection. ADR 0005 selects initial owner/member and invitation policy. Collection credential storage, production evidence source and hosting need documented choices before dependent implementation. Do not treat previous suggestions about PATs or auth bypass as accepted decisions.
 
 ## Sequence
 

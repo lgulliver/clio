@@ -2,7 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../lib/query-client';
 import { createAppRouter } from '../router';
 
@@ -18,6 +18,12 @@ function renderApp(path = '/') {
 }
 
 describe('application routing', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 401 })),
+    );
+  });
   it('renders an honest empty state before evidence is connected', async () => {
     renderApp();
     expect(await screen.findByRole('heading', { name: 'No service evidence yet' })).toBeVisible();

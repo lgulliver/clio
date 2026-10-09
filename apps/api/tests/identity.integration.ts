@@ -241,8 +241,8 @@ describe('real identity/session/workspace boundary', () => {
         url: `/api/auth/callback/github?code=fixture&state=${state}`,
         headers: { cookie: cookieHeader(start.headers['set-cookie']) },
       });
-      expect(callback.statusCode).toBe(409);
-      expect(callback.json()).toEqual({ error: 'conflict' });
+      expect(callback.statusCode).toBe(303);
+      expect(callback.headers.location).toBe('http://localhost:5173/settings?authError=1');
       expect(callback.body).not.toContain('email');
       expect(logging).not.toHaveBeenCalled();
       const accounts = await pool.query(
