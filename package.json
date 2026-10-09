@@ -1,0 +1,27 @@
+{
+  "name": "clio",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@12.10.1",
+  "engines": {
+    "node": "^24.15.0",
+    "pnpm": "12.10.1"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @clio/web dev",
+    "build": "pnpm --filter @clio/web build",
+    "preview": "pnpm --filter @clio/web preview",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:watch": "pnpm --filter @clio/web test:watch",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "typescript": "7.0.2"
+  }
+}

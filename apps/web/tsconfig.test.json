@@ -1,0 +1,7 @@
+{
+  "extends": "@clio/typescript-config/react.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src"]
+}
