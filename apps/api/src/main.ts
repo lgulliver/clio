@@ -1,16 +1,22 @@
 import { readConfig } from './config.ts';
 import { checkReadiness, loadMigrations } from './db/migrations.ts';
 import { createPool } from './db/pool.ts';
+import { createAuth } from './features/identity/auth.ts';
+import { readAuthConfig } from './features/identity/config.ts';
 import { createServer } from './server.ts';
 
 async function main() {
   const config = readConfig(process.env);
+  const authConfig = readAuthConfig(process.env);
   const migrations = await loadMigrations();
   const pool = createPool(config.databaseUrl);
-  const server = createServer({
-    ready: () => checkReadiness(pool, migrations),
-    close: () => pool.end(),
-  });
+  const server = createServer(
+    {
+      ready: () => checkReadiness(pool, migrations),
+      close: () => pool.end(),
+    },
+    authConfig ? { auth: createAuth(pool, authConfig), config: authConfig, pool } : undefined,
+  );
   let closing = false;
   const shutdown = async () => {
     if (closing) return;

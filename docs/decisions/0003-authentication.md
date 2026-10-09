@@ -1,6 +1,6 @@
 # ADR 0003 Application authentication and workspace access
 
-Status: accepted; implementation pending
+Status: accepted; server foundation implemented, browser integration pending
 Date: 2026-10-09
 Maintainer: Liam Gulliver
 
@@ -16,11 +16,11 @@ Local interactive development uses real login; automated tests use controlled au
 
 ## Consequences and remaining choices
 
-Better Auth avoids hand-written OAuth/session protocols and supports the existing TypeScript/PostgreSQL direction. It has a documented Fastify integration if that proposed backend is selected. GitHub-first login narrows initial sign-in options; generic OIDC, email/password, and additional identity providers can be considered later.
+Better Auth avoids hand-written OAuth/session protocols and supports the existing TypeScript/PostgreSQL direction. Its Fastify integration now runs in the selected local backend. GitHub-first login narrows initial sign-in options; generic OIDC, email/password, and additional identity providers can be considered later.
 
-Workspace membership is a Clio authorization boundary, independent from GitHub organisation membership. Bind membership to the stable Clio user ID and GitHub provider identity to its stable account ID, never email or username. Email-addressed invitations require verified ownership of the invited email before acceptance. Do not enable implicit account linking by email; email/username changes must not change membership. The organization plugin, initial role matrix, membership/invitation flows, and ownership bootstrap must be selected and tested in the identity task. Do not infer a hosted single-user product from local development. The implementation must test cross-workspace access, expired/revoked sessions, logout, invalid callbacks, missing configuration, email/username changes, unverified invitation acceptance, and attempted account-link collisions.
+Workspace membership is a Clio authorization boundary, independent from GitHub organisation membership. Bind membership to the stable Clio user ID and GitHub provider identity to its stable account ID, never email or username. Email-addressed invitations require verified ownership of the invited email before acceptance. Do not enable implicit account linking by email; email/username changes must not change membership. ADR 0005 selects the initial role matrix, membership/invitation flows and ownership bootstrap; Clio retains its workspace model instead of enabling the organization plugin. Do not infer a hosted single-user product from local development. The implementation must test cross-workspace access, expired/revoked sessions, logout, invalid callbacks, missing configuration, email/username changes, unverified invitation acceptance, and attempted account-link collisions.
 
-No OAuth application is registered and no credentials, live login, deployment, or dependency installation for Better Auth is implemented by this ADR. Pin and review the selected library version when building the identity slice.
+The server foundation pins Better Auth 1.7.7 and uses controlled OAuth/provider mocks for automated checks. Real OAuth application registration, credentials and interactive login remain maintainer setup; browser integration and deployment are pending.
 
 ## Sources
 

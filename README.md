@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. Provider collection and authentication are not implemented yet. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login remains unconnected. Provider collection is not implemented. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -38,7 +38,7 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 
 ```text
 apps/web/                  React SPA, routing, query state and Tailwind
-apps/api/                  Local health API, migrations and scoped persistence
+apps/api/                  Local API, GitHub sessions, workspace authorization and persistence
 packages/oems/             Pinned schemas, snapshot validation and five metric calculations
 packages/adapters/         Reserved server-side provider boundary (documentation only)
 packages/typescript-config/ Shared strict TypeScript configurations

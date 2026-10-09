@@ -91,4 +91,22 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   // Also detect missing tables/columns rather than trusting ledger alone.
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
   await pool.query('SELECT id, workspace_id, name, created_at FROM services LIMIT 0');
+  await pool.query(
+    'SELECT id, name, email, email_verified, image, created_at, updated_at FROM auth_users LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id, user_id, token, expires_at, ip_address, user_agent, created_at, updated_at FROM auth_sessions LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id, user_id, account_id, provider_id, access_token, refresh_token, id_token, access_token_expires_at, refresh_token_expires_at, scope, password, created_at, updated_at FROM auth_accounts LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id, identifier, value, expires_at, created_at, updated_at FROM auth_verifications LIMIT 0',
+  );
+  await pool.query(
+    'SELECT workspace_id, user_id, role, created_at FROM workspace_memberships LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id, workspace_id, email, token_hash, created_by, expires_at, consumed_at, cancelled_at, created_at FROM workspace_invitations LIMIT 0',
+  );
 }

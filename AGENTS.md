@@ -32,4 +32,4 @@ Clio is a personal open source project; MaxContact context does not apply. Postg
 
 Use docs/agents/team.md and shared role briefs in docs/agents/roles for Codex/Claude collaboration. The maintainer authorizes bounded specialist delegation for this project. Keep at most three specialists active across both engines, isolate concurrent writers in worktrees, assign shared files to one owner, and use the opposite engine for independent review. The coordinator integrates verified slices; specialists do not silently expand scope. docs/agents/first-milestone.md separates accepted decisions from proposed choices.
 
-Authentication decision: Better Auth with GitHub login, PostgreSQL sessions, and workspace membership (docs/decisions/0003-authentication.md). Login credentials and provider collection credentials are separate. Authentication is selected, not yet implemented.
+Authentication decision: Better Auth with GitHub login, PostgreSQL sessions, and workspace membership (docs/decisions/0003-authentication.md). Login credentials and provider collection credentials are separate. The server identity foundation is implemented; browser login integration remains pending.
