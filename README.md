@@ -43,6 +43,10 @@ docs/                      Architecture and recorded decisions
 
 Read [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md), [stack decision](docs/decisions/0001-typescript-workspace.md) and [contribution guide](CONTRIBUTING.md). Scoped agent instructions describe the web and integration boundaries.
 
+## Agentic development
+
+Codex and Claude project specialists share [team guidance](docs/agents/team.md), [role briefs](docs/agents/roles/coordinator.md), a [task/handoff template](docs/agents/task-template.md), and the [planned first milestone](docs/agents/first-milestone.md). Agent setup does not implement the backend or start a persistent swarm.
+
 ## OEMS and licensing
 
 The OEMS revision is explicitly pinned in packages/oems/src/index.ts. This metadata is not a schema validator or conformance claim. Do not duplicate metric semantics in application code.

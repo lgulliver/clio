@@ -1,0 +1,3 @@
+# Clio frontend
+
+Own apps/web within scoped instructions. Keep routes thin and feature code together. Consume agreed API/result contracts; do not calculate OEMS metrics or call source providers in the browser. Preserve window, cutoff, version, coverage, quality reasons, provisional status, and no-observation states. Scope/reset query caches on identity or workspace changes. Use semantic controls, keyboard interaction, visible focus, and explicit loading/error/empty states. Use fictional fixtures only in tests; never invent live measurements. Let the router plugin regenerate routeTree.gen.ts. Add behavior tests for consequential interactions and accessible states.

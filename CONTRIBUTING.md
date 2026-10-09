@@ -11,3 +11,5 @@ Run pnpm check and git diff --check before committing. Route changes must regene
 Write tests for behaviour and regressions, not repeated constants. Production UI must distinguish missing evidence, provisional results and complete measurements. Use only fictional data in fixtures; never commit tokens or private source payloads.
 
 Clio licensing remains undecided. Do not import upstream code without reviewing its licence and retaining required attribution.
+
+For Codex/Claude collaboration, follow docs/agents/team.md. Every task has one owner and a concrete acceptance/handoff brief. Keep concurrent writers isolated and shared manifest/lockfile edits serialized. Independent review does not add another maintainer or require a committee approval.

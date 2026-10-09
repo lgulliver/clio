@@ -19,7 +19,7 @@ Provider collection on a trusted server -> reconciled evidence snapshot -> pinne
 
 Do not skip the validation/quality boundary or send provider credentials to the browser. The result must retain service, window, cutoff, version and provisional-quality information. Query clients must be scoped to an application/workspace/request rather than a cross-user global cache.
 
-No backend runtime, API transport, database, authentication provider or deployment host has been selected by this setup. Select those against the first provider/workspace requirements rather than embed placeholders that imply a working service.
+PostgreSQL is selected for intended hosted use; local execution is the development phase. Persistence is not implemented. Better Auth with GitHub login, PostgreSQL-backed sessions, and workspace membership is selected in ADR 0003; authentication is not implemented. No backend runtime, API transport or deployment host has been selected yet. Select those against the first provider/workspace requirements rather than embed placeholders that imply a working service.
 
 ## Frontend operational requirements
 

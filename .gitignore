@@ -8,3 +8,6 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+
+# Local agent transcripts and review artifacts
+.agent-runs/

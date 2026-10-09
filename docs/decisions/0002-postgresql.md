@@ -1,0 +1,15 @@
+# ADR 0002 PostgreSQL persistence
+
+Status: accepted; implementation pending
+Date: 2026-10-09
+Maintainer: Liam Gulliver
+
+## Context and decision
+
+Clio is a personal open source project intended to become a hosted web application. Local execution is the development phase, not a local-only product requirement. Use PostgreSQL in development and production, with a local Docker Compose service and versioned migrations when persistence is implemented.
+
+Store core identities, connections, evidence revisions, snapshot/result relationships, and collection checkpoints relationally. Variable provider evidence may use JSONB; that does not replace typed relational keys and constraints. Durable PostgreSQL jobs are the initial proposed queue approach, to be selected with worker requirements.
+
+## Alternatives and consequences
+
+SQLite would lower initial setup cost but introduce a later database migration if hosted concurrency requires PostgreSQL. Using PostgreSQL from the start exercises the intended database semantics locally. Do not build dual-database support upfront. Hosting vendor, SQL library, schema, job library, and operational deployment remain separate choices.
