@@ -1,0 +1,321 @@
+{
+  "layer": "structural",
+  "input": {
+    "dataset_id": "fictional-beacon",
+    "profile_version": "0.1-draft",
+    "window": {
+      "start": "2026-10-01T00:00:00Z",
+      "end": "2026-10-11T00:00:00Z",
+      "timezone": "UTC",
+      "calendar_days": 10
+    },
+    "evidence_cutoff": "2026-10-12T00:00:00Z",
+    "collection_complete": true,
+    "deployment_history_complete": true,
+    "services": [
+      {
+        "id": "service:beacon",
+        "name": "Beacon",
+        "source_refs": [
+          "https://example.invalid/services/beacon"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      }
+    ],
+    "deployments": [
+      {
+        "id": "deployment:d1",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r1",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-01T08:00:00Z",
+        "change_ids": [
+          "change:c1",
+          "change:c2",
+          "change:c3",
+          "change:c4"
+        ],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d1"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d1/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d1/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d2",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r2",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-02T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d2"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d2/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d2/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d3",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r3",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-03T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d3"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d3/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d3/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d4",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r4",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-04T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d4"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d4/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d4/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d5",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r5",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-05T08:00:00Z",
+        "change_ids": [],
+        "failure": "failed",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d5"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d5/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d5/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d6",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r6",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-06T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d6"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d6/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d6/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d7",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r7",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-07T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d7"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d7/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d7/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d8",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r8",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-08T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d8"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d8/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d8/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d9",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r9",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-09T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d9"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d9/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d9/intent-review"
+        ]
+      },
+      {
+        "id": "deployment:d10",
+        "service_id": "service:beacon",
+        "rollout_group_id": "rollout:r10",
+        "environment": "production",
+        "qualification": "qualifying",
+        "effective_at": "2026-10-10T08:00:00Z",
+        "change_ids": [],
+        "failure": "no_recorded_failure",
+        "rework": "not_incident_driven",
+        "source_refs": [
+          "https://example.invalid/deployments/d10"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z",
+        "change_links_complete": true,
+        "qualification_window": null,
+        "failure_evidence_refs": [
+          "https://example.invalid/deployments/d10/failure-review"
+        ],
+        "rework_evidence_refs": [
+          "https://example.invalid/deployments/d10/intent-review"
+        ]
+      }
+    ],
+    "changes": [
+      {
+        "id": "change:c1",
+        "repository_id": "repository:beacon",
+        "commit_id": "fictional-commit-1",
+        "committed_at": "2026-10-01T07:00:00.1234567Z",
+        "source_refs": [
+          "https://example.invalid/commits/c1"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      },
+      {
+        "id": "change:c2",
+        "repository_id": "repository:beacon",
+        "commit_id": "fictional-commit-2",
+        "committed_at": "2026-10-01T06:00:00Z",
+        "source_refs": [
+          "https://example.invalid/commits/c2"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      },
+      {
+        "id": "change:c3",
+        "repository_id": "repository:beacon",
+        "commit_id": "fictional-commit-3",
+        "committed_at": "2026-10-01T05:00:00Z",
+        "source_refs": [
+          "https://example.invalid/commits/c3"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      },
+      {
+        "id": "change:c4",
+        "repository_id": "repository:beacon",
+        "commit_id": "fictional-commit-4",
+        "committed_at": "2026-10-01T00:00:00Z",
+        "source_refs": [
+          "https://example.invalid/commits/c4"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      }
+    ],
+    "incidents": [
+      {
+        "id": "incident:i1:beacon",
+        "service_id": "service:beacon",
+        "causal_deployment_id": "deployment:d5",
+        "failure_started_at": "2026-10-05T08:05:00Z",
+        "restored_at": "2026-10-05T08:35:00Z",
+        "start_is_approximate": false,
+        "source_refs": [
+          "https://example.invalid/incidents/i1"
+        ],
+        "observed_at": "2026-10-12T00:00:00Z"
+      }
+    ],
+    "snapshot_as_of_cutoff": true,
+    "recovery_evidence_complete": true
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Service recovery episode",
+  "description": "OEMS v0.1 draft contract; semantic constraints also apply.",
+  "type": "object",
+  "required": [
+    "id",
+    "service_id",
+    "causal_deployment_id",
+    "failure_started_at",
+    "restored_at",
+    "start_is_approximate",
+    "source_refs",
+    "observed_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "minItems": 1
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "service_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "causal_deployment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "failure_started_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+    },
+    "restored_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "start_is_approximate": {
+      "type": "boolean"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+    }
+  },
+  "additionalProperties": false
+}

@@ -8,7 +8,7 @@ The workspace has these boundaries:
 
 - apps/web: presentation and user interaction. Routes are thin composition points. Feature code will live together in src/features/<feature> when implemented; shared UI stays in src/components, foundational client utilities in src/lib.
 - apps/api: server-only Fastify JSON HTTP transport, explicit SQL migrations and node-postgres repositories for workspaces and scoped services. Native Node TypeScript runs the API; there is no separate server build pipeline. Only health endpoints are exposed until membership authorization exists.
-- packages/oems: platform-neutral integration with the pinned standard. Initially exposes provenance only. Future schema/semantic checks and standard result handling belong here; normative changes still belong upstream.
+- packages/oems: platform-neutral integration with the pinned standard. Implements pinned local schema checks, separate semantic validation, immutable validated snapshots and all five per-service calculations. Bigint microsecond timestamps preserve ordering; nulls and provisional quality retain missing evidence. Runtime supports native Node 24 and browser bundling; normative changes still belong upstream.
 - packages/adapters: reserved server-side source collection/reconciliation boundary. Currently documentation only, not an implemented collector or package.
 - packages/typescript-config: shared strict compiler defaults; no runtime code.
 
@@ -30,4 +30,4 @@ VITE_ values are public configuration. Keep browser/server TypeScript environmen
 
 ## Current limitations
 
-The UI honestly displays unconnected/empty states. It has no live measurements, collectors, authentication or conformance designation. Persistence is currently limited to internal workspace/service repositories; there are no workspace HTTP routes or results API. The first adapter will establish the server/service boundary and exercise real evidence against OEMS fixtures.
+The UI honestly displays unconnected/empty states. It has no live measurements, collectors, authentication or conformance designation. Persistence is currently limited to internal workspace/service repositories; there are no workspace HTTP routes or results API. OEMS validation/calculation is tested against pinned synthetic fixtures. A future adapter must establish source mapping, reconciliation and truthful coverage; there is no real provider evidence or results API yet.

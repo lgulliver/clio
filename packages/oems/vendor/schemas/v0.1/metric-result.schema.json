@@ -1,0 +1,595 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Service metric result",
+  "type": "object",
+  "properties": {
+    "dataset_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_version": {
+      "const": "0.1-draft"
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+        },
+        "timezone": {
+          "const": "UTC"
+        },
+        "calendar_days": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "timezone",
+        "calendar_days"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_cutoff": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+    },
+    "qualification_unknown_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "deployment_frequency": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "provisional",
+            "no_observations"
+          ]
+        },
+        "quality_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "incomplete_collection",
+              "unresolved_qualification",
+              "unknown_failure_classification",
+              "unknown_rework_classification",
+              "incomplete_history",
+              "incomplete_change_linkage",
+              "unresolved_change_links",
+              "incomplete_recovery_evidence",
+              "unresolved_causal_links",
+              "open_recovery_episodes",
+              "approximate_recovery_start"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deployments_per_day": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "quality_reasons",
+        "count",
+        "deployments_per_day"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "provisional"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quality_reasons": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "quality_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "change_lead_time": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "provisional",
+            "no_observations"
+          ]
+        },
+        "quality_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "incomplete_collection",
+              "unresolved_qualification",
+              "unknown_failure_classification",
+              "unknown_rework_classification",
+              "incomplete_history",
+              "incomplete_change_linkage",
+              "unresolved_change_links",
+              "incomplete_recovery_evidence",
+              "unresolved_causal_links",
+              "open_recovery_episodes",
+              "approximate_recovery_start"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "observation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_change_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkage_unknown_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_seconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "quality_reasons",
+        "observation_count",
+        "candidate_count",
+        "unresolved_change_count",
+        "linkage_unknown_count",
+        "median_seconds"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "provisional"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quality_reasons": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "quality_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "change_fail_rate": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "provisional",
+            "no_observations"
+          ]
+        },
+        "quality_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "incomplete_collection",
+              "unresolved_qualification",
+              "unknown_failure_classification",
+              "unknown_rework_classification",
+              "incomplete_history",
+              "incomplete_change_linkage",
+              "unresolved_change_links",
+              "incomplete_recovery_evidence",
+              "unresolved_causal_links",
+              "open_recovery_episodes",
+              "approximate_recovery_start"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "numerator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lower_bound": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upper_bound": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bounds_scope": {
+          "enum": [
+            "full_population",
+            "observed_population"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "quality_reasons",
+        "numerator",
+        "denominator",
+        "unknown_count",
+        "lower_bound",
+        "upper_bound",
+        "ratio",
+        "bounds_scope"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "provisional"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quality_reasons": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "quality_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "deployment_rework_rate": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "provisional",
+            "no_observations"
+          ]
+        },
+        "quality_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "incomplete_collection",
+              "unresolved_qualification",
+              "unknown_failure_classification",
+              "unknown_rework_classification",
+              "incomplete_history",
+              "incomplete_change_linkage",
+              "unresolved_change_links",
+              "incomplete_recovery_evidence",
+              "unresolved_causal_links",
+              "open_recovery_episodes",
+              "approximate_recovery_start"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "numerator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lower_bound": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upper_bound": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bounds_scope": {
+          "enum": [
+            "full_population",
+            "observed_population"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "quality_reasons",
+        "numerator",
+        "denominator",
+        "unknown_count",
+        "lower_bound",
+        "upper_bound",
+        "ratio",
+        "bounds_scope"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "provisional"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quality_reasons": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "quality_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "failed_deployment_recovery_time": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "provisional",
+            "no_observations"
+          ]
+        },
+        "quality_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "incomplete_collection",
+              "unresolved_qualification",
+              "unknown_failure_classification",
+              "unknown_rework_classification",
+              "incomplete_history",
+              "incomplete_change_linkage",
+              "unresolved_change_links",
+              "incomplete_recovery_evidence",
+              "unresolved_causal_links",
+              "open_recovery_episodes",
+              "approximate_recovery_start"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "observation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approximate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_failure_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_seconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approximate_median_seconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "quality_reasons",
+        "observation_count",
+        "open_count",
+        "approximate_count",
+        "unresolved_count",
+        "unknown_failure_count",
+        "median_seconds",
+        "approximate_median_seconds"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "provisional"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quality_reasons": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "quality_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "dataset_id",
+    "service_id",
+    "profile_version",
+    "window",
+    "evidence_cutoff",
+    "qualification_unknown_count",
+    "deployment_frequency",
+    "change_lead_time",
+    "change_fail_rate",
+    "deployment_rework_rate",
+    "failed_deployment_recovery_time"
+  ],
+  "additionalProperties": false
+}

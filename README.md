@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Provider collection, authentication and metric calculation are not implemented yet. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. Provider collection and authentication are not implemented yet. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -39,7 +39,7 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 ```text
 apps/web/                  React SPA, routing, query state and Tailwind
 apps/api/                  Local health API, migrations and scoped persistence
-packages/oems/             Pinned upstream provenance and future OEMS integration
+packages/oems/             Pinned schemas, snapshot validation and five metric calculations
 packages/adapters/         Reserved server-side provider boundary (documentation only)
 packages/typescript-config/ Shared strict TypeScript configurations
 docs/                      Architecture and recorded decisions
@@ -56,6 +56,6 @@ Codex and Claude project specialists share [team guidance](docs/agents/team.md),
 
 ## OEMS and licensing
 
-The OEMS revision is explicitly pinned in packages/oems/src/index.ts. This metadata is not a schema validator or conformance claim. Do not duplicate metric semantics in application code.
+The OEMS revision is explicitly pinned in packages/oems/src/index.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. Do not duplicate metric semantics in application code.
 
 Clio's licence has not been selected. Public visibility does not grant an open licence; workspace packages are private and marked UNLICENSED. OEMS is separately licensed under Apache 2.0.

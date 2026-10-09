@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reconciled metric dataset",
+  "type": "object",
+  "properties": {
+    "dataset_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_version": {
+      "const": "0.1-draft"
+    },
+    "snapshot_as_of_cutoff": {
+      "const": true
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+        },
+        "timezone": {
+          "const": "UTC"
+        },
+        "calendar_days": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "timezone",
+        "calendar_days"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_cutoff": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,6})?([Zz]|\\+[0-9]{2}:[0-9]{2}|-(?!00:00)[0-9]{2}:[0-9]{2})$"
+    },
+    "collection_complete": {
+      "type": "boolean"
+    },
+    "deployment_history_complete": {
+      "type": "boolean"
+    },
+    "recovery_evidence_complete": {
+      "type": "boolean"
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "$ref": "service.schema.json"
+      },
+      "minItems": 1
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "$ref": "change.schema.json"
+      }
+    },
+    "deployments": {
+      "type": "array",
+      "items": {
+        "$ref": "deployment.schema.json"
+      }
+    },
+    "incidents": {
+      "type": "array",
+      "items": {
+        "$ref": "incident.schema.json"
+      }
+    }
+  },
+  "required": [
+    "dataset_id",
+    "profile_version",
+    "snapshot_as_of_cutoff",
+    "window",
+    "evidence_cutoff",
+    "collection_complete",
+    "deployment_history_complete",
+    "recovery_evidence_complete",
+    "services",
+    "changes",
+    "deployments",
+    "incidents"
+  ],
+  "additionalProperties": false
+}

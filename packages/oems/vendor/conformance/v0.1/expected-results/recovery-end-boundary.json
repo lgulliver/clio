@@ -1,0 +1,61 @@
+{
+  "dataset_id": "fictional-beacon",
+  "profile_version": "0.1-draft",
+  "window": {
+    "start": "2026-10-01T00:00:00Z",
+    "end": "2026-10-11T00:00:00Z",
+    "timezone": "UTC",
+    "calendar_days": 10
+  },
+  "evidence_cutoff": "2026-10-12T00:00:00Z",
+  "service_id": "service:beacon",
+  "qualification_unknown_count": 0,
+  "deployment_frequency": {
+    "status": "complete",
+    "quality_reasons": [],
+    "count": 10,
+    "deployments_per_day": 1
+  },
+  "change_lead_time": {
+    "status": "complete",
+    "quality_reasons": [],
+    "observation_count": 4,
+    "candidate_count": 0,
+    "unresolved_change_count": 0,
+    "linkage_unknown_count": 0,
+    "median_seconds": 9000
+  },
+  "change_fail_rate": {
+    "status": "complete",
+    "quality_reasons": [],
+    "numerator": 1,
+    "denominator": 10,
+    "unknown_count": 0,
+    "lower_bound": 0.1,
+    "upper_bound": 0.1,
+    "ratio": 0.1,
+    "bounds_scope": "full_population"
+  },
+  "deployment_rework_rate": {
+    "status": "complete",
+    "quality_reasons": [],
+    "numerator": 2,
+    "denominator": 10,
+    "unknown_count": 0,
+    "lower_bound": 0.2,
+    "upper_bound": 0.2,
+    "ratio": 0.2,
+    "bounds_scope": "full_population"
+  },
+  "failed_deployment_recovery_time": {
+    "status": "no_observations",
+    "quality_reasons": [],
+    "observation_count": 0,
+    "open_count": 0,
+    "approximate_count": 0,
+    "unresolved_count": 0,
+    "unknown_failure_count": 0,
+    "median_seconds": null,
+    "approximate_median_seconds": null
+  }
+}

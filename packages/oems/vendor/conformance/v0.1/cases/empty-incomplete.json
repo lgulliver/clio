@@ -1,0 +1,28 @@
+{
+  "dataset_id": "fictional-beacon",
+  "profile_version": "0.1-draft",
+  "window": {
+    "start": "2026-10-01T00:00:00Z",
+    "end": "2026-10-11T00:00:00Z",
+    "timezone": "UTC",
+    "calendar_days": 10
+  },
+  "evidence_cutoff": "2026-10-12T00:00:00Z",
+  "collection_complete": false,
+  "deployment_history_complete": true,
+  "services": [
+    {
+      "id": "service:beacon",
+      "name": "Beacon",
+      "source_refs": [
+        "https://example.invalid/services/beacon"
+      ],
+      "observed_at": "2026-10-12T00:00:00Z"
+    }
+  ],
+  "deployments": [],
+  "changes": [],
+  "incidents": [],
+  "snapshot_as_of_cutoff": true,
+  "recovery_evidence_complete": true
+}

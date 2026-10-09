@@ -1,0 +1,65 @@
+{
+  "dataset_id": "fictional-beacon",
+  "profile_version": "0.1-draft",
+  "window": {
+    "start": "2026-10-01T00:00:00Z",
+    "end": "2026-10-11T00:00:00Z",
+    "timezone": "UTC",
+    "calendar_days": 10
+  },
+  "evidence_cutoff": "2026-10-12T00:00:00Z",
+  "collection_complete": true,
+  "deployment_history_complete": true,
+  "services": [
+    {
+      "id": "service:beacon",
+      "name": "Beacon",
+      "source_refs": [
+        "https://example.invalid/services/beacon"
+      ],
+      "observed_at": "2026-10-12T00:00:00Z"
+    }
+  ],
+  "deployments": [
+    {
+      "id": "deployment:d5",
+      "service_id": "service:beacon",
+      "rollout_group_id": "rollout:r5",
+      "environment": "production",
+      "qualification": "qualifying",
+      "effective_at": "2026-09-30T08:00:00Z",
+      "change_ids": [],
+      "failure": "failed",
+      "rework": "not_incident_driven",
+      "source_refs": [
+        "https://example.invalid/deployments/d5"
+      ],
+      "observed_at": "2026-10-12T00:00:00Z",
+      "change_links_complete": true,
+      "qualification_window": null,
+      "failure_evidence_refs": [
+        "https://example.invalid/deployments/d5/failure-review"
+      ],
+      "rework_evidence_refs": [
+        "https://example.invalid/deployments/d5/intent-review"
+      ]
+    }
+  ],
+  "changes": [],
+  "incidents": [
+    {
+      "id": "incident:i1:beacon",
+      "service_id": "service:beacon",
+      "causal_deployment_id": "deployment:d5",
+      "failure_started_at": "2026-10-05T08:05:00Z",
+      "restored_at": "2026-10-05T08:35:00Z",
+      "start_is_approximate": false,
+      "source_refs": [
+        "https://example.invalid/incidents/i1"
+      ],
+      "observed_at": "2026-10-12T00:00:00Z"
+    }
+  ],
+  "snapshot_as_of_cutoff": true,
+  "recovery_evidence_complete": true
+}

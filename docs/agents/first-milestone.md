@@ -1,6 +1,6 @@
 # First Clio milestone
 
-Status: backend foundation implemented; remaining slices in progress/planned. Agent setup itself did not implement application behavior. Authentication, collectors and calculations are not implemented yet.
+Status: backend foundation and OEMS fixture implementation complete; remaining slices planned. Agent setup itself did not implement application behavior. Authentication and collectors are not implemented yet. All five OEMS calculations are exercised against the pinned fixtures.
 
 Accepted: PostgreSQL; local is the development phase of a future hosted application. Clio is a personal open source project and Liam is sole maintainer. Better Auth with GitHub login, PostgreSQL sessions, and workspace membership is accepted in ADR 0003. Licence selection remains separate and pending.
 
@@ -19,4 +19,4 @@ Selected in ADR 0004: Node 24/TypeScript + Fastify API, node-postgres, explicit 
 
 One explicitly selected workspace/service/provider can produce a validated snapshot and reproducible OEMS result for a closed UTC reporting window. UI exposes coverage and provisional/unavailable states. Collection gaps and later evidence cannot rewrite an earlier cutoff snapshot. Real data access requires explicitly supplied scope/credentials.
 
-Build all five OEMS calculations against fixtures; initial live provider evidence may only support some metrics. Unsupported evidence remains unavailable or provisional according to the standard.
+All five OEMS calculations are implemented against fixtures; initial live provider evidence may only support some metrics. Unsupported evidence remains unavailable or provisional according to the standard.

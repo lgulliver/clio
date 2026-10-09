@@ -1,0 +1,100 @@
+{
+  "service": {
+    "id": "service:beacon",
+    "name": "Beacon",
+    "source_refs": [
+      "https://example.invalid/services/beacon"
+    ],
+    "observed_at": "2026-10-12T00:00:00Z"
+  },
+  "change": {
+    "id": "change:c1",
+    "repository_id": "repository:beacon",
+    "commit_id": "fictional-commit-1",
+    "committed_at": "2026-10-01T07:00:00Z",
+    "source_refs": [
+      "https://example.invalid/commits/c1"
+    ],
+    "observed_at": "2026-10-12T00:00:00Z"
+  },
+  "deployment": {
+    "id": "deployment:d1",
+    "service_id": "service:beacon",
+    "rollout_group_id": "rollout:r1",
+    "environment": "production",
+    "qualification": "qualifying",
+    "effective_at": "2026-10-01T08:00:00Z",
+    "change_ids": [
+      "change:c1",
+      "change:c2",
+      "change:c3",
+      "change:c4"
+    ],
+    "failure": "no_recorded_failure",
+    "rework": "not_incident_driven",
+    "source_refs": [
+      "https://example.invalid/deployments/d1"
+    ],
+    "observed_at": "2026-10-12T00:00:00Z",
+    "change_links_complete": true,
+    "qualification_window": null,
+    "failure_evidence_refs": [
+      "https://example.invalid/deployments/d1/failure-review"
+    ],
+    "rework_evidence_refs": [
+      "https://example.invalid/deployments/d1/intent-review"
+    ]
+  },
+  "incident": {
+    "id": "incident:i1:beacon",
+    "service_id": "service:beacon",
+    "causal_deployment_id": "deployment:d5",
+    "failure_started_at": "2026-10-05T08:05:00Z",
+    "restored_at": "2026-10-05T08:35:00Z",
+    "start_is_approximate": false,
+    "source_refs": [
+      "https://example.invalid/incidents/i1"
+    ],
+    "observed_at": "2026-10-12T00:00:00Z"
+  },
+  "envelope": {
+    "spec_version": "0.1-draft",
+    "dataset_id": "fictional-example",
+    "event_id": "event:deployment:d1:r1",
+    "record_type": "deployment",
+    "source_revision": "1",
+    "occurred_at": "2026-10-01T08:00:00Z",
+    "observed_at": "2026-10-12T00:00:00Z",
+    "source_refs": [
+      "https://example.invalid/deployments/d1"
+    ],
+    "payload": {
+      "id": "deployment:d1",
+      "service_id": "service:beacon",
+      "rollout_group_id": "rollout:r1",
+      "environment": "production",
+      "qualification": "qualifying",
+      "effective_at": "2026-10-01T08:00:00Z",
+      "change_ids": [
+        "change:c1",
+        "change:c2",
+        "change:c3",
+        "change:c4"
+      ],
+      "failure": "no_recorded_failure",
+      "rework": "not_incident_driven",
+      "source_refs": [
+        "https://example.invalid/deployments/d1"
+      ],
+      "observed_at": "2026-10-12T00:00:00Z",
+      "change_links_complete": true,
+      "qualification_window": null,
+      "failure_evidence_refs": [
+        "https://example.invalid/deployments/d1/failure-review"
+      ],
+      "rework_evidence_refs": [
+        "https://example.invalid/deployments/d1/intent-review"
+      ]
+    }
+  }
+}

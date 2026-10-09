@@ -1,7 +1,9 @@
 {
   "extends": "@clio/typescript-config/base.json",
   "compilerOptions": {
-    "types": []
+    "types": [],
+    "resolveJsonModule": true,
+    "erasableSyntaxOnly": true
   },
   "include": ["src"]
 }

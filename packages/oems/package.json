@@ -11,10 +11,17 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.test.json",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@clio/typescript-config": "workspace:*",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "@types/node": "24.19.2"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
   }
 }
