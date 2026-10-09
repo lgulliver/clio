@@ -1,10 +1,10 @@
 # First Clio milestone
 
-Status: planned; no server, authentication, persistence, collector, or calculation is implemented by the agent setup.
+Status: backend foundation implemented; remaining slices in progress/planned. Agent setup itself did not implement application behavior. Authentication, collectors and calculations are not implemented yet.
 
 Accepted: PostgreSQL; local is the development phase of a future hosted application. Clio is a personal open source project and Liam is sole maintainer. Better Auth with GitHub login, PostgreSQL sessions, and workspace membership is accepted in ADR 0003. Licence selection remains separate and pending.
 
-Proposed: Node 24/TypeScript + Fastify backend, separate API/worker entry points, PostgreSQL-backed jobs, GitHub-first collection. Credential storage, SQL tooling, production evidence source, hosting, and detailed tenancy/role policy need documented choices before dependent implementation. Do not treat previous suggestions about PATs or auth bypass as accepted decisions.
+Selected in ADR 0004: Node 24/TypeScript + Fastify API, node-postgres, explicit transactional SQL migrations, local PostgreSQL 17. Implemented: health/readiness and internal workspace/service persistence. Proposed: separate worker entry point, PostgreSQL-backed jobs, GitHub-first collection. Credential storage, production evidence source, hosting, and detailed tenancy/role policy need documented choices before dependent implementation. Do not treat previous suggestions about PATs or auth bypass as accepted decisions.
 
 ## Sequence
 

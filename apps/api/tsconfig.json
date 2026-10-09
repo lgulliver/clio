@@ -1,0 +1,5 @@
+{
+  "extends": "@clio/typescript-config/base.json",
+  "compilerOptions": { "types": ["node"], "erasableSyntaxOnly": true },
+  "include": ["src", "tests", "vitest*.ts"]
+}

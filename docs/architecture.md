@@ -2,11 +2,12 @@
 
 ## Current boundary
 
-The initial application is a client-side React SPA. Vite builds it; TanStack Router owns file-based navigation and TanStack Query owns remote/server-state caching when data is introduced. Tailwind supplies styling. Biome owns linting, import organisation and formatting. Vitest and Testing Library check browser behaviour in jsdom.
+The browser application is a client-side React SPA; a separate local Node 24 API owns PostgreSQL persistence. Vite builds it; TanStack Router owns file-based navigation and TanStack Query owns remote/server-state caching when data is introduced. Tailwind supplies styling. Biome owns linting, import organisation and formatting. Vitest and Testing Library check browser behaviour in jsdom.
 
 The workspace has these boundaries:
 
 - apps/web: presentation and user interaction. Routes are thin composition points. Feature code will live together in src/features/<feature> when implemented; shared UI stays in src/components, foundational client utilities in src/lib.
+- apps/api: server-only Fastify JSON HTTP transport, explicit SQL migrations and node-postgres repositories for workspaces and scoped services. Native Node TypeScript runs the API; there is no separate server build pipeline. Only health endpoints are exposed until membership authorization exists.
 - packages/oems: platform-neutral integration with the pinned standard. Initially exposes provenance only. Future schema/semantic checks and standard result handling belong here; normative changes still belong upstream.
 - packages/adapters: reserved server-side source collection/reconciliation boundary. Currently documentation only, not an implemented collector or package.
 - packages/typescript-config: shared strict compiler defaults; no runtime code.
@@ -19,7 +20,7 @@ Provider collection on a trusted server -> reconciled evidence snapshot -> pinne
 
 Do not skip the validation/quality boundary or send provider credentials to the browser. The result must retain service, window, cutoff, version and provisional-quality information. Query clients must be scoped to an application/workspace/request rather than a cross-user global cache.
 
-PostgreSQL is selected for intended hosted use; local execution is the development phase. Persistence is not implemented. Better Auth with GitHub login, PostgreSQL-backed sessions, and workspace membership is selected in ADR 0003; authentication is not implemented. No backend runtime, API transport or deployment host has been selected yet. Select those against the first provider/workspace requirements rather than embed placeholders that imply a working service.
+PostgreSQL workspace/service persistence and transactional, checksummed migrations are implemented for local development. ADR 0004 selects Fastify and node-postgres; Docker Compose binds PostgreSQL 17 to loopback. API startup does not migrate. Readiness requires database connectivity, current migration history and expected table columns. Internal repositories require workspace IDs; callers must establish membership before using them. Better Auth with GitHub login, PostgreSQL-backed sessions, and workspace membership is selected in ADR 0003; authentication is not implemented. Deployment hosting and durable jobs remain undecided.
 
 ## Frontend operational requirements
 
@@ -29,4 +30,4 @@ VITE_ values are public configuration. Keep browser/server TypeScript environmen
 
 ## Current limitations
 
-The UI honestly displays unconnected/empty states. It has no live measurements, collectors, authentication, persistence or conformance designation. The first adapter will establish the server/service boundary and exercise real evidence against OEMS fixtures.
+The UI honestly displays unconnected/empty states. It has no live measurements, collectors, authentication or conformance designation. Persistence is currently limited to internal workspace/service repositories; there are no workspace HTTP routes or results API. The first adapter will establish the server/service boundary and exercise real evidence against OEMS fixtures.

@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: repository foundation. A working browser shell and development tooling are implemented. Provider collection, authentication, persistence and metric calculation are not implemented yet. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Provider collection, authentication and metric calculation are not implemented yet. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -21,6 +21,10 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 | Command | Purpose |
 | --- | --- |
 | pnpm dev | Start the web app with hot reload and route generation |
+| pnpm dev:api | Start the local API with native Node TypeScript |
+| pnpm db:up | Start local PostgreSQL through Docker Compose |
+| pnpm db:migrate | Apply database migrations explicitly |
+| pnpm test:integration | Check persistence against PostgreSQL (CLIO_TEST_DATABASE_URL required) |
 | pnpm check | Lint/format check, type checks, tests and production build |
 | pnpm lint | Check formatting, imports and lint with Biome |
 | pnpm format | Format source and configuration |
@@ -34,6 +38,7 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 
 ```text
 apps/web/                  React SPA, routing, query state and Tailwind
+apps/api/                  Local health API, migrations and scoped persistence
 packages/oems/             Pinned upstream provenance and future OEMS integration
 packages/adapters/         Reserved server-side provider boundary (documentation only)
 packages/typescript-config/ Shared strict TypeScript configurations
@@ -41,11 +46,13 @@ docs/                      Architecture and recorded decisions
 .github/workflows/         CI checks and production artifact
 ```
 
+For PostgreSQL and API setup, read [apps/api/README.md](apps/api/README.md). API configuration is server-only; the browser remains an unconnected shell. CI runs the ordinary checks plus real PostgreSQL integration tests.
+
 Read [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md), [stack decision](docs/decisions/0001-typescript-workspace.md) and [contribution guide](CONTRIBUTING.md). Scoped agent instructions describe the web and integration boundaries.
 
 ## Agentic development
 
-Codex and Claude project specialists share [team guidance](docs/agents/team.md), [role briefs](docs/agents/roles/), a [task/handoff template](docs/agents/task-template.md), and the [planned first milestone](docs/agents/first-milestone.md). Agent setup does not implement the backend or start a persistent swarm.
+Codex and Claude project specialists share [team guidance](docs/agents/team.md), [role briefs](docs/agents/roles/), a [task/handoff template](docs/agents/task-template.md), and the [planned first milestone](docs/agents/first-milestone.md). Agent definitions do not start a persistent swarm. Backend foundation implementation is recorded separately in ADR 0004.
 
 ## OEMS and licensing
 

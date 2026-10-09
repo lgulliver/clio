@@ -18,7 +18,11 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "test:watch": "pnpm --filter @clio/web test:watch",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "dev:api": "pnpm --filter @clio/api dev",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:migrate": "pnpm --filter @clio/api migrate",
+    "test:integration": "pnpm --filter @clio/api test:integration"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
