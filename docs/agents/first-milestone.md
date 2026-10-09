@@ -8,7 +8,7 @@ Proposed: Node 24/TypeScript + Fastify backend, separate API/worker entry points
 
 ## Sequence
 
-1. Coordinator records PostgreSQL decision and defines first backend task, API boundaries, and workspace identity assumptions. Backend specialist builds local database/migrations, server health/readiness, and testable persistence. No hosted deployment.
+1. PostgreSQL is recorded in ADR 0002; coordinator defines first backend task, API boundaries, and workspace identity assumptions. Backend specialist builds local database/migrations, server health/readiness, and testable persistence. No hosted deployment.
 2. In parallel, OEMS specialist implements pinned schema/semantic validation and calculations against upstream fixtures. This work does not need real provider credentials. Coordinator serializes shared workspace/lockfile edits.
 3. Identity specialist implements accepted Better Auth/GitHub login and PostgreSQL sessions, establishing workspace access and provider credential contracts before real connections. Use a separate development OAuth application locally; test auth with controlled mocks. OAuth app registration and real credentials remain maintainer actions.
 4. Provider specialist designs the first source mapping and explains what evidence can establish production exposure and metric coverage. Once selected, implement backfill, checkpoints, and reconciliation against mocks, then assigned repositories.

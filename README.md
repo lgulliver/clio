@@ -45,7 +45,7 @@ Read [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md), [stack decisi
 
 ## Agentic development
 
-Codex and Claude project specialists share [team guidance](docs/agents/team.md), [role briefs](docs/agents/roles/coordinator.md), a [task/handoff template](docs/agents/task-template.md), and the [planned first milestone](docs/agents/first-milestone.md). Agent setup does not implement the backend or start a persistent swarm.
+Codex and Claude project specialists share [team guidance](docs/agents/team.md), [role briefs](docs/agents/roles/), a [task/handoff template](docs/agents/task-template.md), and the [planned first milestone](docs/agents/first-milestone.md). Agent setup does not implement the backend or start a persistent swarm.
 
 ## OEMS and licensing
 

@@ -20,7 +20,7 @@ Role behavior lives in roles/*.md. Native definitions are thin pointers to these
 
 - One coordinator owns the active milestone. A specialist receives a complete task brief using task-template.md; native subagents do not necessarily inherit conversation history.
 - Keep at most three specialists active across both engines combined. Delegate ready, independent tasks. Sequential work is preferable when dependencies or shared files overlap.
-- Every concurrent writer gets a separate worktree and an assigned path scope. Worktrees isolate files, not contract conflicts; agree shared interfaces first. Readers may share a stable checkout.
+- Every concurrent writer runs as a separate CLI session started inside its own worktree, with an assigned path scope. Native subagents are limited to read-only work or sequential writes in the parent checkout. Naming a worktree in a prompt does not change a native subagent's working directory or sandbox. Worktrees isolate files, not contract conflicts; agree shared interfaces first. Readers may share a stable checkout.
 - Coordinator owns root package/workspace manifests, lockfile, CI, API contract coordination, and migration numbering unless assigned explicitly. Integrate one slice at a time and recheck after integration.
 - Codex implements / Claude reviews, or Claude implements / Codex reviews. Roles are engine-neutral. Review is evidence about the diff, not a committee approval or a conformance claim.
 - Native Codex agents are Codex; native Claude agents are Claude. Cross-engine tasks run through the other installed CLI. Written configuration does not start background workers or create a persistent mixed-engine swarm.
@@ -42,7 +42,7 @@ Claude coordinator:
 claude --agent clio-coordinator "Read docs/agents/first-milestone.md. Coordinate the next bounded milestone using project specialists and Codex CLI for independent review."
 ```
 
-Within Codex, ask for a named custom agent explicitly, for example: "Spawn clio_oems for this task brief; give it the exact OEMS checkout and isolated worktree." Codex discovers .codex/agents/*.toml. Within Claude, delegate to the matching clio-* project agent. Confirm the active CLI has loaded project configuration; Codex requires project trust. CLI config discovery does not prove the current desktop chat has reloaded agents.
+Within Codex, ask for a named custom agent explicitly for read-only work or a sequential slice, for example: "Spawn clio_oems to review this fixture contract; give it the exact OEMS checkout." Codex discovers .codex/agents/*.toml. Within Claude, delegate to the matching clio-* project agent under the same sequential/read-only restriction. For concurrent implementation, start separate Codex or Claude CLI sessions inside assigned worktrees and pass the role/task brief explicitly. Confirm the active CLI has loaded project configuration; Codex requires project trust. CLI config discovery does not prove the current desktop chat has reloaded agents.
 
 ## Cross-engine review
 
@@ -67,7 +67,7 @@ These are dispatch patterns, not ready-to-run reviews of an unspecified task. Su
 
 ## Worktree discipline
 
-Start from a clean committed base so both engines can read the same agent definitions. Coordinator creates task worktrees through the host's worktree tooling, then starts the target CLI inside the assigned worktree. Do not assume a native agent automatically has an isolated checkout. Claude agent-team behavior can differ from ordinary subagents; verify the actual working directory before writing. Avoid automatic worktree removal until patches/commits and handoffs are integrated.
+Start from a clean committed base so both engines can read the same agent definitions. Coordinator creates task worktrees through the host's worktree tooling, then starts the target CLI inside the assigned worktree. Do not dispatch concurrent native writers from a shared parent checkout. Before each writer starts, verify its actual working directory and write permissions against the assigned worktree. Native subagents do not automatically have an isolated checkout. Claude agent-team behavior can differ from ordinary subagents; verify the actual working directory before writing. Avoid automatic worktree removal until patches/commits and handoffs are integrated.
 
 ## References
 
