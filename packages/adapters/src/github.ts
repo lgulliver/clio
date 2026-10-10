@@ -1,4 +1,5 @@
 import { type FetchTransport, githubApiVersion } from './github-app.ts';
+import { githubRateLimit } from './github-rate-limit.ts';
 import type { DeploymentEvidence, EvidenceBatch, StatusEvidence } from './model.ts';
 import { currentDeployments, deploymentVersions } from './observations.ts';
 import {
@@ -126,22 +127,9 @@ export async function collectGitHubDeployments(input: {
       throw new AdapterError(input.signal?.aborted ? 'cancelled' : 'transport_failed');
     }
     if (!response.ok) {
-      const retry = response.headers.get('retry-after');
-      retryAfterSeconds =
-        retry && /^\d+$/.test(retry) && Number.isSafeInteger(Number(retry)) ? Number(retry) : null;
-      const reset = response.headers.get('x-ratelimit-reset');
-      if (
-        retryAfterSeconds === null &&
-        response.headers.get('x-ratelimit-remaining') === '0' &&
-        reset &&
-        /^\d+$/.test(reset) &&
-        Number.isSafeInteger(Number(reset))
-      )
-        retryAfterSeconds = Math.max(0, Number(reset) - Math.floor(input.clock().getTime() / 1000));
-      const limited =
-        response.status === 429 ||
-        (response.status === 403 &&
-          (response.headers.get('x-ratelimit-remaining') === '0' || retry !== null));
+      const limit = await githubRateLimit(response, input.clock);
+      retryAfterSeconds = limit.retryAfterSeconds;
+      const limited = limit.limited;
       throw new AdapterError(limited ? 'rate_limited' : `http_${response.status}`);
     }
     return response;

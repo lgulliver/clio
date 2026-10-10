@@ -1,4 +1,5 @@
 import { createPrivateKey, createSign } from 'node:crypto';
+import { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';
 import { AdapterError, instant, object, positiveId, string, timestamp } from './value.ts';
 
 export const githubApiVersion = '2026-03-10';
@@ -74,7 +75,11 @@ export async function createInstallationToken(input: {
   } catch {
     throw new AdapterError(input.signal?.aborted ? 'cancelled' : 'token_transport_failed');
   }
-  if (!response.ok) throw new AdapterError(`token_http_${response.status}`);
+  if (!response.ok) {
+    const limit = await githubRateLimit(response, input.clock);
+    if (limit.limited) throw new GitHubRateLimitError(limit.retryAfterSeconds);
+    throw new AdapterError(`token_http_${response.status}`);
+  }
   try {
     const body = object(await response.json());
     const token = string(body.token);

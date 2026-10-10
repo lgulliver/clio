@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { GitHubBatch } from '@clio/adapters';
+import { AdapterError, type GitHubBatch, GitHubRateLimitError } from '@clio/adapters';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { name, uuid } from '../identity/input.ts';
@@ -18,7 +18,15 @@ import {
   parseEvidence,
 } from './history.ts';
 import { instant, parseConnection, timestamp } from './input.ts';
-import { type GitHubProvider, githubProvider } from './provider.ts';
+import { createGitHubProvider, type GitHubProvider } from './provider.ts';
+import {
+  ensureQuota,
+  pauseQuota,
+  type QuotaLease,
+  quotaRetryDelay,
+  releaseQuota,
+  retryDelay,
+} from './quota.ts';
 import { latestConnection } from './repository.ts';
 import { storedWindow } from './result.ts';
 
@@ -29,23 +37,24 @@ interface Claim {
   token: string;
   workspaceId: string;
   serviceId: string;
+  quota: QuotaLease;
 }
 interface WorkerDependencies {
   provider?: GitHubProvider;
   clock?: () => Date;
   configNow?: () => GitHubConfig | null;
+  acquisitionBudgetMs?: number;
 }
 class LeaseLost extends Error {}
 class Revoked extends Error {}
 class Retry extends Error {
   readonly delay: number;
-  constructor(delay: number) {
+  readonly providerThrottle: boolean;
+  constructor(delay: number, providerThrottle = false) {
     super('GitHub acquisition incomplete');
     this.delay = delay;
+    this.providerThrottle = providerThrottle;
   }
-}
-function boundedDelay(value: number) {
-  return Math.min(300, Math.max(1, Math.ceil(Number.isFinite(value) ? value : 1)));
 }
 
 export function createGitHubWorker(
@@ -105,18 +114,39 @@ export function createGitHubWorker(
           `WITH expired AS (SELECT id FROM github_collection_runs WHERE status='running' AND lease_until<=clock_timestamp() AND attempts=3 ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE github_collection_runs SET status='failed',failure_code='github_processing_failed',completed_at=statement_timestamp(),updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE id IN (SELECT id FROM expired)`,
         );
         if (expired.rowCount) return null;
+        const config = configNow();
+        if (!config) {
+          await client.query(
+            "WITH revoked AS (SELECT id FROM github_collection_runs WHERE status IN ('pending','running') ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE github_collection_runs SET status='failed',failure_code='github_connection_revoked',completed_at=statement_timestamp(),updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE id IN (SELECT id FROM revoked)",
+          );
+          return null;
+        }
+        await ensureQuota(client, config.appId, 0);
+        for (const grant of config.grants)
+          await ensureQuota(client, config.appId, grant.installationId);
+        await client.query(
+          "INSERT INTO github_quota_state(app_id,installation_id) SELECT DISTINCT $1::bigint,(connection_input->>'installationId')::bigint FROM github_collection_runs WHERE status IN ('pending','running') ON CONFLICT DO NOTHING",
+          [config.appId],
+        );
         const token = randomUUID();
         const found = await client.query<Record<string, unknown>>(
-          `WITH eligible AS (SELECT id FROM github_collection_runs WHERE attempts<3 AND ((status='pending' AND available_at<=clock_timestamp()) OR (status='running' AND lease_until<=clock_timestamp())) ORDER BY available_at,created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE github_collection_runs SET status='running',attempts=attempts+1,lease_token=$1,lease_until=clock_timestamp()+interval '120 seconds',updated_at=clock_timestamp() WHERE id IN (SELECT id FROM eligible) RETURNING id,workspace_id,service_id`,
-          [token],
+          `WITH eligible AS (SELECT r.id FROM github_collection_runs r JOIN github_quota_state q ON q.app_id=$2 AND q.installation_id=(r.connection_input->>'installationId')::bigint WHERE r.attempts<3 AND ((r.status='pending' AND r.available_at<=clock_timestamp()) OR (r.status='running' AND r.lease_until<=clock_timestamp())) AND q.blocked_until<=clock_timestamp() AND (q.lease_until IS NULL OR q.lease_until<=clock_timestamp()) AND EXISTS(SELECT 1 FROM github_quota_state WHERE app_id=$2 AND installation_id=0 AND blocked_until<=clock_timestamp()) ORDER BY r.available_at,r.created_at,r.id FOR UPDATE OF r,q SKIP LOCKED LIMIT 1) UPDATE github_collection_runs SET status='running',attempts=attempts+1,quota_app_id=$2,lease_token=$1,lease_until=clock_timestamp()+interval '120 seconds',updated_at=clock_timestamp() WHERE id IN (SELECT id FROM eligible) RETURNING id,workspace_id,service_id,connection_input`,
+          [token, config.appId],
         );
         const row = found.rows[0];
-        return row
+        const installationId = row ? parseConnection(row.connection_input).installationId : null;
+        if (installationId !== null)
+          await client.query(
+            "UPDATE github_quota_state SET lease_token=$3,lease_until=clock_timestamp()+interval '120 seconds' WHERE app_id=$1 AND installation_id=$2",
+            [config.appId, installationId, token],
+          );
+        return row && installationId !== null
           ? {
               id: uuid(row.id),
               token,
               workspaceId: uuid(row.workspace_id),
               serviceId: uuid(row.service_id),
+              quota: { appId: config.appId, installationId, token },
             }
           : null;
       });
@@ -124,7 +154,24 @@ export function createGitHubWorker(
     preflight(claim: Claim) {
       return locked(claim, async (_client, input) => input);
     },
-    async complete(claim: Claim, batch: GitHubBatch, acquiredAt: string, signal?: AbortSignal) {
+    async complete(
+      claim: Claim,
+      batch: GitHubBatch,
+      acquiredAt: string,
+      signal?: AbortSignal,
+      quotaObserved = false,
+    ) {
+      const limits = batch.diagnostics.filter(
+        (d) => d.code === 'rate_limited' || d.retryAfterSeconds !== null,
+      );
+      let delay: number | null = null;
+      if (limits.length && quotaObserved) delay = await quotaRetryDelay(pool, claim.quota);
+      else if (limits.length)
+        delay = await pauseQuota(
+          pool,
+          claim.quota,
+          Math.max(...limits.map((d) => d.retryAfterSeconds ?? 0)) || null,
+        );
       try {
         return await locked(claim, async (client, input) => {
           if (signal?.aborted) throw new LeaseLost();
@@ -174,7 +221,7 @@ export function createGitHubWorker(
             throw new Error('Conflicting source record');
           const evidence = mergeHistory(previous, acquired);
           if (!batch.transportComplete && evidence.deployments.length === 0)
-            throw new Retry(boundedDelay(batch.diagnostics[0]?.retryAfterSeconds ?? 1));
+            throw new Retry(delay ?? retryDelay(null), limits.length > 0);
           const time = await client.query<Record<string, unknown>>(
             `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed`,
           );
@@ -276,13 +323,34 @@ export function createGitHubWorker(
       } catch (error) {
         if (error instanceof LeaseLost) return false;
         throw error;
+      } finally {
+        await releaseQuota(pool, claim.quota);
       }
     },
-    async fail(claim: Claim, delay = 1, revoked = false) {
+    async deferQuota(claim: Claim) {
+      const delay = await quotaRetryDelay(pool, claim.quota);
       const result = await pool.query(
-        `UPDATE github_collection_runs SET status=CASE WHEN attempts=3 OR $4 THEN 'failed' ELSE 'pending' END,failure_code=CASE WHEN $4 THEN 'github_connection_revoked' WHEN attempts=3 THEN 'github_processing_failed' ELSE NULL END,completed_at=CASE WHEN attempts=3 OR $4 THEN statement_timestamp() ELSE NULL END,available_at=clock_timestamp()+$3*interval '1 second',updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE id=$1 AND status='running' AND lease_token=$2 AND lease_until>clock_timestamp()`,
-        [claim.id, claim.token, boundedDelay(delay), revoked],
+        `UPDATE github_collection_runs SET status='pending',attempts=attempts-1,available_at=CASE WHEN $3::double precision>2147483647 THEN 'infinity'::timestamptz ELSE clock_timestamp()+$3*interval '1 second' END,updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE id=$1 AND status='running' AND lease_token=$2 AND lease_until>clock_timestamp() AND quota_app_id=$4 AND EXISTS(SELECT 1 FROM github_quota_state WHERE app_id=$4 AND installation_id IN (0,$5) AND blocked_until>clock_timestamp())`,
+        [claim.id, claim.token, delay, claim.quota.appId, claim.quota.installationId],
       );
+      if (result.rowCount) await releaseQuota(pool, claim.quota);
+      return Boolean(result.rowCount);
+    },
+    async fail(claim: Claim, delay: number | null = null, revoked = false) {
+      const attempt = await pool.query<Record<string, unknown>>(
+        'SELECT attempts FROM github_collection_runs WHERE id=$1 AND lease_token=$2',
+        [claim.id, claim.token],
+      );
+      const result = await pool.query(
+        `UPDATE github_collection_runs SET status=CASE WHEN attempts=3 OR $4 THEN 'failed' ELSE 'pending' END,failure_code=CASE WHEN $4 THEN 'github_connection_revoked' WHEN attempts=3 THEN 'github_processing_failed' ELSE NULL END,completed_at=CASE WHEN attempts=3 OR $4 THEN statement_timestamp() ELSE NULL END,available_at=CASE WHEN $3::double precision>2147483647 THEN 'infinity'::timestamptz ELSE clock_timestamp()+$3*interval '1 second' END,updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE id=$1 AND status='running' AND lease_token=$2 AND lease_until>clock_timestamp()`,
+        [
+          claim.id,
+          claim.token,
+          delay ?? retryDelay(null, Number(attempt.rows[0]?.attempts ?? 1)),
+          revoked,
+        ],
+      );
+      await releaseQuota(pool, claim.quota);
       return Boolean(result.rowCount);
     },
   };
@@ -298,13 +366,18 @@ export async function processOne(
   const worker = createGitHubWorker(pool, github, dependencies),
     claim = await worker.claim();
   if (!claim) return false;
+  const budget = dependencies.acquisitionBudgetMs ?? acquisitionMs;
+  if (!Number.isInteger(budget) || budget < 100 || budget > acquisitionMs)
+    throw new Error('Invalid acquisition budget');
+  const started = performance.now();
   const signal = dependencies.signal
-    ? AbortSignal.any([dependencies.signal, AbortSignal.timeout(acquisitionMs)])
-    : AbortSignal.timeout(acquisitionMs);
+    ? AbortSignal.any([dependencies.signal, AbortSignal.timeout(budget)])
+    : AbortSignal.timeout(budget);
+  let provider = dependencies.provider;
   try {
-    const input = await worker.preflight(claim),
-      provider = dependencies.provider ?? githubProvider,
-      clock = dependencies.clock ?? (() => new Date());
+    const input = await worker.preflight(claim);
+    provider ??= createGitHubProvider(pool, input.config, claim.quota);
+    const clock = dependencies.clock ?? (() => new Date());
     if (signal.aborted) throw new Error('Acquisition cancelled');
     const scope = await abortable(
       provider.verify({
@@ -317,20 +390,45 @@ export async function processOne(
     );
     if (signal.aborted || instant(timestamp(scope.expiresAt)) <= instant(clock().toISOString()))
       throw new Error('Credential expired');
+    // Leave time for the adapter to return its accepted prefix before the hard deadline.
+    const softBudget = Math.max(
+      1,
+      Math.floor(budget - (performance.now() - started) - Math.min(5000, budget / 4)),
+    );
+    const collectionSignal = AbortSignal.any([signal, AbortSignal.timeout(softBudget)]);
     const batch = await abortable(
       provider.collect({
         installationId: input.connection.installationId,
         repositoryId: input.connection.repositoryId,
         token: scope.token,
         clock,
-        signal,
+        signal: collectionSignal,
       }),
       signal,
     );
     if (signal.aborted) throw new Error('Acquisition cancelled');
-    await worker.complete(claim, batch, timestamp(clock().toISOString()), signal);
+    await worker.complete(
+      claim,
+      batch,
+      timestamp(clock().toISOString()),
+      dependencies.signal,
+      dependencies.provider === undefined,
+    );
   } catch (error) {
-    await worker.fail(claim, error instanceof Retry ? error.delay : 1, error instanceof Revoked);
+    const canDefer =
+      provider?.quotaContention?.() === true &&
+      ((error instanceof Retry && !error.providerThrottle) ||
+        (error instanceof AdapterError && error.code === 'transport_failed'));
+    if (canDefer && (await worker.deferQuota(claim))) return true;
+    const delay =
+      error instanceof GitHubRateLimitError
+        ? dependencies.provider === undefined
+          ? await quotaRetryDelay(pool, claim.quota)
+          : await pauseQuota(pool, claim.quota, error.retryAfterSeconds)
+        : error instanceof Retry
+          ? error.delay
+          : null;
+    await worker.fail(claim, delay, error instanceof Revoked);
   }
   return true;
 }

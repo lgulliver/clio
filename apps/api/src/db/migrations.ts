@@ -90,6 +90,10 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   checkApplied(result.rows, migrations, true);
   // Also detect missing tables/columns rather than trusting ledger alone.
   await pool.query(
+    'SELECT app_id,installation_id,next_request_at,blocked_until,consecutive_throttles,lease_token,lease_until FROM github_quota_state LIMIT 0',
+  );
+  await pool.query('SELECT source_id,tokens,refilled_at FROM argo_ingress_buckets LIMIT 0');
+  await pool.query(
     'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by FROM argo_connection_revisions LIMIT 0',
   );
   await pool.query(
@@ -114,7 +118,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
     'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,created_by FROM github_connection_revisions LIMIT 0',
   );
   await pool.query(
-    'SELECT id,workspace_id,service_id,connection_revision,request_id,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code,result,lease_token,lease_until,available_at FROM github_collection_runs LIMIT 0',
+    'SELECT id,workspace_id,service_id,connection_revision,request_id,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code,result,lease_token,lease_until,available_at,quota_app_id FROM github_collection_runs LIMIT 0',
   );
   await pool.query(
     'SELECT workspace_id,service_id,installation_id,repository_id,kind,record_key,observed_at,payload FROM github_collection_history LIMIT 0',

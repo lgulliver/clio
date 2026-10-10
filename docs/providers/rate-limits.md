@@ -1,0 +1,29 @@
+# Provider rate limits
+
+Clio coordinates GitHub acquisition and authenticated Argo notification ingress through PostgreSQL. Apply migration `0007_provider_rate_limits.sql` explicitly before starting updated API or workers. Readiness checks require its tables and columns. No credentials or private provider responses are stored in quota state.
+
+## GitHub
+
+Every production connection verification and collection request uses the shared gate. Installation acquisition is serialized by `(GitHub App ID, installation ID)` across workspaces, services, API instances and workers. Grants, connection revisions and token rotation do not reset this state. Queued jobs blocked by a cooldown or another acquisition remain pending without consuming an attempt. If a quota check blocks an active acquisition (including exhaustion signaled by a successful response), the run is deferred and its reserved attempt is returned through a database-guarded transition. Actual provider-throttle responses still count toward the three-attempt empty-acquisition limit. Different installations can acquire independently.
+
+Acquisition markers expire after 120 seconds; worker network acquisition remains bounded to 60 seconds and connection verification to 30 seconds. Network calls and pacing waits happen outside database transactions. Collection uses a soft deadline before the hard acquisition deadline so accepted pages can become an incomplete provisional snapshot; the hard limit still rejects an uncooperative provider. Lease UUIDs fence stale checks, counter increments and releases. A late trusted throttle response can only extend its cooldown; it cannot increment a replacement acquisition’s backoff counter. Each request checks the current lease and both installation and App cooldowns before starting.
+
+A conservative App-wide schedule spaces request starts by at least one second, including installation verification, token issuance, repository checks and deployment/status pages. This is Clio's initial pacing policy, not a statement of GitHub's published quota or a guarantee against secondary limits. Reserved slots can remain unused after cancellation; they cannot trigger network calls after cancellation.
+
+Response metadata is observed before returning to the adapter. `Retry-After` and an exhausted primary quota's `x-ratelimit-reset` are both respected: the later deadline wins. Primary reset is also stored as an absolute UTC deadline, so API-host clock skew cannot shorten the database-enforced wait. A successful response with zero remaining quota also pauses subsequent requests. HTTP 429 and recognized secondary-limit HTTP 403 responses without usable delay headers wait at least 60 seconds, with exponential backoff for repeated throttles and additive positive jitter. Successful requests after the cooldown reset the corresponding consecutive-throttle counter. Cooldowns only extend; releasing a lease cannot clear them. App-authenticated responses pause the App budget; installation-token responses pause the installation budget. Delays are not truncated to five minutes. An unrepresentably large provider wait fails closed rather than overflowing database timestamps.
+
+Useful partial evidence can still produce an immutable provisional snapshot. Its shared cooldown persists even when the run succeeds; a later run cannot bypass it. Empty acquisitions retry at most three times, and generic acquisition failures also use exponential backoff with jitter. Provider diagnostics remain server-side. Incomplete acquisition never establishes complete OEMS coverage or turns missing evidence into zero.
+
+Collection still performs bounded full backfills (100 pages, 5,000 records and the existing byte/deadline limits). Incremental checkpoints, conditional response caching, webhook updates and automatic scheduling are future work. Pacing and deadlines can stop a traversal below those maximum bounds. Without incremental checkpoints, repeated runs can revisit the same prefix; large histories may remain incomplete. A requested period bounds the metric window; it does not make the REST traversal incremental. Collections should be requested deliberately while that limitation remains.
+
+Connection saves can return a redacted `503` while an installation is collecting, cooling down, or queued pacing exceeds the verification timeout; retry after ongoing acquisition or cooldown.
+
+GitHub's own limits and response headers remain authoritative. See [REST API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) and [recommended retry, queue and conditional-request behavior](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).
+
+## Argo CD
+
+After bearer authentication and before JSON parsing, all API instances consume the same PostgreSQL token bucket keyed by source UUID: 30 requests per minute, burst 10, using the database clock. Process restarts and grant rotation do not create another burst. Different sources have independent buckets. Malformed authenticated requests consume ingress capacity; unauthenticated requests do not create bucket rows. Database failure fails closed with a redacted unavailable response.
+
+Throttle responses remain `503 {"error":"unavailable"}` with `Retry-After: 2`, matching the native notification transport contract. This shared request-rate budget is separate from the source-lifetime row/byte retention budgets. Exact authorized receipt replays do not add storage rows; they still count as requests. Owner disconnect remains separate and available when an ingestion budget is exhausted.
+
+The proposed enrichment receiver is not implemented. Its producers must consume this same source bucket and lifetime storage budget; adding a producer must not multiply capacity. Hosted unauthenticated ingress protection and reverse-proxy policy remain deployment decisions.

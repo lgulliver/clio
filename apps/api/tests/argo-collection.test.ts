@@ -69,46 +69,6 @@ it('rejects bad machine auth before malformed JSON, uniformly and without DB', a
     await pool.end();
   }
 });
-it('limits authenticated machine bursts before DB and refills 30/min without starving denied callers', async () => {
-  const app = Fastify({ logger: false }),
-    pool = new Pool();
-  let now = 0;
-  const scope = grantFixture(),
-    token = 'b'.repeat(64);
-  const { createHash } = await import('node:crypto');
-  registerArgoIngress(app, {
-    pool,
-    argo: {
-      grants: [
-        {
-          ...scope,
-          tokenDigest: createHash('sha256').update(token).digest('hex'),
-          fingerprint: 'c'.repeat(64),
-        },
-      ],
-    },
-    clock: () => now,
-  });
-  const post = () =>
-    app.inject({
-      method: 'POST',
-      url: `/api/argo/sources/${scope.sourceId}/operations`,
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      payload: '{',
-    });
-  try {
-    for (let i = 0; i < 10; i++) expect((await post()).statusCode).toBe(400);
-    expect((await post()).statusCode).toBe(503);
-    now = 1999;
-    expect((await post()).statusCode).toBe(503);
-    now = 2000;
-    expect((await post()).statusCode).toBe(400);
-    expect((await post()).headers['retry-after']).toBe('2');
-  } finally {
-    await app.close();
-    await pool.end();
-  }
-});
 it('rejects duplicate source/app/token grants and includes credential/scope rotation in fingerprints', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'argo-config-'));
   try {

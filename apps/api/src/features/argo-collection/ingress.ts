@@ -14,6 +14,7 @@ import { type ArgoConfig, type ArgoGrant, digest, grantFor, scopeFor } from './c
 import { boundedJson, maxBytes, maxRows, parseEvidence } from './history.ts';
 import { count, timestamp } from './input.ts';
 import { operationMetadata } from './metadata.ts';
+import { consumeIngressToken } from './rate-limit.ts';
 import { ensureSource, latestConnection } from './repository.ts';
 
 export const databaseTime = `to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
@@ -42,13 +43,10 @@ export function registerArgoIngress(
     pool: Pool;
     argo: ArgoConfig | null;
     configNow?: () => ArgoConfig | null;
-    clock?: () => number;
   },
 ) {
-  const configNow = dependencies.configNow ?? (() => dependencies.argo),
-    clock = dependencies.clock ?? (() => Date.now());
+  const configNow = dependencies.configNow ?? (() => dependencies.argo);
   const authenticated = new WeakMap<FastifyRequest, ArgoGrant>();
-  const buckets = new Map<string, { tokens: number; at: number }>();
   app.register(async (routes) => {
     routes.addHook('onRequest', async (_request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -79,11 +77,7 @@ export function registerArgoIngress(
         onRequest: async (request, reply) => {
           const grant = authenticate(request, configNow());
           authenticated.set(request, grant);
-          const now = clock(),
-            old = buckets.get(grant.sourceId) ?? { tokens: 10, at: now };
-          const tokens = Math.min(10, old.tokens + Math.max(0, now - old.at) / 2000);
-          buckets.set(grant.sourceId, { tokens: tokens < 1 ? tokens : tokens - 1, at: now });
-          if (tokens < 1) {
+          if (!(await consumeIngressToken(dependencies.pool, grant.sourceId))) {
             reply.header('Retry-After', '2');
             throw new IdentityError(503, 'unavailable');
           }

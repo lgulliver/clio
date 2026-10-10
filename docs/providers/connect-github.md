@@ -105,3 +105,5 @@ REST traversal completion is shown separately from metric coverage. Initial coll
 | Grant/key changed | Stop both processes, update files privately, restart both, then re-save every connection using the changed installation grant. Any repository allowlist change changes its grant fingerprint and fences queued work. Remove/retire old provider credentials independently; old jobs cannot inherit new grants. |
 
 The current transport is tested with controlled GitHub responses and actual PostgreSQL. A real App/installation run still requires your own configured credentials and deliberate repository selection. Argo transport, automatic scheduling, task-level monorepo binding and incident/change collectors remain subsequent slices.
+
+Read [provider rate limits](rate-limits.md) for shared cooldowns, retry behavior, ingress budgets and current collection-cost limits.

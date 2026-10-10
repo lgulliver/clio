@@ -1,4 +1,5 @@
 import { type FetchTransport, githubApiVersion, signGitHubAppJwt } from './github-app.ts';
+import { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';
 import { createBoundedGitHubTransport } from './github-transport.ts';
 import { AdapterError, instant, object, positiveId, string, timestamp } from './value.ts';
 
@@ -49,7 +50,11 @@ export async function verifyGitHubScope(input: {
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    if (!response.ok) throw new AdapterError(`github_http_${response.status}`);
+    if (!response.ok) {
+      const limit = await githubRateLimit(response, input.clock);
+      if (limit.limited) throw new GitHubRateLimitError(limit.retryAfterSeconds);
+      throw new AdapterError(`github_http_${response.status}`);
+    }
     if (path.startsWith('/installation/repositories?') && response.headers.get('link'))
       throw new AdapterError('github_repository_scope_mismatch');
     try {

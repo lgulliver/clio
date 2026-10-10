@@ -14,7 +14,7 @@ import {
   text,
   timestamp,
 } from './input.ts';
-import { type GitHubProvider, githubProvider } from './provider.ts';
+import { createGitHubProvider, type GitHubProvider } from './provider.ts';
 import { parseRun, runColumns } from './result.ts';
 
 export async function latestConnection(client: PoolClient, workspaceId: string, serviceId: string) {
@@ -39,7 +39,7 @@ export function createGitHubRepository(
   github: GitHubConfig | null,
   dependencies: { provider?: GitHubProvider; clock?: () => Date } = {},
 ) {
-  const provider = dependencies.provider ?? githubProvider,
+  const provider = dependencies.provider ?? createGitHubProvider(pool, github),
     clock = dependencies.clock ?? (() => new Date());
   function scoped<T>(
     actor: Actor,

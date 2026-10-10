@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type GitHubBatch, identity } from '@clio/adapters';
+import { AdapterError, type GitHubBatch, identity } from '@clio/adapters';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -155,6 +155,7 @@ afterEach(async () => {
   await pool.query(
     "UPDATE github_collection_runs SET status='failed',failure_code='github_connection_revoked',completed_at=statement_timestamp(),updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE status IN ('pending','running')",
   );
+  await pool.query('DELETE FROM github_quota_state');
   await pool.query(
     "UPDATE auth_sessions SET expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
     [owner.sessionId],
@@ -264,7 +265,7 @@ describe('live GitHub PostgreSQL boundaries', () => {
       ]),
     ).rejects.toThrow('immutable');
   });
-  it('serializes distinct enqueue requests and allows independent service claims', async () => {
+  it('serializes enqueue requests and same-installation service acquisitions', async () => {
     const f = await fixture();
     const concurrent = await Promise.allSettled([f.enqueue(), f.enqueue()]);
     expect(concurrent.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -283,11 +284,13 @@ describe('live GitHub PostgreSQL boundaries', () => {
       window,
     });
     const claims = await Promise.all([f.worker.claim(), f.worker.claim()]);
-    expect(new Set(claims.map((claim) => claim?.id)).size).toBe(2);
-    for (const claim of claims) {
-      if (!claim) throw new Error('Missing independent claim');
-      expect(await f.worker.complete(claim, batch(), new Date().toISOString())).toBe(true);
-    }
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const first = claims.find((claim) => claim !== null);
+    if (!first) throw new Error('Missing serialized claim');
+    expect(await f.worker.complete(first, batch(), new Date().toISOString())).toBe(true);
+    const second = await f.worker.claim();
+    if (!second) throw new Error('Missing next installation claim');
+    expect(await f.worker.complete(second, batch(), new Date().toISOString())).toBe(true);
   });
   it('fences disconnect and changed revisions, preserving immutable historical input/replays', async () => {
     const f = await fixture(),
@@ -363,6 +366,9 @@ describe('live GitHub PostgreSQL boundaries', () => {
       "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
       [queued.id],
     );
+    await pool.query(
+      "UPDATE github_quota_state SET lease_until=clock_timestamp()-interval '1 second' WHERE app_id=12 AND installation_id=10",
+    );
     const second = await f.worker.claim();
     if (!second) throw new Error('Missing second claim');
     expect(second.token).not.toBe(first.token);
@@ -371,6 +377,9 @@ describe('live GitHub PostgreSQL boundaries', () => {
     await pool.query(
       "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
       [queued.id],
+    );
+    await pool.query(
+      "UPDATE github_quota_state SET lease_until=clock_timestamp()-interval '1 second' WHERE app_id=12 AND installation_id=10 AND lease_token IS NOT NULL",
     );
     const third = await f.worker.claim();
     if (!third) throw new Error('Missing third claim');
@@ -416,6 +425,18 @@ describe('live GitHub PostgreSQL boundaries', () => {
     );
     expect(history.rows[0]?.payload).toEqual(initial.statuses[0]);
     const next = await f.enqueue();
+    expect(await processOne(pool, f.config, { provider: f.provider })).toBe(false);
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+    });
+    const quota = await pool.query<Record<string, unknown>>(
+      'SELECT extract(epoch FROM blocked_until-clock_timestamp())::float AS delay FROM github_quota_state WHERE app_id=12 AND installation_id=10',
+    );
+    expect(Number(quota.rows[0]?.delay)).toBeGreaterThan(9998);
+    await pool.query(
+      "UPDATE github_quota_state SET blocked_until='-infinity' WHERE app_id=12 AND installation_id=10",
+    );
     f.provider.collect.mockResolvedValueOnce({
       deployments: [],
       statuses: [],
@@ -435,7 +456,7 @@ describe('live GitHub PostgreSQL boundaries', () => {
       ]),
     ).rejects.toThrow('immutable');
   });
-  it('bounds retry delays and three empty acquisition failures without exposing provider diagnostics', async () => {
+  it('honors long provider retry delays and bounds attempts without exposing diagnostics', async () => {
     const f = await fixture(),
       queued = await f.enqueue();
     f.provider.collect.mockResolvedValue({
@@ -446,6 +467,9 @@ describe('live GitHub PostgreSQL boundaries', () => {
       diagnostics: [{ code: 'private-reason', resource: 'private-path', retryAfterSeconds: 9999 }],
     });
     for (let attempt = 1; attempt <= 3; attempt++) {
+      await pool.query(
+        "UPDATE github_quota_state SET blocked_until='-infinity' WHERE app_id=12 AND installation_id=10",
+      );
       await pool.query(
         "UPDATE github_collection_runs SET available_at=clock_timestamp()-interval '1 second' WHERE id=$1",
         [queued.id],
@@ -464,9 +488,208 @@ describe('live GitHub PostgreSQL boundaries', () => {
           'SELECT extract(epoch FROM available_at-clock_timestamp())::float AS delay FROM github_collection_runs WHERE id=$1',
           [queued.id],
         );
-        expect(Number(delay.rows[0]?.delay)).toBeGreaterThan(290);
-        expect(Number(delay.rows[0]?.delay)).toBeLessThanOrEqual(300);
+        expect(Number(delay.rows[0]?.delay)).toBeGreaterThan(9998);
+        expect(Number(delay.rows[0]?.delay)).toBeLessThanOrEqual(10030);
       }
+    }
+  });
+  it('counts a production collection throttle once through transport observation and worker completion', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const verify = vi.spyOn(githubProvider, 'verify').mockResolvedValue({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('', { status: 429 }));
+    try {
+      await processOne(pool, f.config);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const quota = await pool.query<Record<string, unknown>>(
+        'SELECT consecutive_throttles,extract(epoch FROM blocked_until-clock_timestamp())::float AS wait FROM github_quota_state WHERE app_id=12 AND installation_id=10',
+      );
+      expect(quota.rows[0]?.consecutive_throttles).toBe(1);
+      expect(Number(quota.rows[0]?.wait)).toBeGreaterThanOrEqual(59);
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'pending', attempts: 1 },
+      );
+      expect(await processOne(pool, f.config)).toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      verify.mockRestore();
+      fetch.mockRestore();
+    }
+  });
+  it('keeps a paced production prefix when a large full backfill reaches the soft acquisition deadline', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const verify = vi.spyOn(githubProvider, 'verify').mockResolvedValue({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const deployments = Array.from({ length: 61 }, (_, i) => ({
+      id: i + 1,
+      created_at: '2026-01-01T10:00:00Z',
+      updated_at: '2026-01-01T10:00:00Z',
+      environment: 'production',
+      sha: 'a'.repeat(40),
+    }));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      const body =
+        path === '/repositories/20'
+          ? { id: 20, name: 'fixture-repo', owner: { login: 'fixture-owner' } }
+          : path.endsWith('/deployments')
+            ? deployments
+            : [];
+      return new Response(JSON.stringify(body));
+    });
+    try {
+      await processOne(pool, f.config, { acquisitionBudgetMs: 4000 });
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        {
+          status: 'succeeded',
+          result: {
+            transportComplete: false,
+            deploymentCount: 61,
+            coverage: { collectionComplete: false },
+          },
+        },
+      );
+      expect(fetch.mock.calls.length).toBeLessThan(10);
+      expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      verify.mockRestore();
+      fetch.mockRestore();
+    }
+  });
+  it('defers repeated unrelated App cooldowns without consuming acquisition attempts', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    f.provider.verify.mockImplementation(async () => {
+      await pool.query(
+        "UPDATE github_quota_state SET blocked_until=clock_timestamp()+interval '600 seconds' WHERE app_id=12 AND installation_id=0",
+      );
+      throw new AdapterError('transport_failed');
+    });
+    for (let i = 0; i < 3; i++) {
+      await pool.query("UPDATE github_quota_state SET blocked_until='-infinity' WHERE app_id=12");
+      await pool.query(
+        "UPDATE github_collection_runs SET available_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+        [queued.id],
+      );
+      await processOne(pool, f.config, {
+        provider: { ...f.provider, quotaContention: () => true },
+      });
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'pending', attempts: 0 },
+      );
+    }
+    expect(f.provider.collect).not.toHaveBeenCalled();
+  });
+  it('fences pending jobs when current configuration is removed', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    await processOne(pool, f.config, { configNow: () => null, provider: f.provider });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'failed',
+      failureCode: 'github_connection_revoked',
+      attempts: 0,
+    });
+    expect(f.provider.verify).not.toHaveBeenCalled();
+  });
+  it('rejects arbitrary attempt rollback even during a shared cooldown', async () => {
+    const f = await fixture();
+    await f.enqueue();
+    const claim = await f.worker.claim();
+    if (!claim) throw new Error('Missing claim');
+    await pool.query(
+      "UPDATE github_quota_state SET blocked_until=clock_timestamp()+interval '600 seconds' WHERE app_id=12 AND installation_id=0",
+    );
+    await expect(
+      pool.query(
+        "UPDATE github_collection_runs SET attempts=0,quota_app_id=NULL,status='pending',lease_token=NULL,lease_until=NULL WHERE id=$1",
+        [claim.id],
+      ),
+    ).rejects.toThrow('attempts cannot decrease');
+    expect(await f.worker.deferQuota(claim)).toBe(true);
+  });
+  it('does not refund deterministic failure merely because a shared cooldown exists', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    f.provider.verify.mockImplementation(async () => {
+      await pool.query(
+        "UPDATE github_quota_state SET blocked_until=clock_timestamp()+interval '600 seconds' WHERE app_id=12 AND installation_id=0",
+      );
+      throw new AdapterError('github_http_404');
+    });
+    await processOne(pool, f.config, { provider: { ...f.provider, quotaContention: () => true } });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+    });
+  });
+  it('refunds a real production quota-check failure after successful primary exhaustion', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const verify = vi.spyOn(githubProvider, 'verify').mockResolvedValue({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: 20, name: 'fixture-repo', owner: { login: 'fixture-owner' } }),
+        {
+          headers: {
+            'x-ratelimit-remaining': '0',
+            'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 900),
+          },
+        },
+      ),
+    );
+    try {
+      await processOne(pool, f.config);
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'pending', attempts: 0, result: null },
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(await processOne(pool, f.config)).toBe(false);
+    } finally {
+      verify.mockRestore();
+      fetch.mockRestore();
+    }
+  });
+  it('does not refund real production transport failure without quota-check contention', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const verify = vi.spyOn(githubProvider, 'verify').mockResolvedValue({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      await pool.query(
+        "UPDATE github_quota_state SET blocked_until=clock_timestamp()+interval '600 seconds' WHERE app_id=12 AND installation_id=0",
+      );
+      throw new Error('private transport failure');
+    });
+    try {
+      await processOne(pool, f.config);
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'pending', attempts: 1, result: null },
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      verify.mockRestore();
+      fetch.mockRestore();
     }
   });
   it('keeps unchanged backfills flat while retaining new source observations and immutable snapshots', async () => {

@@ -13,6 +13,7 @@ export type { CollectionDiagnostic, GitHubBatch } from './github.ts';
 export { collectGitHubDeployments } from './github.ts';
 export type { FetchTransport, InstallationToken } from './github-app.ts';
 export { createInstallationToken, githubApiVersion } from './github-app.ts';
+export { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';
 export { verifyGitHubScope } from './github-scope.ts';
 export { createBoundedGitHubTransport } from './github-transport.ts';
 export type {
