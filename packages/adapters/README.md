@@ -1,10 +1,12 @@
 # @clio/adapters
 
 Server-only deployment evidence foundation. GitHub App installation-token issuance,
-GitHub REST full backfill, supplied Argo CD operation normalization, and pure one-service
-OEMS reconciliation are implemented. No API route, credential store, live Argo client,
-HTTP notification receiver, durable job, checkpoint, results API or browser integration exists.
-Fixtures are fictional. No live provider evidence has been collected.
+GitHub REST full backfill, supplied Argo CD operation normalization, strict native Argo
+notification parsing, and pure one-service OEMS reconciliation are implemented. This package
+owns no API route, credential store, notification receiver or durable job. Fictional fixtures
+cover normalization; the committed native producer was also exercised against the dedicated
+public-repository Argo CD 3.5.4 sandbox. That probe proves producer behavior, not Clio receiver
+integration or complete source history.
 
 ## Authorization and credentials
 
@@ -124,6 +126,43 @@ can append observations, but conflicting content for the same notification revis
 Repeated notification revisions deduplicate; different operations using the same SHA stay distinct.
 Never use `oncePer: revision` as operation identity. Sync success/healthy alone does not prove
 consumer exposure. Self-heal/retry/unknown operations remain unqualified in this slice.
+
+## Native Argo notification boundary
+
+`parseArgoNotification(input: unknown, scope: ArgoScope, observedAt: string): ArgoNotification`
+and `argoNotificationDigest(input: unknown, scope: ArgoScope): string` implement the exact
+[native wire contract](../../docs/providers/live-argo-contract.md). Exported types are
+`NativeArgoNotification`, `ArgoScope`, `ArgoNotification`, `ArgoOperationNotification`,
+`ArgoGapNotification`, and `ArgoGapReason`. The caller authenticates the source before calling
+these helpers and supplies trusted UTC observation time. Scope mismatches and malformed
+shapes throw redacted `AdapterError`; scope-valid unsupported events return explicit gaps.
+
+Parsing rejects unknown or missing keys, nonboolean flags, unsafe retry counts, invalid UTC
+calendar timestamps, completion before start, strings over 4096 characters, arrays over 100
+entries, and normalized envelopes over 64 KiB of UTF-8. Valid native timestamps retain up to
+six fractional digits. Canonical receipt JSON contains only explicitly selected public scope
+fields and the normalized envelope: deterministic key ordering, sorted operation info and
+normalized fractional padding. Private grant extensions and observation time are excluded.
+The receipt digest is SHA-256. The digest-only entry validates timestamps and exact scope but
+skips arrival age checks, allowing authorized storage to find replay before horizon checks.
+
+Supported terminal operations require explicit UUID info, recognized operation kind (missing
+kind remains `unknown`), single-source configuration revision, completion time and recorded
+health transition time. New arrivals more than ten minutes after completion become gaps.
+Status time is the later of completion and health transition, with future native timestamps
+reported as gaps. Health predating operation start is allowed, without exposure inference.
+Operation metadata digest binds public scope, normalized UUID, start, configuration revision,
+kind, immutable `v1` revision, original initiatedBy and sorted operation info. Retry count and
+mutable terminal/health status are excluded. Notification revisions hash phase, health,
+conjunction timestamp, false exposure and namespaced source reference. They are opaque
+identities, not chronology. Native evidence always has false consumer exposure and null
+application provenance; configuration revisions remain opaque strings.
+
+The [native YAML](../../infra/argocd/clio-notifications.yaml) uses safe JSON encoding and custom
+UUID/phase/health/transition-time oncePer; native start time only discriminates unmarked gap
+delivery. See [producer notes](../../infra/argocd/README.md) for actual runtime facts and setup
+requirements. Storage owns replay authorization, UUID conflicts, combination/retention limits,
+gap persistence and first observation; this pure parser does not implement those controls.
 
 ## Snapshot policy and limits
 

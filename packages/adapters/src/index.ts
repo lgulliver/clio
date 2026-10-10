@@ -1,4 +1,13 @@
 /** Server-only boundary. Never import this package from apps/web. */
+export type {
+  ArgoGapNotification,
+  ArgoGapReason,
+  ArgoNotification,
+  ArgoOperationNotification,
+  ArgoScope,
+  NativeArgoNotification,
+} from './argo-notification.ts';
+export { argoNotificationDigest, parseArgoNotification } from './argo-notification.ts';
 export { normalizeArgoOperation } from './argocd.ts';
 export type { CollectionDiagnostic, GitHubBatch } from './github.ts';
 export { collectGitHubDeployments } from './github.ts';

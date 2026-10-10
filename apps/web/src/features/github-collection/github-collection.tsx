@@ -246,7 +246,7 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
         <>
           {connectionQuery.isPending ? (
             <p role="status">Loading GitHub connection…</p>
-          ) : connectionQuery.isError ? (
+          ) : !connectionQuery.data ? (
             <p role="alert">{errorMessage(connectionQuery.error)}</p>
           ) : (
             <>

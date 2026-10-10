@@ -1,0 +1,60 @@
+# Native producer for Argo CD 3.5.4. Merge data into existing notification config;
+# do not replace unrelated services. Set URL and granted sourceId before applying.
+# Create clio-token in argocd-notifications-secret through a private operator flow.
+# Subscribe only the granted Application:
+# notifications.argoproj.io/subscribe.clio-operation.clio: ""
+# Bearer credential authenticates the operator-controlled producer, not controller attestation.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  context: |
+    sourceId: REPLACE_WITH_GRANTED_SOURCE_UUID
+  service.webhook.clio: |
+    url: https://clio-ingress.example.invalid
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: Authorization
+        value: Bearer $clio-token
+    retryWaitMin: 1000000000 # 1 second, native time.Duration nanoseconds
+    retryWaitMax: 5000000000 # 5 seconds
+    retryMax: 3
+  template.clio-native-operation: |
+    webhook:
+      clio:
+        method: POST
+        path: /api/argo/sources/{{.context.sourceId}}/operations
+        body: |
+          {{- $state := default (dict) .app.status.operationState -}}
+          {{- $operation := default (dict) $state.operation -}}
+          {{- $initiator := default (dict) $operation.initiatedBy -}}
+          {{- $result := default (dict) $state.syncResult -}}
+          {{- $health := default (dict) .app.status.health -}}
+          {{- $source := default (dict) .app.spec.source -}}
+          {{- $destination := .app.spec.destination -}}
+          {{- $application := dict "uid" .app.metadata.uid "name" .app.metadata.name "namespace" .app.metadata.namespace "project" .app.spec.project "destination" (dict "server" (default nil $destination.server) "name" (default nil $destination.name) "namespace" $destination.namespace) "repoURL" (default nil $source.repoURL) "hasSources" (hasKey .app.spec "sources") "hasSourceHydrator" (hasKey .app.spec "sourceHydrator") -}}
+          {{- $nativeOperation := dict "phase" (default nil $state.phase) "startedAt" (default nil $state.startedAt) "finishedAt" (default nil $state.finishedAt) "retryCount" (default 0 $state.retryCount) "info" (default (list) $operation.info) "initiatedBy" (dict "username" (default nil $initiator.username) "automated" (default false $initiator.automated)) "revision" (default nil $result.revision) "revisions" (default (list) $result.revisions) -}}
+          {{- dict "contract" "clio.argocd.notification.v1" "application" $application "operation" $nativeOperation "health" (dict "status" (default nil $health.status) "lastTransitionTime" (default nil $health.lastTransitionTime)) | toJson -}}
+  trigger.clio-operation: |
+    - when: >-
+        app.status?.operationState != nil &&
+        app.status.operationState.phase in ['Succeeded', 'Failed', 'Error'] &&
+        (app.status.operationState.finishedAt == nil ||
+          time.Now().Sub(time.Parse(app.status.operationState.finishedAt)).Seconds() <= 600)
+      # Terminal observations only; nullable completion admits an explicit gap.
+      # Argo CD 3.5.4 may skip missing completion before trigger evaluation.
+      # Bound health churn to ten minutes after completion, including exact boundary.
+      # Content identity uses UUID, never SHA or resourceVersion. startedAt is only
+      # a discriminator for unsupported unmarked-operation gap delivery.
+      oncePer: >-
+        let ids = filter(app.status.operationState.operation?.info ?? [], { .name == 'clio.operation-id' });
+        (len(ids) > 0 && ids[0].value != '' ?
+          ids[0].value :
+          'unmarked:' + (app.status.operationState.startedAt ?? '')) + '|' +
+        (app.status.operationState.phase ?? '') + '|' +
+        (app.status.health?.status ?? '') + '|' +
+        (app.status.health?.lastTransitionTime ?? '')
+      send: [clio-native-operation]

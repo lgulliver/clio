@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArgoCollection } from '../argo-collection/argo-collection';
 import { DeploymentMappings } from '../deployment-mappings/deployment-mappings';
 import { GitHubCollection } from '../github-collection/github-collection';
 import {
@@ -44,7 +45,7 @@ export function WorkspacePage({ authError }: { authError: boolean }) {
       <div className="panel">
         <h2 className="text-xl font-semibold">Connections</h2>
         <p className="mt-3 text-slate-600">
-          Select a workspace and service to manage live GitHub connections or separate mock
+          Select a workspace and service to manage live GitHub or Argo connections, or separate mock
           deployment settings.
         </p>
       </div>
@@ -148,7 +149,7 @@ function WorkspaceScope({
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [denied, setDenied] = useState('');
   const [selectedService, setSelectedService] = useState('');
-  const [sourceMode, setSourceMode] = useState<'mock' | 'live'>('mock');
+  const [sourceMode, setSourceMode] = useState<'mock' | 'live' | 'argo'>('mock');
   const serviceSelection = useRef('');
   const mutationEpoch = useRef(0);
   const revision = session.revision;
@@ -311,6 +312,19 @@ function WorkspaceScope({
                       >
                         Live GitHub
                       </button>
+                      <button
+                        type="button"
+                        className="control ml-2"
+                        aria-label={`Live Argo for ${item.name}`}
+                        aria-pressed={selectedService === item.id && sourceMode === 'argo'}
+                        onClick={() => {
+                          serviceSelection.current = `argo:${item.id}`;
+                          setSourceMode('argo');
+                          setSelectedService(item.id);
+                        }}
+                      >
+                        Live Argo
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -337,6 +351,17 @@ function WorkspaceScope({
                   userId={userId}
                   validSelection={() =>
                     valid() && serviceSelection.current === `live:${selectedService}`
+                  }
+                />
+              )}
+              {activeService && sourceMode === 'argo' && (
+                <ArgoCollection
+                  workspace={workspace}
+                  serviceId={selectedService}
+                  serviceName={activeService.name}
+                  userId={userId}
+                  validSelection={() =>
+                    valid() && serviceSelection.current === `argo:${selectedService}`
                   }
                 />
               )}

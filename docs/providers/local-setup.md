@@ -1,8 +1,8 @@
 # Local provider setup
 
-Mock workflows need no provider registration or credentials. For real GitHub Deployments, follow [the local connection guide](connect-github.md) after provider preparation. Argo transport remains unimplemented; its steps below prepare access only.
+Mock workflows need no provider registration or credentials. For real GitHub Deployments, follow [the local connection guide](connect-github.md) after provider preparation. For native Argo notifications, follow [the Argo connection guide](connect-argocd.md); scoped read-only Argo API access remains a separate preflight capability.
 
-For concrete registration, scoped access checks, credential rotation and troubleshooting, follow [preparing real deployment sources](real-sources.md). For a separate practice controller, follow [the optional local Argo sandbox](local-argocd.md). The sandbox does not connect to Clio; GitHub requires the separate local connection workflow.
+For concrete registration, scoped access checks, credential rotation and troubleshooting, follow [preparing real deployment sources](real-sources.md). For a separate practice controller, follow [the optional local Argo sandbox](local-argocd.md). The sandbox can exercise native notification delivery with an explicit private grant; GitHub uses its separate local connection workflow.
 
 ## GitHub App
 
@@ -20,7 +20,7 @@ The adapter receives signing material server-side and requests a short-lived ins
 
 Keep GitOps manifest repository and application-source repository distinct. Record Argo CD instance, application UID/name, target production mapping and operation identity. Decide which signal proves consumer exposure before declaring a qualifying deployment.
 
-The adapter slice parses supplied evidence; no notification endpoint or Argo CD polling client exists yet. Do not point Argo CD at Clio's API before the authenticated ingestion slice is implemented. That slice must define credential scope, notification authentication, replay protection, service authorization, history/backfill gaps and durable receipt before acknowledgment.
+Native notification ingestion has a separate source credential, exact Application scope and durable receipt/gap history. Configure it with [the Argo connection guide](connect-argocd.md). Read-only Argo API tokens below are for operator preflight, not receiver authentication. No polling/backfill client is included.
 
 Synced/Healthy establishes controller reconciliation and health assessments under its configuration. It does not independently prove consumer exposure or application-source commit lineage. Revision-only notification deduplication can hide distinct deployments of the same SHA; Clio requires operation/rollout identity.
 

@@ -1,8 +1,8 @@
 # Preparing real deployment sources
 
-This guide prepares and checks access to **real GitHub Deployments and Argo CD**. Provider-side setup prepares the scope and access checks. For the local GitHub connection workflow, continue with [connecting GitHub Deployments](connect-github.md): separate App key/grants files, service connection and live worker. `pnpm worker:mock` remains fictional. Argo has no live collector or notification receiver yet. Do not put collection secrets in login OAuth settings or send Argo notifications to Clio's API.
+This guide prepares and checks access to **real GitHub Deployments and Argo CD**. Provider-side setup prepares the scope and access checks. For the local GitHub connection workflow, continue with [connecting GitHub Deployments](connect-github.md): separate App key/grants files, service connection and live worker. `pnpm worker:mock` remains fictional. For native Argo notification ingestion, continue with [connecting Argo CD](connect-argocd.md): explicit Application/source grants, a separate receiver credential and snapshot worker. Keep collection secrets separate from login OAuth settings.
 
-Start with [local Clio setup](../getting-started.md). For an independent Argo practice environment, use the [optional Kubernetes-in-Docker sandbox](local-argocd.md). That sandbox supplies no data to Clio.
+Start with [local Clio setup](../getting-started.md). For an independent Argo practice environment, use the [optional Kubernetes-in-Docker sandbox](local-argocd.md). That sandbox supplies no data to Clio until deliberately connected through the native notification workflow.
 
 ## Choose the service and evidence first
 
@@ -261,7 +261,7 @@ PY
 
 Argo's [Applications API](https://argo-cd.readthedocs.io/en/stable/developer-guide/api-docs/) accepts bearer authentication and project filtering. Confirm application UID and destination against your plan. With the same token, verify access to a known application outside the allowed scope is denied; an operator should also test effective write permissions with Argo's RBAC tooling without performing a production mutation. Broad inherited read/write access fails the scope check.
 
-Application state and retained history are mutable and bounded. This preflight proves access to current records, not complete deployment history. Future ingestion must preserve operations durably, assign trusted receiver observation times, retain retries/self-heal, and identify missing periods. Native Argo API responses and webhook templates are **not** Clio's `clio.argocd.operation.v1` normalized evidence contract; an authenticated transport and mapping layer still need implementation. Do not configure Argo notifications to a guessed Clio URL.
+Application state and retained history are mutable and bounded. This preflight proves access to current records, not complete deployment history. Future ingestion must preserve operations durably, assign trusted receiver observation times, retain retries/self-heal, and identify missing periods. Native Argo API responses are **not** Clio's normalized evidence contract. Use the strict `clio.argocd.notification.v1` producer and exact authenticated source endpoint from [the Argo connection guide](connect-argocd.md).
 
 ## Rotation, revocation and connection handoff
 
@@ -288,9 +288,9 @@ argocd --argocd-context YOUR_CONTEXT --prompts-enabled proj role delete-token de
 
 See [token revocation](https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_proj_role_delete-token/). GitHub token revocation uses `DELETE /installation/token` authenticated with the token being retired. Delete local preflight token files after revocation. No long-lived credential is needed merely to keep a connection plan.
 
-**GitHub:** when scope, identities, exposure policy and sample evidence have been checked, continue with [the local connection guide](connect-github.md). Keep secrets in private files and record only non-secret setup decisions in project notes. **Argo:** stop at provider preparation; no authenticated Clio transport or connection configuration exists yet.
+**GitHub:** when scope, identities, exposure policy and sample evidence have been checked, continue with [the local connection guide](connect-github.md). Keep secrets in private files and record only non-secret setup decisions in project notes. **Argo:** continue with [native notification ingestion](connect-argocd.md), using a separate scoped receiver credential and explicit operation UUIDs; the read-only API token above remains for preflight.
 
-The [local GitHub contract](live-github-contract.md) binds operator-granted scope to an authorized workspace/service, verifies installation/account/repository scope, keeps secrets outside PostgreSQL, and preserves immutable evidence and explicit gaps through pinned OEMS validation. Hosted self-service ownership proof and the Argo authenticated transport still require separate implementation. Results must expose incomplete/unknown states honestly. Successful access checks, empty responses or transport completion do not establish metric coverage; deployment sources alone do not supply change failures, recovery evidence or complete commit lineage.
+The [local GitHub contract](live-github-contract.md) binds operator-granted scope to an authorized workspace/service, verifies installation/account/repository scope, keeps secrets outside PostgreSQL, and preserves immutable evidence and explicit gaps through pinned OEMS validation. Hosted self-service ownership proof remains future work. Native Argo ingestion follows the [scoped notification contract](live-argo-contract.md). Results must expose incomplete/unknown states honestly. Successful access checks, empty responses or transport completion do not establish metric coverage; deployment sources alone do not supply change failures, recovery evidence or complete commit lineage.
 
 ## Troubleshooting
 
@@ -303,4 +303,4 @@ The [local GitHub contract](live-github-contract.md) binds operator-granted scop
 | Argo 401 | Token expiry/revocation and correct Argo instance. |
 | Argo 403/404 | Project, application namespace/name, role object and effective RBAC; project filtering affects missing-resource responses. |
 | Healthy app but no usable rollout | Check operation identity, retention, operation kind, consumer exposure and source provenance separately. |
-| Clio still shows mocks | Mock workflows remain separate. Configure the local GitHub App/grant and live worker using the connection guide; Argo remains supplied/mock evidence only. |
+| Clio still shows mocks | Mock workflows remain separate. Configure the local GitHub App/grant and live worker using the connection guide; Argo uses its separate native notification grant, source connection and snapshot worker. |

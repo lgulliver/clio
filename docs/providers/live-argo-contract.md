@@ -85,7 +85,7 @@ interface ArgoRun {
 }
 ```
 
-Result counts describe all retained dates at cutoff, not reporting-window completeness. Observation period describes retained source history and counters; no initial-delivery coverage claim. Counter changes and receipt inserts serialize with cutoff capture so result never incorporates later changes. Connection stores private grant scope/fingerprint separately from public DTO. IDs UUID; timestamps UTC up to six fractional digits. Closed whole-day windows 1–90 days.
+Result counts describe all eligible retained dates at cutoff, not reporting-window completeness. Receipt/evidence/gap counts use the current fingerprint and exact scope; observation period and rejection/drift counters span the whole source lifetime across grant revisions. Each disconnect/reconnect boundary contributes one interruption gap, so a pair contributes two; policy-only active re-save adds none. Counter changes and receipt inserts serialize with cutoff capture so result never incorporates later changes. Connection stores private grant scope/fingerprint separately from public DTO. IDs UUID; timestamps UTC up to six fractional digits. Closed whole-day windows 1–90 days.
 
 ## Integration interfaces and ownership
 

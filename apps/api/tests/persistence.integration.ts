@@ -159,6 +159,15 @@ describe('real PostgreSQL foundation', () => {
   });
 
   it('detects schema drift even with matching migration history', async () => {
+    await pool.query('ALTER TABLE argo_receipts RENAME COLUMN grant_fingerprint TO removed_grant');
+    try {
+      await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+    } finally {
+      await pool.query(
+        'ALTER TABLE argo_receipts RENAME COLUMN removed_grant TO grant_fingerprint',
+      );
+    }
+    await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
     await pool.query('ALTER TABLE services RENAME COLUMN name TO removed_name');
     try {
       await expect(checkReadiness(pool, migrations)).rejects.toThrow();

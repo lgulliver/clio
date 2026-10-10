@@ -768,6 +768,36 @@ describe('live GitHub workflow', () => {
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(posts()[0]?.[1]?.body).toEqual(posts()[1]?.[1]?.body);
   });
+  it('failed connection refresh preserves uncertain replay and locked dates', async () => {
+    let connectionFails = false;
+    fetchMock.mockImplementation(async (input, options) => {
+      if (options?.method === 'POST') throw new TypeError('network');
+      if (connectionFails && String(input).endsWith('/github-connection')) return json({}, 503);
+      return defaultRead(input);
+    });
+    mount();
+    await screen.findByRole('button', { name: 'Collect GitHub deployments' });
+    dates();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Collect GitHub deployments' }));
+    await screen.findByRole('button', { name: 'Retry collection request' });
+    connectionFails = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh connection and runs' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Refresh connection and runs' })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Start date (UTC)')).toBeDisabled();
+    expect(screen.getByLabelText('Start date (UTC)')).toHaveValue('2026-01-01');
+    expect(screen.getByRole('button', { name: 'Retry collection request' })).toBeVisible();
+    connectionFails = false;
+    await user.click(screen.getByRole('button', { name: 'Refresh connection and runs' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Retry collection request' })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Retry collection request' }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[0]?.[1]?.body).toEqual(posts()[1]?.[1]?.body);
+  });
   it('late history recovery cannot unlock or publish after service switch', async () => {
     const late = deferred(),
       other = '44444444-4444-4444-8444-444444444444';

@@ -119,7 +119,26 @@ kubectl --kubeconfig "$CLIO_ARGO_KUBECONFIG" --context kind-clio-argocd -n argoc
 kubectl --kubeconfig "$CLIO_ARGO_KUBECONFIG" --context kind-clio-argocd -n clio-guestbook get deployments,pods,services
 ```
 
-Synced/Healthy reports reconciliation and health, not customer exposure. Guestbook is not production; a configuration Git SHA is not application-source provenance. Future Clio ingestion needs explicit instance/cluster/application/service mapping, authenticated receipt, preserved immutable operation identity/history, exposure evidence and explicit cross-provider rollout correlation. Matching SHAs never establish that correlation automatically. No Clio ingestion endpoint, live configuration keys or connector UI exist for this sandbox. See [future source requirements](local-setup.md).
+Synced/Healthy reports reconciliation and health, not customer exposure. Guestbook is not production; a configuration Git SHA is not application-source provenance. Native Clio ingestion requires explicit instance/cluster/application/service mapping, authenticated receipts and immutable operation identity/history. Exposure enrichment and cross-provider rollout correlation remain separate future contracts. Matching SHAs never establish that correlation automatically. Connect this sandbox deliberately using [native Argo notification setup](connect-argocd.md), including a private source grant, operation UUID info, custom notification trigger and separate snapshot worker. Selecting a mock Argo source does not connect the controller.
+
+## Verified connection to Clio
+
+On 2026-10-10 this sandbox was deliberately connected through a private scoped ingestion
+grant and an owner-saved service connection. Two native Argo API sync operations at the same
+configuration SHA produced separate durable Clio receipts; an unmarked sync produced a gap.
+The separate Argo snapshot worker completed a closed UTC-day capture, and the authenticated
+Live Argo panel showed three retained receipts, two deployments with unknown qualification,
+one missing-identity gap and incomplete coverage. Counts span all retained dates at cutoff;
+the prior-day reporting window does not include today's evaluation operations. Mock history
+and GitHub operator setup remained separate. See [detailed producer and receiver proof](../../infra/argocd/README.md).
+
+Docker Desktop's Kind network could not reach host loopback directly. This proof used a
+temporary source-scoped, bounded and independently authenticated tunnel on the isolated
+Kind network, with its host transport published only on loopback. Clio's API remained
+`127.0.0.1:3000`. This tunnel is evaluation tooling, not a supported hosted ingress or a
+portable local installation step. For your installation, provide a trusted HTTPS receiver
+reachable by the notification controller as described in [connecting Argo CD](connect-argocd.md).
+Do not assume that a successful localhost request proves controller connectivity.
 
 ## Diagnostics and cleanup
 

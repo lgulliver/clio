@@ -2,6 +2,8 @@ import cors from '@fastify/cors';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
+import type { ArgoConfig } from '../argo-collection/config.ts';
+import { registerArgoRoutes } from '../argo-collection/routes.ts';
 import { revision } from '../deployment-mappings/input.ts';
 import { previewMapping } from '../deployment-mappings/preview.ts';
 import { createMappingRepository } from '../deployment-mappings/repository.ts';
@@ -18,6 +20,7 @@ export interface IdentityDependencies {
   config: AuthConfig;
   pool: Pool;
   github?: GitHubConfig | null;
+  argo?: ArgoConfig | null;
 }
 
 function clientError(status: number) {
@@ -109,6 +112,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
     });
     if (identity) {
       registerGitHubRoutes(routes, { pool: identity.pool, github: identity.github ?? null, actor });
+      registerArgoRoutes(routes, { pool: identity.pool, argo: identity.argo ?? null, actor });
     } else {
       const base = '/api/workspaces/:workspaceId/services/:serviceId';
       for (const path of [
@@ -116,10 +120,17 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         '/github-connection/disconnect',
         '/github-collection-runs',
         '/github-collection-runs/:runId',
+        '/argo-connection',
+        '/argo-connection/disconnect',
+        '/argo-collection-runs',
+        '/argo-collection-runs/:runId',
       ]) {
         routes.route({
           method:
-            path === '/github-connection' || path === '/github-collection-runs'
+            path === '/github-connection' ||
+            path === '/github-collection-runs' ||
+            path === '/argo-connection' ||
+            path === '/argo-collection-runs'
               ? ['GET', 'POST']
               : path.endsWith('/disconnect')
                 ? 'POST'

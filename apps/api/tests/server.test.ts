@@ -3,6 +3,29 @@ import { readConfig } from '../src/config.ts';
 import { createServer } from '../src/server.ts';
 
 describe('health-only API', () => {
+  it('rejects unconfigured machine ingress before parsing malformed JSON', async () => {
+    const server = createServer({ ready: async () => {}, close: async () => {} });
+    try {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/argo/sources/11111111-1111-4111-8111-111111111111/operations',
+        headers: { 'content-type': 'application/json' },
+        payload: '{broken',
+      });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: 'unauthorized' });
+      expect(response.headers['cache-control']).toBe('no-store');
+      for (const path of ['argo-connection', 'argo-collection-runs']) {
+        const browser = await server.inject(
+          `/api/workspaces/22222222-2222-4222-8222-222222222222/services/33333333-3333-4333-8333-333333333333/${path}`,
+        );
+        expect(browser.statusCode).toBe(503);
+        expect(browser.json()).toEqual({ error: 'unavailable' });
+      }
+    } finally {
+      await server.close();
+    }
+  });
   it('keeps liveness independent of readiness and redacts dependency failures', async () => {
     const ready = vi.fn().mockRejectedValue(new Error('postgres://secret:password@host/private'));
     const close = vi.fn().mockResolvedValue(undefined);
