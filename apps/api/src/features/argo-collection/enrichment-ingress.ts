@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { snapshotDigest } from '../github-collection/digest.ts';
 import { IdentityError, object, uuid } from '../identity/input.ts';
+import { eligibleArchive } from './archive-grants.ts';
 import {
   type ArgoConfig,
   type ArgoProducerGrant,
@@ -174,7 +175,8 @@ export async function acceptEnrichment(
       const freshConfig = configNow();
       if (
         grantFor(freshConfig, grant.sourceId)?.fingerprint !== native.fingerprint ||
-        eligibleProducers(freshConfig, current.connection, current.producers) === null
+        eligibleProducers(freshConfig, current.connection, current.producers) === null ||
+        eligibleArchive(freshConfig, current.connection, current.archive) === undefined
       )
         throw new IdentityError(409, 'conflict');
       return { receiptId: uuid(replay.id), observedAt: timestamp(replay.observed) };
@@ -182,9 +184,18 @@ export async function acceptEnrichment(
     let lockRows = 0,
       lockJson: unknown = null;
     if (event.kind === 'consumer_exposure') {
+      const archive = eligibleArchive(configNow(), current.connection, current.archive);
       const anchors = await client.query<Record<string, unknown>>(
-        'SELECT scope,evidence FROM argo_receipts WHERE source_id=$1 AND application_uid=$2 AND operation_id=$3 AND grant_fingerprint=$4 AND evidence IS NOT NULL ORDER BY observed_at,id LIMIT 31',
-        [grant.sourceId, grant.applicationUid, event.operation_id, native.fingerprint],
+        `SELECT scope,evidence FROM argo_receipts r WHERE source_id=$1 AND application_uid=$2 AND operation_id=$3 AND grant_fingerprint=$4 AND evidence IS NOT NULL AND (r.origin_transport='live' OR EXISTS (SELECT 1 FROM argo_receipt_authorities a WHERE a.receipt_id=r.id AND a.native_fingerprint=$4 AND (a.kind='live' OR (a.archive_fingerprint=$5 AND a.journal_id=$6 AND a.producer_id=$7)))) ORDER BY observed_at,id LIMIT 31`,
+        [
+          grant.sourceId,
+          grant.applicationUid,
+          event.operation_id,
+          native.fingerprint,
+          archive?.fingerprint ?? null,
+          archive?.journalId ?? null,
+          archive?.producerId ?? null,
+        ],
       );
       const eligible = anchors.rows.some((row) => {
         if (!isDeepStrictEqual(row.scope, scopeFor(native)))
@@ -305,7 +316,8 @@ export async function acceptEnrichment(
     const freshConfig = configNow();
     if (
       grantFor(freshConfig, grant.sourceId)?.fingerprint !== native.fingerprint ||
-      eligibleProducers(freshConfig, current.connection, current.producers) === null
+      eligibleProducers(freshConfig, current.connection, current.producers) === null ||
+      eligibleArchive(freshConfig, current.connection, current.archive) === undefined
     )
       throw new IdentityError(409, 'conflict');
     return { receiptId, observedAt };

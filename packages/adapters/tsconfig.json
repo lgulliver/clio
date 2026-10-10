@@ -4,5 +4,5 @@
     "types": ["node"],
     "erasableSyntaxOnly": true
   },
-  "include": ["src", "test", "examples"]
+  "include": ["src", "test", "tests", "examples"]
 }

@@ -90,6 +90,16 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   checkApplied(result.rows, migrations, true);
   // Also detect missing tables/columns rather than trusting ledger alone.
   await pool.query(
+    'SELECT source_id,journal_id,producer_id,policy_reference,startup_at,registered_at,last_sequence,last_digest,last_capture_at,sealed_sequence,sealed_end FROM argo_archive_journals LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,source_id,journal_id,producer_id,native_fingerprint,archive_fingerprint,connection_revision,kind,sequence,seal_id,digest,record,captured_at,received_at,receipt_id,gap_reason,remaining_rows,remaining_bytes FROM argo_archive_records LIMIT 0',
+  );
+  await pool.query(
+    'SELECT receipt_id,kind,authority_id,native_fingerprint,archive_fingerprint,journal_id,producer_id,observed_at FROM argo_receipt_authorities LIMIT 0',
+  );
+  await pool.query('SELECT source_id,tokens,refilled_at FROM argo_archive_buckets LIMIT 0');
+  await pool.query(
     'SELECT id,source_id,workspace_id,service_id,connection_revision,producer_id,event_id,native_fingerprint,producer_fingerprint,scope,event,digest,observed_at FROM argo_enrichment_receipts LIMIT 0',
   );
   await pool.query(
@@ -106,7 +116,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   );
   await pool.query('SELECT source_id,tokens,refilled_at FROM argo_ingress_buckets LIMIT 0');
   await pool.query(
-    'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants FROM argo_connection_revisions LIMIT 0',
+    'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants,archive_grant FROM argo_connection_revisions LIMIT 0',
   );
   await pool.query(
     'SELECT id,workspace_id,service_id,connection_revision,request_id,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code,result,lease_token,lease_until,available_at FROM argo_collection_runs LIMIT 0',
@@ -121,7 +131,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
     'SELECT source_id,application_uid,operation_id,metadata_digest FROM argo_operation_metadata LIMIT 0',
   );
   await pool.query(
-    'SELECT id,source_id,workspace_id,service_id,connection_revision,application_uid,grant_fingerprint,scope,digest,observed_at,started_at,operation_id,notification_revision,phase,health,reason,canonical_json,evidence FROM argo_receipts LIMIT 0',
+    'SELECT id,source_id,workspace_id,service_id,connection_revision,application_uid,grant_fingerprint,scope,digest,observed_at,started_at,operation_id,notification_revision,phase,health,reason,canonical_json,evidence,origin_transport FROM argo_receipts LIMIT 0',
   );
   await pool.query(
     'SELECT source_id,grant_fingerprint,workspace_id,service_id,connection_revision,observed_at FROM argo_interruptions LIMIT 0',

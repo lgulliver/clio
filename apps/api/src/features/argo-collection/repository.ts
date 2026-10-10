@@ -5,6 +5,14 @@ import { storedRevision } from '../github-collection/db-value.ts';
 import { IdentityError, object, uuid } from '../identity/input.ts';
 import { type Actor, authorizedWorkspaceTransaction } from '../identity/repository.ts';
 import { createRepository } from '../workspaces/repository.ts';
+import {
+  archiveFor,
+  eligibleArchive,
+  parseArchivePin,
+  pinArchive,
+  publicArchive,
+} from './archive-grants.ts';
+import { archiveSummary } from './archive-summary.ts';
 import { type ArgoConfig, grantFor, parseScope, producerFor, scopeFor } from './config.ts';
 import { eligibleProducers, parsePins, pinProducer, publicProducer } from './enrichment-grants.ts';
 import {
@@ -19,7 +27,7 @@ import { parseRun, runColumns } from './result.ts';
 
 export async function latestConnection(client: PoolClient, workspaceId: string, serviceId: string) {
   const found = await client.query<Record<string, unknown>>(
-    'SELECT connection,grant_fingerprint,scope,enrichment_grants FROM argo_connection_revisions WHERE workspace_id=$1 AND service_id=$2 ORDER BY revision DESC LIMIT 1',
+    'SELECT connection,grant_fingerprint,scope,enrichment_grants,archive_grant FROM argo_connection_revisions WHERE workspace_id=$1 AND service_id=$2 ORDER BY revision DESC LIMIT 1',
     [workspaceId, serviceId],
   );
   const row = found.rows[0];
@@ -31,6 +39,7 @@ export async function latestConnection(client: PoolClient, workspaceId: string, 
     fingerprint: row.grant_fingerprint,
     scope: parseScope(row.scope),
     producers: parsePins(row.enrichment_grants),
+    archive: parseArchivePin(row.archive_grant),
   };
 }
 export async function fenceRuns(client: PoolClient, workspaceId: string, serviceId: string) {
@@ -124,12 +133,20 @@ export function createArgoRepository(
             applicationNamespace: g.applicationNamespace,
             instance: g.instance,
             environment: g.environment,
+            archiveProducers: (configNow()?.archives ?? [])
+              .filter((p) => p.sourceId === g.sourceId)
+              .map(publicArchive),
             enrichmentProducers: (configNow()?.producers ?? [])
               .filter((p) => p.sourceId === g.sourceId)
               .map(publicProducer)
               .sort((a, b) => a.producerId.localeCompare(b.producerId)),
           }));
+        const latest = await latestConnection(client, service.workspaceId, service.id);
+        const selected = latest
+          ? eligibleArchive(configNow(), latest.connection, latest.archive)
+          : null;
         return {
+          ...(selected ? { archiveStatus: await archiveSummary(client, selected) } : {}),
           configured: sources.length > 0,
           sources,
           connection:
@@ -149,13 +166,39 @@ export function createArgoRepository(
             throw new IdentityError(403, 'forbidden');
           return producer;
         });
+        const archive =
+          body.archiveProducerId === null
+            ? null
+            : archiveFor(configNow(), grant.sourceId, body.archiveProducerId);
+        if (
+          body.archiveProducerId !== null &&
+          (!archive || !isDeepStrictEqual(scopeFor(archive), scopeFor(grant)))
+        )
+          throw new IdentityError(403, 'forbidden');
+        const archivePin = archive ? pinArchive(archive) : null;
         const pins = producers.map(pinProducer);
         await ensureSource(client, grant);
+        if (archive) {
+          const registered = (
+            await client.query<Record<string, unknown>>(
+              'SELECT scope,producer_id,policy_reference FROM argo_archive_journals WHERE source_id=$1 AND journal_id=$2',
+              [grant.sourceId, archive.journalId],
+            )
+          ).rows[0];
+          if (
+            registered &&
+            (!isDeepStrictEqual(parseScope(registered.scope), scopeFor(grant)) ||
+              registered.producer_id !== archive.producerId ||
+              registered.policy_reference !== archive.policyReference)
+          )
+            throw new IdentityError(409, 'conflict');
+        }
         const bindingChanged =
           current !== null &&
           (current.connection.sourceId !== grant.sourceId ||
             current.fingerprint !== grant.fingerprint ||
-            !isDeepStrictEqual(current.producers, pins));
+            !isDeepStrictEqual(current.producers, pins) ||
+            !isDeepStrictEqual(current.archive, archivePin));
         if (current?.connection.active && bindingChanged) await interruption(client, current);
         const revision = (current?.connection.revision ?? 0) + 1;
         const connection = {
@@ -172,10 +215,11 @@ export function createArgoRepository(
           productionEnvironment: grant.environment,
           exposurePolicyReference: body.exposurePolicyReference,
           enrichmentProducers: producers.map(publicProducer),
+          archiveProducer: archive ? publicArchive(archive) : null,
           applicationOperationsBelongToService: true,
         };
         const inserted = await client.query<Record<string, unknown>>(
-          `INSERT INTO argo_connection_revisions(workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants) VALUES($1,$2,$3,$4::jsonb || jsonb_build_object('observedAt',to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),$5,$6,$7,$8) RETURNING connection`,
+          `INSERT INTO argo_connection_revisions(workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants,archive_grant) VALUES($1,$2,$3,$4::jsonb || jsonb_build_object('observedAt',to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),$5,$6,$7,$8,$9) RETURNING connection`,
           [
             service.workspaceId,
             service.id,
@@ -185,6 +229,7 @@ export function createArgoRepository(
             JSON.stringify(scopeFor(grant)),
             actor.userId,
             JSON.stringify(pins),
+            archivePin ? JSON.stringify(archivePin) : null,
           ],
         );
         if (current && (!current.connection.active || bindingChanged))
@@ -193,6 +238,14 @@ export function createArgoRepository(
             [grant.sourceId, grant.fingerprint, service.workspaceId, service.id, revision],
           );
         await fenceRuns(client, service.workspaceId, service.id);
+        const saved = parseConnection(inserted.rows[0]?.connection),
+          fresh = allowed(service.workspaceId, service.id, grant.sourceId);
+        if (
+          fresh.fingerprint !== grant.fingerprint ||
+          eligibleProducers(configNow(), saved, pins) === null ||
+          eligibleArchive(configNow(), saved, archivePin) === undefined
+        )
+          throw new IdentityError(409, 'conflict');
         return parseConnection(inserted.rows[0]?.connection);
       });
     },
@@ -206,7 +259,7 @@ export function createArgoRepository(
         await interruption(client, current);
         const next = { ...current.connection, revision: expected + 1, active: false };
         const inserted = await client.query<Record<string, unknown>>(
-          `INSERT INTO argo_connection_revisions(workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants) VALUES($1,$2,$3,$4::jsonb || jsonb_build_object('observedAt',to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),$5,$6,$7,$8) RETURNING connection`,
+          `INSERT INTO argo_connection_revisions(workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants,archive_grant) VALUES($1,$2,$3,$4::jsonb || jsonb_build_object('observedAt',to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),$5,$6,$7,$8,$9) RETURNING connection`,
           [
             service.workspaceId,
             service.id,
@@ -216,6 +269,7 @@ export function createArgoRepository(
             JSON.stringify(current.scope),
             actor.userId,
             JSON.stringify(current.producers),
+            current.archive ? JSON.stringify(current.archive) : null,
           ],
         );
         await fenceRuns(client, service.workspaceId, service.id);
@@ -263,7 +317,8 @@ export function createArgoRepository(
         if (
           grant.fingerprint !== current.fingerprint ||
           !isDeepStrictEqual(current.scope, scopeFor(grant)) ||
-          eligibleProducers(configNow(), current.connection, current.producers) === null
+          eligibleProducers(configNow(), current.connection, current.producers) === null ||
+          eligibleArchive(configNow(), current.connection, current.archive) === undefined
         )
           throw new IdentityError(403, 'forbidden');
         const active = await client.query(

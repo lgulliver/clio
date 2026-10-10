@@ -26,7 +26,8 @@
     "demo:providers": "pnpm --filter @clio/adapters demo",
     "worker:mock": "pnpm --filter @clio/api worker:mock",
     "worker:github": "pnpm --filter @clio/api worker:github",
-    "worker:argo": "pnpm --filter @clio/api worker:argo"
+    "worker:argo": "pnpm --filter @clio/api worker:argo",
+    "argo:journal": "node infra/argocd/journal/cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

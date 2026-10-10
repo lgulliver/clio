@@ -27,6 +27,24 @@ export const source = {
   instance: 'sandbox',
   environment: 'production',
 };
+export const archiveProducer = {
+  producerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  journalId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  policyReference: 'urn:fixture:archive:v1',
+};
+export const archiveSummary = {
+  ...archiveProducer,
+  lastSequence: 3,
+  lastSuccessfulReconciliationAt: '2026-01-04T00:00:59Z',
+  sealedInterval: { start: '2026-01-01T01:00:00Z', end: '2026-01-02T01:00:00Z' },
+  entryCount: 3,
+  gapCount: 1,
+  missingIntervalCount: 1,
+  missingIntervals: [
+    { start: '2026-01-01T01:00:00Z', end: '2026-01-01T01:10:00Z', reason: 'producer_outage' },
+  ],
+  omittedIntervalCount: 0,
+};
 export const result: Result = {
   ...scope,
   mode: 'live',

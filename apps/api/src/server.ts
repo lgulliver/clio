@@ -24,6 +24,7 @@ export function createServer(database: HealthDependency, identity?: IdentityDepe
     for (const route of [
       '/api/argo/sources/:sourceId/operations',
       '/api/argo/sources/:sourceId/enrichments/:producerId',
+      '/api/argo/sources/:sourceId/archives/:producerId',
     ])
       server.post(
         route,

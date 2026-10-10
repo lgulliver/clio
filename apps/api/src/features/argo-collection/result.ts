@@ -1,6 +1,7 @@
 import { oemsContract } from '@clio/oems';
 import { storedRevision } from '../github-collection/db-value.ts';
 import { object, uuid } from '../identity/input.ts';
+import { parseArchiveSummary } from './archive-summary.ts';
 import {
   type ArgoConnection,
   count,
@@ -60,6 +61,7 @@ export function parseResult(
   pinnedWindow: ReturnType<typeof windowInput>,
 ) {
   const row = object(value, [
+    'archiveSummary',
     'enrichmentSummary',
     'mode',
     'provider',
@@ -139,7 +141,24 @@ export function parseResult(
     new Set(qualityReasons).size !== qualityReasons.length
   )
     throw new Error('Invalid stored Argo result');
+  const archiveSummary = Object.hasOwn(row, 'archiveSummary')
+    ? parseArchiveSummary(row.archiveSummary)
+    : undefined;
+  if (
+    archiveSummary &&
+    (!connection.archiveProducer ||
+      archiveSummary.producerId !== connection.archiveProducer.producerId ||
+      archiveSummary.journalId !== connection.archiveProducer.journalId ||
+      archiveSummary.policyReference !== connection.archiveProducer.policyReference ||
+      (archiveSummary.lastSuccessfulReconciliationAt !== null &&
+        instant(archiveSummary.lastSuccessfulReconciliationAt) > instant(cutoff)) ||
+      (archiveSummary.sealedInterval !== null &&
+        instant(archiveSummary.sealedInterval.end) > instant(cutoff)) ||
+      archiveSummary.missingIntervals.some((i) => instant(i.end) > instant(cutoff)))
+  )
+    throw new Error('Invalid archive result');
   return {
+    ...(archiveSummary ? { archiveSummary } : {}),
     ...(Object.hasOwn(row, 'enrichmentSummary')
       ? { enrichmentSummary: parseSummary(row.enrichmentSummary, connection) }
       : {}),

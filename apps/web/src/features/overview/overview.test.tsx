@@ -3,7 +3,10 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { type ReactNode, StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
-import { completed as argoCompleted } from '../argo-collection/fixtures.test-support';
+import {
+  archiveSummary,
+  completed as argoCompleted,
+} from '../argo-collection/fixtures.test-support';
 import { completed, json, scope } from '../github-collection/fixtures.test-support';
 import { completed as mockCompleted } from '../mock-collection/fixtures.test-support';
 import { Overview } from './overview';
@@ -218,6 +221,22 @@ describe('stored results overview', () => {
     expect(within(argo).queryByText(/Fictional/)).not.toBeInTheDocument();
   });
 
+  it('separates archived capture bounds from reporting window and receiver cutoff', async () => {
+    const saved = { ...argoCompleted, result: { ...argoCompleted.result, archiveSummary } };
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-collection-runs')
+        ? json({ runs: [saved] })
+        : defaultRead(input),
+    );
+    mount();
+    await select();
+    const card = screen.getByRole('region', { name: 'Live Argo CD stored results' });
+    expect(
+      await within(card).findByText(/Sealed capture interval: 2026-01-01T01:00:00Z/),
+    ).toBeVisible();
+    expect(within(card).getByText(/Coverage remains incomplete/)).toBeVisible();
+    expect(within(card).getByText(/Archive gaps: 1/)).toBeVisible();
+  });
   it.each([null, '2026-01-02T00:00:00Z'])(
     'shows Argo observation limits and gaps with observation start %s',
     async (start) => {

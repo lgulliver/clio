@@ -1,8 +1,58 @@
 import { describe, expect, it } from 'vitest';
 import { closedWindow, parseConnection, parseRun, parseRuns, parseSavedConnection } from './api';
-import { completed, connection, result, scope, source } from './fixtures.test-support';
+import {
+  archiveProducer,
+  archiveSummary,
+  completed,
+  connection,
+  result,
+  scope,
+  source,
+} from './fixtures.test-support';
 
 describe('live Argo boundary', () => {
+  it('reads selected archive policies and immutable bounds separately from reporting window', () => {
+    const saved = { ...connection, archiveProducer };
+    expect(
+      parseConnection(
+        {
+          connection: saved,
+          configured: true,
+          sources: [{ ...source, archiveProducers: [archiveProducer] }],
+        },
+        scope,
+      ).connection,
+    ).toEqual(saved);
+    const captured = { ...result, archiveSummary };
+    expect(parseRun({ run: { ...completed, result: captured } }, scope).result).toEqual(captured);
+    expect(parseRun({ run: completed }, scope).result).not.toHaveProperty('archiveSummary');
+  });
+  it('rejects private archive fields, mismatched totals and bounds after evidence cutoff', () => {
+    for (const summary of [
+      { ...archiveSummary, token: 'private' },
+      { ...archiveSummary, omittedIntervalCount: 1 },
+      { ...archiveSummary, lastSuccessfulReconciliationAt: '2026-01-04T00:02:00Z' },
+      {
+        ...archiveSummary,
+        sealedInterval: { start: '2026-01-05T00:00:00Z', end: '2026-01-06T00:00:00Z' },
+      },
+      { ...archiveSummary, gapCount: 4 },
+    ])
+      expect(() =>
+        parseRun({ run: { ...completed, result: { ...result, archiveSummary: summary } } }, scope),
+      ).toThrow();
+  });
+  it('rejects changed archive selection in a save acknowledgement', () => {
+    expect(() =>
+      parseSavedConnection(
+        { connection: { ...connection, revision: 2, archiveProducer: null } },
+        scope,
+        1,
+        true,
+        { ...connection, archiveProducer },
+      ),
+    ).toThrow();
+  });
   it('parses safe granted producers and separate enrichment counts without asserting coverage', () => {
     const producer = {
       producerId: '99999999-9999-4999-8999-999999999999',

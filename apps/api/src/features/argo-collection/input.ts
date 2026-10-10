@@ -26,9 +26,11 @@ export interface ArgoConnection {
   applicationOperationsBelongToService: true;
   observedAt: string;
   enrichmentProducers?: EnrichmentProducer[];
+  archiveProducer?: ArchiveProducer | null;
 }
 export function connectionInput(value: unknown) {
   const row = object(value, [
+    'archiveProducerId',
     'enrichmentProducerIds',
     'expectedRevision',
     'sourceId',
@@ -38,6 +40,10 @@ export function connectionInput(value: unknown) {
   if (row.applicationOperationsBelongToService !== true)
     throw new IdentityError(400, 'invalid_request');
   return {
+    archiveProducerId:
+      !Object.hasOwn(row, 'archiveProducerId') || row.archiveProducerId === null
+        ? null
+        : uuid(row.archiveProducerId),
     enrichmentProducerIds: Object.hasOwn(row, 'enrichmentProducerIds')
       ? producerIds(row.enrichmentProducerIds)
       : [],
@@ -49,6 +55,7 @@ export function connectionInput(value: unknown) {
 }
 export function parseConnection(value: unknown): ArgoConnection {
   const row = object(value, [
+    'archiveProducer',
     'enrichmentProducers',
     'workspaceId',
     'serviceId',
@@ -73,6 +80,12 @@ export function parseConnection(value: unknown): ArgoConnection {
   )
     throw new Error('Invalid stored Argo connection');
   return {
+    ...(Object.hasOwn(row, 'archiveProducer')
+      ? {
+          archiveProducer:
+            row.archiveProducer === null ? null : parseArchiveProducer(row.archiveProducer),
+        }
+      : {}),
     ...(Object.hasOwn(row, 'enrichmentProducers')
       ? { enrichmentProducers: parseProducers(row.enrichmentProducers) }
       : {}),
@@ -121,4 +134,18 @@ export function parseProducers(value: unknown): EnrichmentProducer[] {
     .sort((a, b) => a.producerId.localeCompare(b.producerId));
   producerIds(producers.map((p) => p.producerId));
   return producers;
+}
+
+export interface ArchiveProducer {
+  producerId: string;
+  journalId: string;
+  policyReference: string;
+}
+export function parseArchiveProducer(value: unknown): ArchiveProducer {
+  const row = object(value, ['producerId', 'journalId', 'policyReference']);
+  return {
+    producerId: uuid(row.producerId),
+    journalId: uuid(row.journalId),
+    policyReference: text(row.policyReference),
+  };
 }

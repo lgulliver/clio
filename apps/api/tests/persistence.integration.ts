@@ -158,6 +158,25 @@ describe('real PostgreSQL foundation', () => {
     await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
   });
 
+  it('requires archive tables, pins and authority columns for readiness', async () => {
+    for (const [table, column] of [
+      ['argo_archive_journals', 'last_sequence'],
+      ['argo_archive_records', 'archive_fingerprint'],
+      ['argo_receipt_authorities', 'observed_at'],
+      ['argo_archive_buckets', 'tokens'],
+      ['argo_connection_revisions', 'archive_grant'],
+      ['argo_receipts', 'origin_transport'],
+    ]) {
+      await pool.query(`ALTER TABLE ${table} RENAME COLUMN ${column} TO archive_readiness_probe`);
+      try {
+        await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+      } finally {
+        await pool.query(`ALTER TABLE ${table} RENAME COLUMN archive_readiness_probe TO ${column}`);
+      }
+      await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
+    }
+  });
+
   it('detects schema drift even with matching migration history', async () => {
     await pool.query('ALTER TABLE argo_receipts RENAME COLUMN grant_fingerprint TO removed_grant');
     try {

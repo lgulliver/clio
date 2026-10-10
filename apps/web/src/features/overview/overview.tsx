@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Run as ArgoRun, parseRuns as parseArgoRuns } from '../argo-collection/api';
+import { ArchiveHistory } from '../argo-collection/archive-history';
 import { type Run as GitHubRun, parseRuns as parseGitHubRuns } from '../github-collection/api';
 import { ApiError, errorMessage, parseServices, parseWorkspaces, request } from '../identity/api';
 import { useSession } from '../identity/session';
@@ -332,6 +333,7 @@ function ResultHistory({ runs }: { runs: StoredRun[] }) {
           )}
           {'provider' in result && result.provider === 'argocd' && (
             <>
+              {result.archiveSummary && <ArchiveHistory summary={result.archiveSummary} />}
               <p>
                 Receipt observation period: {result.observationPeriod.start ?? 'Unknown start'} to{' '}
                 {result.observationPeriod.end}. Receipt observation does not prove continuous

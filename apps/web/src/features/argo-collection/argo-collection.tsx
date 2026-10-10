@@ -15,6 +15,7 @@ import {
   type Source,
   type Window,
 } from './api';
+import { ArchiveHistory } from './archive-history';
 
 type Props = {
   workspace: Workspace;
@@ -249,7 +250,14 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
               grant.capability === producer.capability &&
               grant.policyReference === producer.policyReference,
           ),
-      ));
+      ) ||
+      (saved.archiveProducer != null &&
+        !(currentSource.archiveProducers ?? []).some(
+          (grant) =>
+            grant.producerId === saved.archiveProducer?.producerId &&
+            grant.journalId === saved.archiveProducer.journalId &&
+            grant.policyReference === saved.archiveProducer.policyReference,
+        )));
 
   return (
     <section
@@ -307,7 +315,15 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                       : {producer.policyReference}.
                     </p>
                   ))}
+                  <p>
+                    {saved.archiveProducer
+                      ? `Source history archive selected: ${saved.archiveProducer.policyReference}.`
+                      : 'No source history archive selected.'}
+                  </p>
                 </>
+              )}
+              {connectionQuery.data.archiveStatus && (
+                <ArchiveHistory summary={connectionQuery.data.archiveStatus} />
               )}
               {editable && configured && (
                 <ConnectionForm
@@ -336,6 +352,10 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                           enrichmentProducers: (granted.enrichmentProducers ?? []).filter((entry) =>
                             draft.enrichmentProducerIds.includes(entry.producerId),
                           ),
+                          archiveProducer:
+                            granted.archiveProducers?.find(
+                              (entry) => entry.producerId === draft.archiveProducerId,
+                            ) ?? null,
                         }),
                       (connection) => {
                         client.setQueryData(connectionKey, {
@@ -494,6 +514,7 @@ type ConnectionDraft = {
   sourceId: string;
   exposurePolicyReference: string | null;
   enrichmentProducerIds: string[];
+  archiveProducerId: string | null;
   applicationOperationsBelongToService: true;
 };
 function ConnectionForm({
@@ -522,6 +543,15 @@ function ConnectionForm({
         )
         .map((entry) => entry.producerId),
     ),
+    [archiveProducerId, setArchiveProducerId] = useState(
+      sources
+        .find((source) => source.sourceId === connection?.sourceId)
+        ?.archiveProducers?.some(
+          (entry) => entry.producerId === connection?.archiveProducer?.producerId,
+        )
+        ? (connection?.archiveProducer?.producerId ?? '')
+        : '',
+    ),
     [assigned, setAssigned] = useState(false),
     [error, setError] = useState('');
   const selected = sources.find((source) => source.sourceId === sourceId);
@@ -531,6 +561,10 @@ function ConnectionForm({
     if (
       !selected ||
       !assigned ||
+      (archiveProducerId !== '' &&
+        !(selected.archiveProducers ?? []).some(
+          (entry) => entry.producerId === archiveProducerId,
+        )) ||
       producerIds.some(
         (producerId) =>
           !(selected.enrichmentProducers ?? []).some((entry) => entry.producerId === producerId),
@@ -547,6 +581,7 @@ function ConnectionForm({
       exposurePolicyReference:
         selected.sourceId === connection?.sourceId ? connection.exposurePolicyReference : null,
       enrichmentProducerIds: [...producerIds].sort(),
+      archiveProducerId: archiveProducerId || null,
       applicationOperationsBelongToService: true,
     });
   }
@@ -563,6 +598,7 @@ function ConnectionForm({
             setSourceId(event.target.value);
             setAssigned(false);
             setProducerIds([]);
+            setArchiveProducerId('');
           }}
         >
           {sources.map((source) => (
@@ -606,6 +642,26 @@ function ConnectionForm({
             exposure exists.
           </p>
         </fieldset>
+        <label className="mt-3 block" htmlFor={`${id}-archive`}>
+          Source history archive
+        </label>
+        <select
+          id={`${id}-archive`}
+          className="field"
+          value={archiveProducerId}
+          onChange={(event) => setArchiveProducerId(event.target.value)}
+        >
+          <option value="">No archive selected</option>
+          {(selected?.archiveProducers ?? []).map((producer) => (
+            <option key={producer.producerId} value={producer.producerId}>
+              {producer.policyReference}
+            </option>
+          ))}
+        </select>
+        <p>
+          A source journal can replay retained observations after outages. Selecting it does not
+          establish complete coverage.
+        </p>
         <label className="mt-3 block">
           <input
             type="checkbox"
@@ -909,6 +965,11 @@ function StoredRun({ run }: { run: Run }) {
           <p>
             Argo transport history incomplete. This does not establish complete metric coverage.
           </p>
+          {result.archiveSummary ? (
+            <ArchiveHistory summary={result.archiveSummary} />
+          ) : (
+            <p>Source archive bounds unavailable in this saved result.</p>
+          )}
           <p>Retained receipts across all dates at cutoff: {result.retainedReceiptCount}.</p>
           <p>
             Retained evidence records across all dates at cutoff: {result.retainedEvidenceCount}.

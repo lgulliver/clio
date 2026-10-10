@@ -72,3 +72,5 @@ The OEMS revision is explicitly pinned in packages/oems/src/contract.ts. The pac
 Clio's licence has not been selected. Public visibility does not grant an open licence; workspace packages are private and marked UNLICENSED. OEMS is separately licensed under Apache 2.0.
 
 Independent Argo consumer exposure and application build provenance use separately scoped producer grants, authenticated ingress, immutable storage and exact cutoff joins. Verification currently uses fictional producers; configure real sources through the [operator guide](docs/providers/argo-enrichment.md). Native health alone leaves production exposure unknown, and metric coverage remains incomplete.
+
+Durable [Argo source journals](docs/providers/argo-history.md) retain original observations before delivery and support bounded outage replay through independently authorized historical import. Settings and Overview show sealed capture bounds separately from reporting windows and evidence cutoffs. Run `pnpm argo:journal help` for the local operator CLI. Real continuous capture requires an operator-integrated producer; replay does not establish complete coverage.

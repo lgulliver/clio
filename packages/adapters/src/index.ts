@@ -1,3 +1,9 @@
+export type { ArchiveEntry, ArchiveRecord, ArchiveSeal } from './argo-archive.ts';
+export {
+  archiveRecordDigest,
+  parseArchiveRecord,
+  parseHistoricalArgoNotification,
+} from './argo-archive.ts';
 export type {
   ArgoEnrichment,
   ArgoEnrichmentEvidence,

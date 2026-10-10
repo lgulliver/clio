@@ -1,6 +1,6 @@
 # Durable Argo history and outage reconciliation
 
-Status: proposed for maintainer review. This document defines a new historical acquisition boundary; no implementation or complete coverage is claimed.
+Status: approved by maintainer, 2026-10-10. The maintainer instructed continuous implementation. This document defines the historical acquisition boundary; verification is recorded separately and no complete coverage is claimed.
 
 Base: `5b9a70633c38b9bd79ba92861e6032404161366a`. OEMS remains pinned to `5908bb12cdf24e7528088237dff9dca4c10ff45f`.
 

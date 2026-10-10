@@ -5,7 +5,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
 import { WorkspacePage } from '../workspace/workspace-page';
 import { ArgoCollection } from './argo-collection';
-import { completed, connection, json, queued, scope, source } from './fixtures.test-support';
+import {
+  archiveProducer,
+  archiveSummary,
+  completed,
+  connection,
+  json,
+  queued,
+  scope,
+  source,
+} from './fixtures.test-support';
 
 const identity = vi.hoisted(() => ({ revision: 1, valid: true, expire: vi.fn() }));
 vi.mock('../identity/session', () => ({
@@ -80,6 +89,54 @@ beforeEach(() => {
 });
 
 describe('live Argo workflow', () => {
+  it('member reads sealed capture bounds and missing intervals without archive write controls', async () => {
+    const captured = { ...completed, result: { ...completed.result, archiveSummary } };
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-collection-runs')
+        ? json({ runs: [captured] })
+        : String(input).endsWith(`/${completed.id}`)
+          ? json({ run: captured })
+          : defaultRead(input),
+    );
+    mount(false);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: `View run ${completed.createdAt}` }));
+    const detail = await screen.findByRole('region', { name: 'Live Argo run detail' });
+    expect(within(detail).getByText(/Sealed capture interval: 2026-01-01T01:00:00Z/)).toBeVisible();
+    expect(within(detail).getByText(/Archive gaps: 1.*Missing capture intervals: 1/)).toBeVisible();
+    expect(within(detail).getByText(/Metric evidence uses current grants/)).toBeVisible();
+    expect(within(detail).getByText(/Coverage remains incomplete/)).toBeVisible();
+    expect(screen.queryByLabelText('Source history archive')).not.toBeInTheDocument();
+    expect(posts()).toHaveLength(0);
+  });
+  it('owner selects only granted archive and save acknowledgement preserves exact selection', async () => {
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST'
+        ? json({
+            connection: { ...connection, revision: 2, enrichmentProducers: [], archiveProducer },
+          })
+        : String(input).endsWith('/argo-connection')
+          ? json({
+              connection,
+              configured: true,
+              sources: [{ ...source, archiveProducers: [archiveProducer] }],
+            })
+          : defaultRead(input),
+    );
+    mount();
+    const user = userEvent.setup();
+    await user.selectOptions(
+      await screen.findByLabelText('Source history archive'),
+      archiveProducer.producerId,
+    );
+    await user.click(screen.getByRole('checkbox', { name: /I assign all deployment operations/ }));
+    await user.click(screen.getByRole('button', { name: 'Save Argo connection' }));
+    await screen.findByText('Argo connection saved.');
+    expect(JSON.parse(String(posts()[0]?.[1]?.body)).archiveProducerId).toBe(
+      archiveProducer.producerId,
+    );
+  });
   it('member reads connection/history/detail and honest zero provisional count without write controls', async () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).endsWith('/argo-collection-runs')
@@ -279,6 +336,7 @@ describe('live Argo workflow', () => {
     expect(JSON.parse(String(posts()[0]?.[1]?.body))).toEqual({
       expectedRevision: 1,
       sourceId: source.sourceId,
+      archiveProducerId: null,
       applicationOperationsBelongToService: true,
       exposurePolicyReference: null,
       enrichmentProducerIds: [producer.producerId],
@@ -1000,6 +1058,7 @@ describe('live Argo workflow', () => {
     expect(JSON.parse(String(posts()[0]?.[1]?.body))).toEqual({
       expectedRevision: 1,
       sourceId: second.sourceId,
+      archiveProducerId: null,
       enrichmentProducerIds: [],
       exposurePolicyReference: null,
       applicationOperationsBelongToService: true,

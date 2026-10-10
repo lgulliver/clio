@@ -6,11 +6,19 @@ import {
   reconcileDeployments,
 } from '@clio/adapters';
 import { calculate, oemsContract } from '@clio/oems';
+import type { ArchiveSummary } from './archive-summary.ts';
 import { boundedJson } from './history.ts';
 import { type ArgoConnection, instant, timestamp, type windowInput } from './input.ts';
 import { parseResult } from './result.ts';
 
 export function captureArgo(input: {
+  archiveSummary?: ArchiveSummary;
+  archiveLineages?: {
+    receiptId: string;
+    sourceRef: string;
+    observedAt: string;
+    capturedAt: string;
+  }[];
   runId: string;
   connection: ArgoConnection;
   serviceName: string;
@@ -41,6 +49,13 @@ export function captureArgo(input: {
   ]) {
     if (instant(observation.observedAt) > instant(evidenceCutoff))
       throw new Error('Evidence observed after acquisition');
+  }
+  for (const lineage of input.archiveLineages ?? []) {
+    if (
+      instant(lineage.observedAt) > instant(evidenceCutoff) ||
+      instant(lineage.capturedAt) > instant(lineage.observedAt)
+    )
+      throw new Error('Archive lineage observed after acquisition');
   }
   const reconciled = reconcileDeployments({
     datasetId: identity('live-argocd', input.runId),
@@ -95,6 +110,7 @@ export function captureArgo(input: {
     throw new Error('Unexpected Argo coverage');
   const result = parseResult(
     {
+      ...(input.archiveSummary ? { archiveSummary: input.archiveSummary } : {}),
       mode: 'live',
       workspaceId: connection.workspaceId,
       serviceId: connection.serviceId,
@@ -135,6 +151,7 @@ export function captureArgo(input: {
     window,
   );
   // Keep each exact grant scope once. Receipt events already carry the source/producer lookup key.
+  if (Buffer.byteLength(JSON.stringify(result)) > 65536) throw new Error('Argo result limit');
   const enrichmentScopes = new Map<string, ArgoEnrichmentEvidence['scope']>();
   const argoEnrichments = (input.argoEnrichments ?? []).map(({ scope, ...receipt }) => {
     const key = identity(scope.sourceId, scope.producerId);
@@ -147,6 +164,7 @@ export function captureArgo(input: {
   const capture = {
     evidence: {
       ...evidence,
+      ...(input.archiveLineages ? { argoArchiveLineages: input.archiveLineages } : {}),
       argoEnrichments,
       argoEnrichmentScopes: [...enrichmentScopes]
         .sort(([a], [b]) => a.localeCompare(b))

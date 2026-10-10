@@ -145,3 +145,6 @@ Polling/backfill, automatic UUID enrichment, complete delivery coverage and host
 Follow the [independent evidence setup guide](argo-enrichment.md) to configure consumer-exposure and build-provenance producers. Their receiver, storage and cutoff joins are implemented and verified with fictional producers. Native notification setup alone does not enable an exposure signal.
 
 Read [provider rate limits](rate-limits.md) for shared cooldowns, retry behavior, ingress budgets and current collection-cost limits.
+## Retained history
+
+Use [source history and outage recovery](argo-history.md) for the distinct operation archive capability. A durable source journal retains observations before delivery and replays them through historical import with current receiver availability. Existing live observation timing rules remain unchanged. The archive's sealed capture bounds do not establish complete metric coverage or recover operations from before journal startup.

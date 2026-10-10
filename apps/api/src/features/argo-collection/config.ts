@@ -14,7 +14,14 @@ export interface ArgoProducerGrant extends ArgoEnrichmentScope {
   readonly tokenDigest: string;
   readonly fingerprint: string;
 }
+export interface ArgoArchiveGrant extends ArgoGrant {
+  readonly producerId: string;
+  readonly journalId: string;
+  readonly policyReference: string;
+  readonly capability: 'operation_archive';
+}
 export interface ArgoConfig {
+  readonly archives?: readonly ArgoArchiveGrant[];
   readonly producers?: readonly ArgoProducerGrant[];
   readonly grants: readonly ArgoGrant[];
 }
@@ -102,7 +109,7 @@ async function privateFile(path: string, maxBytes: number) {
 
 export async function readArgoConfig(env: NodeJS.ProcessEnv): Promise<ArgoConfig | null> {
   if (env.ARGO_INGESTION_GRANTS_FILE === undefined) {
-    if (env.ARGO_ENRICHMENT_GRANTS_FILE !== undefined)
+    if (env.ARGO_ENRICHMENT_GRANTS_FILE !== undefined || env.ARGO_ARCHIVE_GRANTS_FILE !== undefined)
       throw new Error('Invalid Argo ingestion configuration');
     return null;
   }
@@ -177,7 +184,57 @@ export async function readArgoConfig(env: NodeJS.ProcessEnv): Promise<ArgoConfig
         );
       }
     }
-    return Object.freeze({ grants: Object.freeze(grants), producers: Object.freeze(producers) });
+    const archives: ArgoArchiveGrant[] = [];
+    if (env.ARGO_ARCHIVE_GRANTS_FILE !== undefined) {
+      const entries: unknown = JSON.parse(await privateFile(env.ARGO_ARCHIVE_GRANTS_FILE, 262144));
+      if (!Array.isArray(entries) || entries.length > 100) throw new Error('Invalid config');
+      const ids = new Set([...sources, ...producers.map((p) => p.producerId)]),
+        journals = new Set<string>();
+      for (const entry of entries) {
+        const row = object(entry, [
+          ...scopeKeys,
+          'producerId',
+          'journalId',
+          'policyReference',
+          'capability',
+          'tokenFile',
+        ]);
+        const { producerId, journalId, policyReference, capability, tokenFile, ...rawScope } = row;
+        const scope = parseScope(rawScope),
+          native = grants.find((g) => g.sourceId === scope.sourceId);
+        if (
+          !native ||
+          JSON.stringify(scopeFor(native)) !== JSON.stringify(scope) ||
+          capability !== 'operation_archive'
+        )
+          throw new Error('Invalid archive scope');
+        const id = uuid(producerId),
+          journal = uuid(journalId),
+          policy = text(policyReference);
+        const token = await privateFile(text(tokenFile, 4096), 65);
+        if (!/^[0-9a-f]{64}\n?$/.test(token)) throw new Error('Invalid token');
+        const tokenDigest = digest(token.trim());
+        if (ids.has(id) || journals.has(journal) || tokens.has(tokenDigest))
+          throw new Error('Duplicate grant');
+        ids.add(id);
+        journals.add(journal);
+        tokens.add(tokenDigest);
+        const archive = {
+          ...scope,
+          producerId: id,
+          journalId: journal,
+          policyReference: policy,
+          capability: 'operation_archive' as const,
+          tokenDigest,
+        };
+        archives.push(Object.freeze({ ...archive, fingerprint: digest(JSON.stringify(archive)) }));
+      }
+    }
+    return Object.freeze({
+      grants: Object.freeze(grants),
+      producers: Object.freeze(producers),
+      archives: Object.freeze(archives),
+    });
   } catch {
     throw new Error('Invalid Argo ingestion configuration');
   }

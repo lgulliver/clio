@@ -2,6 +2,21 @@ import { oemsContract } from '@clio/oems/contract';
 import { ApiError, record } from '../identity/api';
 
 export type Scope = { workspaceId: string; serviceId: string };
+export type ArchiveProducer = {
+  producerId: string;
+  journalId: string;
+  policyReference: string;
+};
+export type ArchiveSummary = ArchiveProducer & {
+  lastSequence: number;
+  lastSuccessfulReconciliationAt: string | null;
+  sealedInterval: { start: string; end: string } | null;
+  entryCount: number;
+  gapCount: number;
+  missingIntervalCount: number;
+  missingIntervals: { start: string; end: string; reason: string }[];
+  omittedIntervalCount: number;
+};
 export type EnrichmentProducer = {
   producerId: string;
   capability: 'consumer_exposure' | 'application_provenance';
@@ -19,6 +34,7 @@ export type Connection = Scope & {
   productionEnvironment: string;
   exposurePolicyReference: string | null;
   enrichmentProducers?: EnrichmentProducer[];
+  archiveProducer?: ArchiveProducer | null;
   applicationOperationsBelongToService: true;
   observedAt: string;
 };
@@ -29,6 +45,7 @@ export type Source = {
   instance: string;
   environment: string;
   enrichmentProducers?: EnrichmentProducer[];
+  archiveProducers?: ArchiveProducer[];
 };
 export type Window = { start: string; end: string };
 export type Result = Scope & {
@@ -39,6 +56,7 @@ export type Result = Scope & {
   window: Window & { timezone: 'UTC'; calendarDays: number };
   evidenceCutoff: string;
   transportComplete: false;
+  archiveSummary?: ArchiveSummary;
   enrichmentSummary?: {
     retainedReceiptCount: number;
     consumerExposureCount: number;
@@ -171,6 +189,86 @@ function producers(value: unknown): EnrichmentProducer[] {
     return fail();
   return result;
 }
+function archiveProducer(value: unknown): ArchiveProducer {
+  const row = exact(value, ['producerId', 'journalId', 'policyReference']);
+  return {
+    producerId: uuid(row.producerId),
+    journalId: uuid(row.journalId),
+    policyReference: text(row.policyReference),
+  };
+}
+function archives(value: unknown): ArchiveProducer[] {
+  if (!Array.isArray(value) || value.length > 100) return fail();
+  const parsed = value.map((row: unknown) => archiveProducer(row));
+  if (new Set(parsed.map((row) => row.producerId.toLowerCase())).size !== parsed.length)
+    return fail();
+  return parsed;
+}
+function archiveSummary(value: unknown, cutoff?: string): ArchiveSummary {
+  const row = exact(value, [
+    'producerId',
+    'journalId',
+    'policyReference',
+    'lastSequence',
+    'lastSuccessfulReconciliationAt',
+    'sealedInterval',
+    'entryCount',
+    'gapCount',
+    'missingIntervalCount',
+    'missingIntervals',
+    'omittedIntervalCount',
+  ]);
+  const producer = archiveProducer({
+    producerId: row.producerId,
+    journalId: row.journalId,
+    policyReference: row.policyReference,
+  });
+  const lastSequence = integer(row.lastSequence),
+    entryCount = integer(row.entryCount),
+    gapCount = integer(row.gapCount);
+  const missingIntervalCount = integer(row.missingIntervalCount),
+    omittedIntervalCount = integer(row.omittedIntervalCount);
+  const lastSuccessfulReconciliationAt =
+    row.lastSuccessfulReconciliationAt === null
+      ? null
+      : timestamp(row.lastSuccessfulReconciliationAt);
+  function interval(value: unknown) {
+    const r = exact(value, ['start', 'end']),
+      start = timestamp(r.start),
+      end = timestamp(r.end);
+    if (instant(start) >= instant(end) || (cutoff && instant(end) > instant(cutoff))) return fail();
+    return { start, end };
+  }
+  const sealedInterval = row.sealedInterval === null ? null : interval(row.sealedInterval);
+  if (!Array.isArray(row.missingIntervals) || row.missingIntervals.length > 32) return fail();
+  const missingIntervals = row.missingIntervals.map((value: unknown) => {
+    const r = exact(value, ['start', 'end', 'reason']);
+    return { ...interval({ start: r.start, end: r.end }), reason: text(r.reason) };
+  });
+  if (
+    lastSequence > 5000 ||
+    entryCount > lastSequence ||
+    gapCount > entryCount ||
+    missingIntervalCount !== missingIntervals.length + omittedIntervalCount ||
+    (sealedInterval === null) !== (lastSuccessfulReconciliationAt === null) ||
+    (lastSuccessfulReconciliationAt !== null &&
+      ((cutoff && instant(lastSuccessfulReconciliationAt) > instant(cutoff)) ||
+        (sealedInterval !== null &&
+          instant(sealedInterval.end) > instant(lastSuccessfulReconciliationAt))))
+  )
+    return fail();
+  return {
+    ...producer,
+    lastSequence,
+    lastSuccessfulReconciliationAt,
+    sealedInterval,
+    entryCount,
+    gapCount,
+    missingIntervalCount,
+    missingIntervals,
+    omittedIntervalCount,
+  };
+}
 function enrichmentSummary(value: unknown) {
   const row = exact(value, [
     'retainedReceiptCount',
@@ -197,6 +295,7 @@ function connection(value: unknown, scope: Scope): Connection {
   const raw = record(value);
   const item = exact(value, [
     ...(Object.hasOwn(raw, 'enrichmentProducers') ? ['enrichmentProducers'] : []),
+    ...(Object.hasOwn(raw, 'archiveProducer') ? ['archiveProducer'] : []),
     'workspaceId',
     'serviceId',
     'mode',
@@ -238,12 +337,19 @@ function connection(value: unknown, scope: Scope): Connection {
     ...(Object.hasOwn(item, 'enrichmentProducers')
       ? { enrichmentProducers: producers(item.enrichmentProducers) }
       : {}),
+    ...(Object.hasOwn(item, 'archiveProducer')
+      ? {
+          archiveProducer:
+            item.archiveProducer === null ? null : archiveProducer(item.archiveProducer),
+        }
+      : {}),
   };
 }
 function source(value: unknown): Source {
   const raw = record(value);
   const item = exact(value, [
     ...(Object.hasOwn(raw, 'enrichmentProducers') ? ['enrichmentProducers'] : []),
+    ...(Object.hasOwn(raw, 'archiveProducers') ? ['archiveProducers'] : []),
     'sourceId',
     'applicationName',
     'applicationNamespace',
@@ -259,13 +365,27 @@ function source(value: unknown): Source {
     ...(Object.hasOwn(item, 'enrichmentProducers')
       ? { enrichmentProducers: producers(item.enrichmentProducers) }
       : {}),
+    ...(Object.hasOwn(item, 'archiveProducers')
+      ? { archiveProducers: archives(item.archiveProducers) }
+      : {}),
   };
 }
 export function parseConnection(
   value: unknown,
   scope: Scope,
-): { connection: Connection | null; configured: boolean; sources: Source[] } {
-  const item = exact(value, ['connection', 'configured', 'sources']);
+): {
+  connection: Connection | null;
+  configured: boolean;
+  sources: Source[];
+  archiveStatus?: ArchiveSummary | null;
+} {
+  const raw = record(value);
+  const item = exact(value, [
+    'connection',
+    'configured',
+    'sources',
+    ...(Object.hasOwn(raw, 'archiveStatus') ? ['archiveStatus'] : []),
+  ]);
   if (
     typeof item.configured !== 'boolean' ||
     !Array.isArray(item.sources) ||
@@ -282,6 +402,9 @@ export function parseConnection(
     connection: item.connection === null ? null : connection(item.connection, scope),
     configured: item.configured,
     sources,
+    ...(Object.hasOwn(item, 'archiveStatus')
+      ? { archiveStatus: item.archiveStatus === null ? null : archiveSummary(item.archiveStatus) }
+      : {}),
   };
 }
 export function parseSavedConnection(
@@ -298,6 +421,7 @@ export function parseSavedConnection(
     | 'productionEnvironment'
     | 'exposurePolicyReference'
     | 'enrichmentProducers'
+    | 'archiveProducer'
   >,
 ): Connection {
   const parsed = connection(exact(value, ['connection']).connection, scope);
@@ -312,7 +436,10 @@ export function parseSavedConnection(
       parsed.exposurePolicyReference !== expected.exposurePolicyReference ||
       (expected.enrichmentProducers !== undefined &&
         JSON.stringify(parsed.enrichmentProducers ?? []) !==
-          JSON.stringify(expected.enrichmentProducers)))
+          JSON.stringify(expected.enrichmentProducers)) ||
+      (expected.archiveProducer !== undefined &&
+        JSON.stringify(parsed.archiveProducer ?? null) !==
+          JSON.stringify(expected.archiveProducer)))
   )
     return fail();
   return parsed;
@@ -321,6 +448,7 @@ function result(value: unknown, scope: Scope, revision: number): Result {
   const raw = record(value);
   const item = exact(value, [
     ...(Object.hasOwn(raw, 'enrichmentSummary') ? ['enrichmentSummary'] : []),
+    ...(Object.hasOwn(raw, 'archiveSummary') ? ['archiveSummary'] : []),
     'mode',
     'provider',
     'workspaceId',
@@ -465,6 +593,9 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     failedDeploymentRecoveryTime: null,
     ...(Object.hasOwn(item, 'enrichmentSummary')
       ? { enrichmentSummary: enrichmentSummary(item.enrichmentSummary) }
+      : {}),
+    ...(Object.hasOwn(item, 'archiveSummary')
+      ? { archiveSummary: archiveSummary(item.archiveSummary, evidenceCutoff) }
       : {}),
   };
 }

@@ -5,6 +5,8 @@ import { withTransaction } from '../../db/pool.ts';
 import { storedRevision } from '../github-collection/db-value.ts';
 import { snapshotDigest } from '../github-collection/digest.ts';
 import { name, uuid } from '../identity/input.ts';
+import { eligibleArchive } from './archive-grants.ts';
+import { archiveSummary } from './archive-summary.ts';
 import { captureArgo } from './capture.ts';
 import { type ArgoConfig, grantFor, parseScope, scopeFor } from './config.ts';
 import { eligibleProducers } from './enrichment-grants.ts';
@@ -59,8 +61,10 @@ export function createArgoWorker(
       connection.workspaceId,
       connection.serviceId,
     );
+    const archive = latest ? eligibleArchive(config, connection, latest.archive) : undefined;
     const producers = latest ? eligibleProducers(config, connection, latest.producers) : null;
     if (
+      archive === undefined ||
       producers === null ||
       !config ||
       !grant ||
@@ -71,7 +75,7 @@ export function createArgoWorker(
       !isDeepStrictEqual(latest.scope, scopeFor(grant))
     )
       throw new Revoked();
-    return { connection, window, serviceName, config, grant, producers };
+    return { connection, window, serviceName, config, grant, producers, archive };
   }
   async function locked<T>(
     claim: Claim,
@@ -117,13 +121,16 @@ export function createArgoWorker(
             cutoff = timestamp(time.rows[0]?.observed);
           const scope = scopeFor(input.grant);
           const found = await client.query<Record<string, unknown>>(
-            'SELECT evidence,reason,scope FROM argo_receipts WHERE source_id=$1 AND workspace_id=$2 AND service_id=$3 AND grant_fingerprint=$4 AND observed_at<=$5 ORDER BY observed_at,id LIMIT 5001',
+            `SELECT r.evidence,r.reason,r.scope,to_char(a.available AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS available FROM argo_receipts r JOIN LATERAL (SELECT observed_at AS available FROM argo_receipt_authorities WHERE receipt_id=r.id AND native_fingerprint=$4 AND observed_at<=$5 AND (kind='live' OR (archive_fingerprint=$6 AND journal_id=$7 AND producer_id=$8)) UNION ALL SELECT r.observed_at WHERE r.origin_transport='live' AND r.observed_at<=$5 ORDER BY available LIMIT 1) a ON true WHERE r.source_id=$1 AND r.workspace_id=$2 AND r.service_id=$3 AND r.grant_fingerprint=$4 ORDER BY a.available,r.id LIMIT 5001`,
             [
               input.grant.sourceId,
               input.connection.workspaceId,
               input.connection.serviceId,
               input.grant.fingerprint,
               cutoff,
+              input.archive?.fingerprint ?? null,
+              input.archive?.journalId ?? null,
+              input.archive?.producerId ?? null,
             ],
           );
           if (found.rows.length > maxRows) throw new Error('Argo storage limit');
@@ -139,7 +146,17 @@ export function createArgoWorker(
               reasons[row.reason] = (reasons[row.reason] ?? 0) + 1;
             } else {
               const batch = parseEvidence(row.evidence, scope);
-              batches.push(batch);
+              const observedAt = timestamp(row.available);
+              batches.push({
+                deployments: batch.deployments.map((r) => ({
+                  ...r,
+                  observedAt,
+                })),
+                statuses: batch.statuses.map((r) => ({
+                  ...r,
+                  observedAt,
+                })),
+              });
               retainedEvidenceCount += batch.deployments.length + batch.statuses.length;
             }
           }
@@ -172,12 +189,37 @@ export function createArgoWorker(
             `SELECT to_char(first_observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM argo_source_state WHERE source_id=$1`,
             [input.grant.sourceId],
           );
+          const archiveLineageRows = input.archive
+            ? await client.query<Record<string, unknown>>(
+                `SELECT receipt_id,sequence::text AS sequence,to_char(received_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed,to_char(captured_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS captured FROM argo_archive_records WHERE source_id=$1 AND native_fingerprint=$2 AND archive_fingerprint=$3 AND journal_id=$4 AND producer_id=$5 AND received_at<=$6 AND receipt_id IS NOT NULL ORDER BY sequence LIMIT 5001`,
+                [
+                  input.grant.sourceId,
+                  input.grant.fingerprint,
+                  input.archive.fingerprint,
+                  input.archive.journalId,
+                  input.archive.producerId,
+                  cutoff,
+                ],
+              )
+            : null;
+          if (archiveLineageRows && archiveLineageRows.rows.length > maxRows)
+            throw new Error('Archive storage limit');
+          const archiveLineages = archiveLineageRows?.rows.map((row) => ({
+            receiptId: uuid(row.receipt_id),
+            sourceRef: `urn:clio:argo-archive:${input.archive?.producerId}:${input.archive?.journalId}:${storedRevision(row.sequence)}`,
+            observedAt: timestamp(row.observed),
+            capturedAt: timestamp(row.captured),
+          }));
           const capture = captureArgo({
             runId: claim.id,
             ...input,
             evidence: mergeHistory(batches),
             argoEnrichments,
             databaseObservedAt: cutoff,
+            ...(archiveLineages ? { archiveLineages } : {}),
+            ...(input.archive
+              ? { archiveSummary: await archiveSummary(client, input.archive, cutoff) }
+              : {}),
             stats: {
               retainedReceiptCount: found.rows.length,
               retainedEvidenceCount,
@@ -222,6 +264,17 @@ export function createArgoWorker(
           );
           if (
             fresh?.fingerprint !== input.grant.fingerprint ||
+            eligibleArchive(
+              freshConfig,
+              input.connection,
+              (
+                await latestConnection(
+                  client,
+                  input.connection.workspaceId,
+                  input.connection.serviceId,
+                )
+              )?.archive ?? null,
+            ) === undefined ||
             eligibleProducers(
               freshConfig,
               input.connection,

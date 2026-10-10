@@ -151,7 +151,7 @@ Live deployment counts are provisional. Unknown qualification and incomplete col
 | --- | --- | --- |
 | GitHub OAuth | Real sign-in and database sessions | Separate from collection credentials |
 | GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow, broader metric evidence and scheduling |
-| Argo CD operations | Separate scoped native notification ingress, immutable receipt/gap history, closed UTC snapshot worker and browser results | Polling/backfill, automatic operation UUIDs, real independent exposure/provenance producers and complete coverage |
+| Argo CD operations | Scoped native notifications, durable source journal/historical import, immutable receipt/gap history, closed UTC snapshots and browser reporting bounds | Real continuous journal capture, outbound polling, automatic operation UUIDs, independent exposure/provenance producers and complete coverage |
 | Optional Kind/Argo sandbox | Independent controller and native producer verification environment | Requires deliberate private grant/producer setup to connect; never supplies mock runs |
 | Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and historical repository labels |
 
@@ -182,3 +182,5 @@ For native Argo evidence, identify Argo instance, destination cluster and applic
 For repository verification, `pnpm check` runs lint, types, behavior tests and build. Database integration tests are separate and require `CLIO_TEST_DATABASE_URL`; see [API verification](../apps/api/README.md#verification). These checks do not collect live provider evidence.
 
 For a reproducible independent build/activation exercise, follow the [Argo artifact evidence walkthrough](providers/argo-evidence-demo.md). It uses a dedicated sandbox service and separate producer credentials.
+
+For retained original operation observations and receiver-outage replay, follow [Argo source history](providers/argo-history.md). Configure a separate archive producer, retain observations before delivery, select it in Settings and inspect sealed capture bounds separately from the reporting window and evidence cutoff. Real continuous capture requires an operator-integrated producer; journal replay does not make metric coverage complete.

@@ -10,6 +10,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { IdentityError, object, uuid } from '../identity/input.ts';
+import { registerArchiveIngress } from './archive-ingress.ts';
 import { type ArgoConfig, type ArgoGrant, digest, grantFor, scopeFor } from './config.ts';
 import { registerEnrichmentIngress } from './enrichment-ingress.ts';
 import { boundedJson, maxBytes, maxRows, parseEvidence } from './history.ts';
@@ -72,6 +73,7 @@ export function registerArgoIngress(
       });
     });
     registerEnrichmentIngress(routes, dependencies.pool, configNow);
+    registerArchiveIngress(routes, dependencies.pool, configNow);
     routes.post(
       '/api/argo/sources/:sourceId/operations',
       {
@@ -138,11 +140,44 @@ export async function acceptReceipt(
       return { error: 400 };
     }
     const found = await client.query<Record<string, unknown>>(
-      `SELECT id,to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM argo_receipts WHERE source_id=$1 AND grant_fingerprint=$2 AND digest=$3`,
+      `SELECT id,origin_transport,to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM argo_receipts WHERE source_id=$1 AND grant_fingerprint=$2 AND digest=$3`,
       [grant.sourceId, grant.fingerprint, key],
     );
     const replay = found.rows[0];
-    if (replay) return { receiptId: uuid(replay.id), observedAt: timestamp(replay.observed) };
+    if (replay) {
+      const receiptId = uuid(replay.id);
+      const live = await client.query<Record<string, unknown>>(
+        `SELECT to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM argo_receipt_authorities WHERE receipt_id=$1 AND kind='live'`,
+        [receiptId],
+      );
+      if (!live.rows[0] && replay.origin_transport === 'live')
+        return { receiptId, observedAt: timestamp(replay.observed) };
+      if (live.rows[0]) return { receiptId, observedAt: timestamp(live.rows[0].observed) };
+      const time = await client.query<Record<string, unknown>>(
+          `SELECT ${databaseTime} AS observed`,
+        ),
+        observedAt = timestamp(time.rows[0]?.observed);
+      let notification: ArgoNotification;
+      try {
+        notification = parseArgoNotification(input, scope, observedAt);
+      } catch {
+        return { error: 400 };
+      }
+      if (notification.kind !== 'operation') return { error: 400 };
+      if (count(state.retained_rows) + 1 > maxRows || count(state.retained_bytes) + 1536 > maxBytes)
+        return { error: 503 };
+      if (grantFor(configNow(), grant.sourceId)?.fingerprint !== grant.fingerprint)
+        throw new IdentityError(409, 'conflict');
+      await client.query(
+        "INSERT INTO argo_receipt_authorities(receipt_id,kind,authority_id,native_fingerprint,observed_at) VALUES($1,'live',$1,$2,$3)",
+        [receiptId, grant.fingerprint, observedAt],
+      );
+      await client.query(
+        'UPDATE argo_source_state SET retained_rows=retained_rows+1,retained_bytes=retained_bytes+1536 WHERE source_id=$1',
+        [grant.sourceId],
+      );
+      return { receiptId, observedAt };
+    }
     const time = await client.query<Record<string, unknown>>(`SELECT ${databaseTime} AS observed`),
       observedAt = timestamp(time.rows[0]?.observed);
     let notification: ArgoNotification;
@@ -164,6 +199,16 @@ export async function acceptReceipt(
         throw new IdentityError(409, 'conflict');
     }
     if (notification.kind === 'operation') {
+      const identity = await client.query<Record<string, unknown>>(
+        'SELECT grant_fingerprint FROM argo_receipts WHERE source_id=$1 AND application_uid=$2 AND operation_id=$3 AND notification_revision=$4 AND evidence IS NOT NULL',
+        [
+          grant.sourceId,
+          grant.applicationUid,
+          notification.operationId,
+          notification.notificationRevision,
+        ],
+      );
+      if (identity.rows.length) throw new IdentityError(409, 'conflict');
       const combos = await client.query<Record<string, unknown>>(
         'SELECT phase,health FROM argo_receipts WHERE source_id=$1 AND application_uid=$2 AND operation_id=$3 AND evidence IS NOT NULL',
         [grant.sourceId, grant.applicationUid, notification.operationId],
@@ -225,6 +270,8 @@ export async function acceptReceipt(
         evidenceJson,
       ],
     );
+    if (grantFor(configNow(), grant.sourceId)?.fingerprint !== grant.fingerprint)
+      throw new IdentityError(409, 'conflict');
     await client.query(
       'UPDATE argo_source_state SET retained_rows=retained_rows+$2,retained_bytes=retained_bytes+$3,first_observed_at=coalesce(first_observed_at,$4) WHERE source_id=$1',
       [grant.sourceId, rows, bytes, observedAt],

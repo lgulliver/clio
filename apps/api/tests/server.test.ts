@@ -15,6 +15,15 @@ describe('health-only API', () => {
       expect(response.statusCode).toBe(401);
       expect(response.json()).toEqual({ error: 'unauthorized' });
       expect(response.headers['cache-control']).toBe('no-store');
+      const archive = await server.inject({
+        method: 'POST',
+        url: '/api/argo/sources/11111111-1111-4111-8111-111111111111/archives/22222222-2222-4222-8222-222222222222',
+        headers: { 'content-type': 'application/json' },
+        payload: '{broken',
+      });
+      expect(archive.statusCode).toBe(401);
+      expect(archive.json()).toEqual({ error: 'unauthorized' });
+      expect(archive.headers['cache-control']).toBe('no-store');
       for (const path of ['argo-connection', 'argo-collection-runs']) {
         const browser = await server.inject(
           `/api/workspaces/22222222-2222-4222-8222-222222222222/services/33333333-3333-4333-8333-333333333333/${path}`,
