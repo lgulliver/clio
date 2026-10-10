@@ -70,3 +70,5 @@ Codex and Claude project specialists share [team guidance](docs/agents/team.md),
 The OEMS revision is explicitly pinned in packages/oems/src/contract.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. Do not duplicate metric semantics in application code.
 
 Clio's licence has not been selected. Public visibility does not grant an open licence; workspace packages are private and marked UNLICENSED. OEMS is separately licensed under Apache 2.0.
+
+Independent Argo consumer exposure and application build provenance use separately scoped producer grants, authenticated ingress, immutable storage and exact cutoff joins. Verification currently uses fictional producers; configure real sources through the [operator guide](docs/providers/argo-enrichment.md). Native health alone leaves production exposure unknown, and metric coverage remains incomplete.

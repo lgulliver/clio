@@ -1,6 +1,6 @@
 # Getting started locally
 
-This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider or populate real overview measurements. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers.
+This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider or populate real overview measurements. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md).
 
 ## Prerequisites and clone
 

@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { IdentityError, object, uuid } from '../identity/input.ts';
 import { type ArgoConfig, type ArgoGrant, digest, grantFor, scopeFor } from './config.ts';
+import { registerEnrichmentIngress } from './enrichment-ingress.ts';
 import { boundedJson, maxBytes, maxRows, parseEvidence } from './history.ts';
 import { count, timestamp } from './input.ts';
 import { operationMetadata } from './metadata.ts';
@@ -70,6 +71,7 @@ export function registerArgoIngress(
               : 'invalid_request',
       });
     });
+    registerEnrichmentIngress(routes, dependencies.pool, configNow);
     routes.post(
       '/api/argo/sources/:sourceId/operations',
       {

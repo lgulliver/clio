@@ -240,7 +240,16 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
       currentSource.applicationName !== saved.applicationName ||
       currentSource.applicationNamespace !== saved.applicationNamespace ||
       currentSource.instance !== saved.instance ||
-      currentSource.environment !== saved.productionEnvironment);
+      currentSource.environment !== saved.productionEnvironment ||
+      (saved.enrichmentProducers ?? []).some(
+        (producer) =>
+          !(currentSource.enrichmentProducers ?? []).some(
+            (grant) =>
+              grant.producerId === producer.producerId &&
+              grant.capability === producer.capability &&
+              grant.policyReference === producer.policyReference,
+          ),
+      ));
 
   return (
     <section
@@ -280,10 +289,24 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                     Saved at {saved.observedAt}.
                   </p>
                   <p>
-                    Exposure policy:{' '}
-                    {saved.exposurePolicyReference ??
-                      'Not supplied; production exposure remains unknown.'}
+                    {(saved.enrichmentProducers ?? []).length === 0
+                      ? 'No independent evidence producers selected; native Argo status leaves production exposure unknown.'
+                      : `Independent evidence producers selected: ${saved.enrichmentProducers?.length}.`}
                   </p>
+                  {saved.exposurePolicyReference && (
+                    <p>
+                      Legacy native policy reference: {saved.exposurePolicyReference}. Native status
+                      alone does not confirm exposure.
+                    </p>
+                  )}
+                  {(saved.enrichmentProducers ?? []).map((producer) => (
+                    <p key={producer.producerId}>
+                      {producer.capability === 'consumer_exposure'
+                        ? 'Consumer exposure'
+                        : 'Build provenance'}
+                      : {producer.policyReference}.
+                    </p>
+                  ))}
                 </>
               )}
               {editable && configured && (
@@ -310,6 +333,9 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                           instance: granted.instance,
                           productionEnvironment: granted.environment,
                           exposurePolicyReference: draft.exposurePolicyReference,
+                          enrichmentProducers: (granted.enrichmentProducers ?? []).filter((entry) =>
+                            draft.enrichmentProducerIds.includes(entry.producerId),
+                          ),
                         }),
                       (connection) => {
                         client.setQueryData(connectionKey, {
@@ -467,6 +493,7 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
 type ConnectionDraft = {
   sourceId: string;
   exposurePolicyReference: string | null;
+  enrichmentProducerIds: string[];
   applicationOperationsBelongToService: true;
 };
 function ConnectionForm({
@@ -486,7 +513,15 @@ function ConnectionForm({
         sources[0]?.sourceId ??
         '',
     ),
-    [policy, setPolicy] = useState(connection?.exposurePolicyReference ?? ''),
+    [producerIds, setProducerIds] = useState(
+      (connection?.enrichmentProducers ?? [])
+        .filter((entry) =>
+          sources
+            .find((source) => source.sourceId === connection?.sourceId)
+            ?.enrichmentProducers?.some((grant) => grant.producerId === entry.producerId),
+        )
+        .map((entry) => entry.producerId),
+    ),
     [assigned, setAssigned] = useState(false),
     [error, setError] = useState('');
   const selected = sources.find((source) => source.sourceId === sourceId);
@@ -496,22 +531,22 @@ function ConnectionForm({
     if (
       !selected ||
       !assigned ||
-      (policy &&
-        (policy !== policy.trim() ||
-          [...policy].length > 200 ||
-          [...policy].some(
-            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-          )))
+      producerIds.some(
+        (producerId) =>
+          !(selected.enrichmentProducers ?? []).some((entry) => entry.producerId === producerId),
+      )
     ) {
       setError(
-        'Choose a granted source and confirm application assignment. Policy reference is optional (up to 200 characters).',
+        'Choose a granted source, granted evidence producers and confirm application assignment.',
       );
       return;
     }
     setError('');
     await save({
       sourceId: selected.sourceId,
-      exposurePolicyReference: policy || null,
+      exposurePolicyReference:
+        selected.sourceId === connection?.sourceId ? connection.exposurePolicyReference : null,
+      enrichmentProducerIds: [...producerIds].sort(),
       applicationOperationsBelongToService: true,
     });
   }
@@ -527,6 +562,7 @@ function ConnectionForm({
           onChange={(event) => {
             setSourceId(event.target.value);
             setAssigned(false);
+            setProducerIds([]);
           }}
         >
           {sources.map((source) => (
@@ -537,19 +573,39 @@ function ConnectionForm({
           ))}
         </select>
         <p>Production environment from grant: {selected?.environment ?? 'Unavailable'}</p>
-        <label htmlFor={`${id}-policy`}>Exposure policy reference (optional)</label>
-        <input
-          id={`${id}-policy`}
-          className="field"
-          value={policy}
-          onChange={(event) => setPolicy(event.target.value)}
-          aria-describedby={`${id}-policy-help`}
-        />
-        <p id={`${id}-policy-help`}>
-          Reference a versioned consumer exposure policy. A successful sync or Healthy status does
-          not prove consumer exposure. Native consumer exposure remains unknown even with a policy.
-          Mock attestations do not apply.
-        </p>
+        <fieldset className="mt-3">
+          <legend className="font-semibold">Granted evidence producers</legend>
+          {(selected?.enrichmentProducers ?? []).length === 0 && (
+            <p>
+              No independent evidence producers configured. Native production exposure remains
+              unknown.
+            </p>
+          )}
+          {(selected?.enrichmentProducers ?? []).map((producer) => (
+            <label className="mt-2 block" key={producer.producerId}>
+              <input
+                type="checkbox"
+                checked={producerIds.includes(producer.producerId)}
+                onChange={(event) =>
+                  setProducerIds((previous) =>
+                    event.target.checked
+                      ? [...previous, producer.producerId]
+                      : previous.filter((producerId) => producerId !== producer.producerId),
+                  )
+                }
+              />{' '}
+              {producer.capability === 'consumer_exposure'
+                ? 'Production consumer exposure'
+                : 'Artifact build provenance'}{' '}
+              · {producer.policyReference}
+            </label>
+          ))}
+          <p>
+            Exposure requires independently confirmed production activation. Build provenance
+            identifies artifact source; it attaches to a rollout only when matching artifact
+            exposure exists.
+          </p>
+        </fieldset>
         <label className="mt-3 block">
           <input
             type="checkbox"
@@ -888,9 +944,29 @@ function StoredRun({ run }: { run: Run }) {
             current grant only.
           </p>
           <p>
-            Native consumer exposure remains unknown. Successful sync and Healthy status do not
-            establish qualification.
+            {result.enrichmentSummary?.consumerExposureCount
+              ? 'Independent exposure receipts are available. Qualification uses exact rollout binding and confirmed production activation.'
+              : 'Native consumer exposure remains unknown. Successful sync and Healthy status do not establish qualification.'}
           </p>
+          {result.enrichmentSummary && (
+            <>
+              <p>
+                Independent exposure receipts: {result.enrichmentSummary.consumerExposureCount}.
+                Build provenance receipts: {result.enrichmentSummary.applicationProvenanceCount}.
+                Build inventory may remain unbound.
+              </p>
+              <ul aria-label="Selected evidence policies">
+                {result.enrichmentSummary.policies.map((policy) => (
+                  <li key={policy.producerId}>
+                    {policy.capability === 'consumer_exposure'
+                      ? 'Production exposure'
+                      : 'Build provenance'}
+                    : {policy.policyReference}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <p>
             Provisional deployment frequency count: {result.deploymentFrequency.count}. This count
             is not a complete deployment measurement.

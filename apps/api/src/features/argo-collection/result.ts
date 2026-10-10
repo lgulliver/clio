@@ -6,6 +6,7 @@ import {
   count,
   instant,
   parseConnection,
+  parseProducers,
   timestamp,
   windowInput,
 } from './input.ts';
@@ -59,6 +60,7 @@ export function parseResult(
   pinnedWindow: ReturnType<typeof windowInput>,
 ) {
   const row = object(value, [
+    'enrichmentSummary',
     'mode',
     'provider',
     'retainedReceiptCount',
@@ -138,6 +140,9 @@ export function parseResult(
   )
     throw new Error('Invalid stored Argo result');
   return {
+    ...(Object.hasOwn(row, 'enrichmentSummary')
+      ? { enrichmentSummary: parseSummary(row.enrichmentSummary, connection) }
+      : {}),
     mode: row.mode,
     workspaceId: connection.workspaceId,
     serviceId: connection.serviceId,
@@ -259,3 +264,22 @@ export const runColumns = `*, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"
 
 export type ArgoResult = ReturnType<typeof parseResult>;
 export type ArgoRun = ReturnType<typeof parseRun>;
+
+function parseSummary(value: unknown, connection: ArgoConnection) {
+  const row = object(value, [
+    'retainedReceiptCount',
+    'consumerExposureCount',
+    'applicationProvenanceCount',
+    'policies',
+  ]);
+  const retainedReceiptCount = count(row.retainedReceiptCount),
+    consumerExposureCount = count(row.consumerExposureCount),
+    applicationProvenanceCount = count(row.applicationProvenanceCount),
+    policies = parseProducers(row.policies);
+  if (
+    retainedReceiptCount !== consumerExposureCount + applicationProvenanceCount ||
+    JSON.stringify(policies) !== JSON.stringify(connection.enrichmentProducers ?? [])
+  )
+    throw new Error('Invalid enrichment summary');
+  return { retainedReceiptCount, consumerExposureCount, applicationProvenanceCount, policies };
+}

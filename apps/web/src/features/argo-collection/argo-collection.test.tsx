@@ -121,6 +121,100 @@ describe('live Argo workflow', () => {
     ).toBeVisible();
     expect(posts()).toHaveLength(0);
   });
+  it('shows independent receipts without claiming complete coverage or build activation', async () => {
+    const enriched = {
+      ...completed,
+      result: {
+        ...completed.result,
+        enrichmentSummary: {
+          retainedReceiptCount: 2,
+          consumerExposureCount: 1,
+          applicationProvenanceCount: 1,
+          policies: [
+            {
+              producerId: '99999999-9999-4999-8999-999999999999',
+              capability: 'consumer_exposure',
+              policyReference: 'urn:fixture:traffic:v1',
+            },
+            {
+              producerId: '88888888-8888-4888-8888-888888888888',
+              capability: 'application_provenance',
+              policyReference: 'urn:fixture:build:v1',
+            },
+          ],
+        },
+      },
+    };
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-collection-runs')
+        ? json({ runs: [enriched] })
+        : String(input).endsWith(`/${completed.id}`)
+          ? json({ run: enriched })
+          : defaultRead(input),
+    );
+    mount(false);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: `View run ${completed.createdAt}` }));
+    const detail = await screen.findByRole('region', { name: 'Live Argo run detail' });
+    expect(within(detail).getByText(/Independent exposure receipts are available/)).toBeVisible();
+    expect(
+      within(detail).getByText(/Independent exposure receipts: 1.*Build provenance receipts: 1/),
+    ).toBeVisible();
+    expect(within(detail).getByText(/Argo transport history incomplete/)).toBeVisible();
+    expect(within(detail).getByText(/Provisional deployment frequency count: 0/)).toBeVisible();
+    expect(
+      within(detail).queryByText(/Native consumer exposure remains unknown/),
+    ).not.toBeInTheDocument();
+  });
+  it('requires owner review when a selected producer policy is no longer granted', async () => {
+    const producer = {
+      producerId: '99999999-9999-4999-8999-999999999999',
+      capability: 'consumer_exposure',
+      policyReference: 'urn:fixture:traffic:v1',
+    };
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST'
+        ? json({ connection: { ...connection, revision: 2, enrichmentProducers: [] } })
+        : String(input).endsWith('/argo-connection')
+          ? json({
+              connection: { ...connection, enrichmentProducers: [producer] },
+              configured: true,
+              sources: [source],
+            })
+          : defaultRead(input),
+    );
+    mount();
+    expect(await screen.findByText(/Granted source changed. An owner must review/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Collect Argo evidence' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Consumer exposure: urn:fixture:traffic:v1/)).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox', { name: /I assign all deployment operations/ }));
+    await user.click(screen.getByRole('button', { name: 'Save Argo connection' }));
+    await screen.findByText('Argo connection saved.');
+    expect(JSON.parse(String(posts()[0]?.[1]?.body)).enrichmentProducerIds).toEqual([]);
+  });
+  it('preserves existing native policy metadata when saving the same source', async () => {
+    const legacy = { ...connection, exposurePolicyReference: 'urn:fixture:legacy:v1' };
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST'
+        ? json({ connection: { ...legacy, revision: 2, enrichmentProducers: [] } })
+        : String(input).endsWith('/argo-connection')
+          ? json({ connection: legacy, configured: true, sources: [source] })
+          : defaultRead(input),
+    );
+    mount();
+    const user = userEvent.setup();
+    expect(
+      await screen.findByText(/Legacy native policy reference: urn:fixture:legacy:v1/),
+    ).toBeVisible();
+    await user.click(screen.getByRole('checkbox', { name: /I assign all deployment operations/ }));
+    await user.click(screen.getByRole('button', { name: 'Save Argo connection' }));
+    await screen.findByText('Argo connection saved.');
+    expect(JSON.parse(String(posts()[0]?.[1]?.body)).exposurePolicyReference).toBe(
+      legacy.exposurePolicyReference,
+    );
+  });
   it.each([null, connection])(
     'unconfigured workspace shows operator setup, no save/enqueue, history still readable %#',
     async (saved) => {
@@ -143,10 +237,28 @@ describe('live Argo workflow', () => {
     },
   );
   it('owner selects granted source and attests; production environment cannot be edited', async () => {
+    const producer = {
+      producerId: '99999999-9999-4999-8999-999999999999',
+      capability: 'consumer_exposure',
+      policyReference: 'policy/v2',
+    };
     fetchMock.mockImplementation(async (input, options) =>
       options?.method === 'POST'
-        ? json({ connection: { ...connection, revision: 2, exposurePolicyReference: 'policy/v2' } })
-        : defaultRead(input),
+        ? json({
+            connection: {
+              ...connection,
+              revision: 2,
+              exposurePolicyReference: null,
+              enrichmentProducers: [producer],
+            },
+          })
+        : String(input).endsWith('/argo-connection')
+          ? json({
+              connection,
+              configured: true,
+              sources: [{ ...source, enrichmentProducers: [producer] }],
+            })
+          : defaultRead(input),
     );
     mount();
     const user = userEvent.setup();
@@ -160,18 +272,21 @@ describe('live Argo workflow', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('confirm application assignment');
     expect(posts()).toHaveLength(0);
     await user.click(screen.getByRole('checkbox', { name: /I assign all deployment operations/ }));
-    fireEvent.change(screen.getByLabelText('Exposure policy reference (optional)'), {
-      target: { value: 'policy/v2' },
-    });
+    expect(screen.queryByLabelText('Exposure policy reference (optional)')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /Production consumer exposure/ }));
     await user.click(save);
     await screen.findByText('Argo connection saved.');
     expect(JSON.parse(String(posts()[0]?.[1]?.body))).toEqual({
       expectedRevision: 1,
       sourceId: source.sourceId,
       applicationOperationsBelongToService: true,
-      exposurePolicyReference: 'policy/v2',
+      exposurePolicyReference: null,
+      enrichmentProducerIds: [producer.producerId],
     });
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: /I assign all deployment operations/ }),
+    ).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Production consumer exposure/ })).toBeChecked();
   });
   it('save conflict requires refresh; reloads new revision before next save', async () => {
     let saved = connection,
@@ -885,6 +1000,7 @@ describe('live Argo workflow', () => {
     expect(JSON.parse(String(posts()[0]?.[1]?.body))).toEqual({
       expectedRevision: 1,
       sourceId: second.sourceId,
+      enrichmentProducerIds: [],
       exposurePolicyReference: null,
       applicationOperationsBelongToService: true,
     });

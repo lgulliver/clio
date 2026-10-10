@@ -20,19 +20,24 @@ export function createServer(database: HealthDependency, identity?: IdentityDepe
   });
   registerIdentity(server, identity);
   if (identity) registerArgoIngress(server, { pool: identity.pool, argo: identity.argo ?? null });
-  else
-    server.post(
+  else {
+    for (const route of [
       '/api/argo/sources/:sourceId/operations',
-      {
-        onRequest: async (_request, reply) => {
-          return reply
-            .header('cache-control', 'no-store')
-            .code(401)
-            .send({ error: 'unauthorized' });
+      '/api/argo/sources/:sourceId/enrichments/:producerId',
+    ])
+      server.post(
+        route,
+        {
+          onRequest: async (_request, reply) => {
+            return reply
+              .header('cache-control', 'no-store')
+              .code(401)
+              .send({ error: 'unauthorized' });
+          },
         },
-      },
-      async (_request, reply) => reply.code(401).send({ error: 'unauthorized' }),
-    );
+        async (_request, reply) => reply.code(401).send({ error: 'unauthorized' }),
+      );
+  }
   server.addHook('onClose', async () => database.close());
   return server;
 }

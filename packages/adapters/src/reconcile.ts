@@ -1,4 +1,10 @@
 import { type Dataset, type Deployment, validateSnapshot } from '@clio/oems';
+import {
+  type ArgoEnrichmentEvidence,
+  type ArgoProvenanceGroup,
+  enrichmentReference,
+  prepareArgoEnrichments,
+} from './argo-enrichment.ts';
 import type { DeploymentEvidence, EvidenceBatch, ServiceMapping, StatusEvidence } from './model.ts';
 import { currentDeployments } from './observations.ts';
 import { AdapterError, content, identity, instant, string, timestamp } from './value.ts';
@@ -45,6 +51,8 @@ export function reconcileDeployments(input: {
   evidenceCutoff: string;
   mapping: ServiceMapping;
   batches: readonly EvidenceBatch[];
+  argoEnrichments?: readonly ArgoEnrichmentEvidence[];
+  argoSourceId?: string;
 }): ReturnType<typeof validateSnapshot> &
   Readonly<{ diagnostics: readonly ReconciliationDiagnostic[] }> {
   const cutoff = instant(input.evidenceCutoff);
@@ -123,6 +131,13 @@ export function reconcileDeployments(input: {
   }
   const diagnostics: ReconciliationDiagnostic[] = [];
   const output: Deployment[] = [];
+  const attachedProvenance = new Map<string, ArgoProvenanceGroup>();
+  const selectEnrichments = prepareArgoEnrichments({
+    sourceId: input.argoSourceId,
+    enrichments: input.argoEnrichments ?? [],
+    cutoff,
+    serviceId: mapping.serviceId,
+  });
   for (const [groupId, records] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     // Secondary evidence cannot create a rollout absent its authoritative source operation.
     if (!records.some((record) => record.sourceId === mapping.primarySourceId)) {
@@ -214,6 +229,21 @@ export function reconcileDeployments(input: {
         }
       }
     }
+    const enrichment = selectEnrichments(records, mapping.primarySourceId);
+    for (const entry of enrichment.exposures) {
+      classes.delete('unknown');
+      classes.add('production');
+      accepted.push(entry.event.effective_at);
+      refs.add(entry.sourceRef);
+      refs.add(enrichmentReference('evidence', entry.event.evidence_ref));
+      refs.add(enrichmentReference('policy', entry.scope.policyReference));
+      observations.push(entry.observedAt);
+    }
+    for (const entry of enrichment.attached) {
+      refs.add(entry.sourceRef);
+      attachedProvenance.set(entry.sourceRef, entry);
+      observations.push(entry.observedAt);
+    }
     if (classes.has('production') && classes.has('non_production'))
       throw new AdapterError('incompatible_correlated_environment');
     const environment = classes.has('production')
@@ -247,6 +277,29 @@ export function reconcileDeployments(input: {
       rework_evidence_refs: [],
       extensions: {
         mapping_revision: mapping.revision,
+        ...(enrichment.exposures.length
+          ? {
+              independent_consumer_exposure: enrichment.exposures.map((entry) => ({
+                producer_id: entry.event.producer_id,
+                event_id: entry.event.event_id,
+                policy_reference: entry.scope.policyReference,
+                evidence_ref: entry.event.evidence_ref,
+                subject: entry.event.subject,
+                effective_at: entry.event.effective_at,
+              })),
+            }
+          : {}),
+        ...(enrichment.attached.length
+          ? {
+              artifact_source_provenance: enrichment.attached.map((group) => ({
+                repository_id: group.repositoryId,
+                commit_sha: group.commitSha,
+                artifact_digest: group.artifactDigest,
+                assertions_ref: group.sourceRef,
+                assertion_count: group.assertions.length,
+              })),
+            }
+          : {}),
         tip_provenance: tips,
         reconciled_configuration_revisions: configuration,
       },
@@ -267,6 +320,38 @@ export function reconcileDeployments(input: {
         name: mapping.serviceName,
         observed_at: mapping.observedAt,
         source_refs: [mapping.sourceRef],
+        ...(attachedProvenance.size
+          ? {
+              extensions: {
+                argo_artifact_provenance: [...attachedProvenance.values()]
+                  .sort((a, b) => a.sourceRef.localeCompare(b.sourceRef))
+                  .map((group) => ({
+                    id: group.sourceRef,
+                    source_id: group.sourceId,
+                    artifact_digest: group.artifactDigest,
+                    repository_id: group.repositoryId,
+                    commit_sha: group.commitSha,
+                    observed_at: group.observedAt,
+                    source_refs: [
+                      ...new Set(
+                        group.assertions.flatMap((entry) => [
+                          entry.sourceRef,
+                          enrichmentReference('evidence', entry.event.evidence_ref),
+                          enrichmentReference('policy', entry.scope.policyReference),
+                        ]),
+                      ),
+                    ].sort(),
+                    assertions: group.assertions.map((entry) => ({
+                      producer_id: entry.event.producer_id,
+                      event_id: entry.event.event_id,
+                      policy_reference: entry.scope.policyReference,
+                      evidence_ref: entry.event.evidence_ref,
+                      observed_at: entry.observedAt,
+                    })),
+                  })),
+              },
+            }
+          : {}),
       },
     ],
     changes: [],

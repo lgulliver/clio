@@ -47,20 +47,24 @@ Gap reasons: `unmarked_operation`, `non_terminal`, `missing_sync_result`, `missi
 
 Base `/api/workspaces/:workspaceId/services/:serviceId`:
 
-- GET `/argo-connection` returns `{configured:boolean, sources:ArgoSource[], connection:ArgoConnection|null}`. Sources are granted sources for this exact workspace/service only. `configured` means matching grant available. Sources expose only `{sourceId, applicationName, applicationNamespace, instance, environment}`.
-- POST `/argo-connection`: `{expectedRevision:number|null, sourceId:string, applicationOperationsBelongToService:true, exposurePolicyReference:string|null}` returns `{connection:ArgoConnection}`.
+- GET `/argo-connection` returns `{configured:boolean, sources:ArgoSource[], connection:ArgoConnection|null}`. Sources are granted sources for this exact workspace/service only. `configured` means matching grant available. Sources expose only `{sourceId, applicationName, applicationNamespace, instance, environment, enrichmentProducers?:EnrichmentProducer[]}`. Producer labels contain no credentials or private fingerprints.
+- POST `/argo-connection`: `{expectedRevision:number|null, sourceId:string, applicationOperationsBelongToService:true, exposurePolicyReference:string|null, enrichmentProducerIds?:string[]}` returns `{connection:ArgoConnection}`.
 - POST `/argo-connection/disconnect`: `{expectedRevision:number}` returns `{connection:ArgoConnection}`.
 - POST `/argo-collection-runs`: `{connectionRevision:number, requestId:string, window:{start:string,end:string}}` returns 202 `{run:ArgoRun}`.
 - GET `/argo-collection-runs`: `{runs:ArgoRun[]}` latest 25.
 - GET `/argo-collection-runs/:runId`: `{run:ArgoRun}`.
 
 ```ts
+interface EnrichmentProducer {
+  producerId:string; capability:'consumer_exposure'|'application_provenance'; policyReference:string;
+}
 interface ArgoConnection {
   workspaceId:string; serviceId:string; mode:'live'; provider:'argocd';
   revision:number; active:boolean; sourceId:string;
   applicationName:string; applicationNamespace:string; instance:string;
   productionEnvironment:string; exposurePolicyReference:string|null;
   applicationOperationsBelongToService:true; observedAt:string;
+  enrichmentProducers?:EnrichmentProducer[];
 }
 interface ArgoResult {
   workspaceId:string; serviceId:string; mode:'live'; provider:'argocd';
@@ -75,6 +79,7 @@ interface ArgoResult {
   coverage:{collectionComplete:false;deploymentHistoryComplete:false;recoveryEvidenceComplete:false};
   deploymentFrequency:{count:number;status:'provisional';deploymentsPerDay:null;qualityReasons:string[]};
   changeFailureRate:null; failedDeploymentRecoveryTime:null;
+  enrichmentSummary?:{retainedReceiptCount:number;consumerExposureCount:number;applicationProvenanceCount:number;policies:EnrichmentProducer[]};
 }
 interface ArgoRun {
   id:string;workspaceId:string;serviceId:string;mode:'live';provider:'argocd';
@@ -92,3 +97,9 @@ Result counts describe all eligible retained dates at cutoff, not reporting-wind
 Backend exports `registerArgoRoutes(routes, {pool, argo, actor})` and separate `registerArgoIngress(app,{pool,argo})`; browser actor signature matches GitHub routes. Ingress registers authentication in `onRequest` before JSON parser. Redaction/no-store applies independently. `createArgoWorker(pool, argo)` exposes `runOnce():Promise<boolean>` and uses 120-second database leases with maximum three attempts. No outbound provider network. Coordinator wires startup/identity/readiness and standalone worker entry.
 
 Backend owns API feature `argo-collection`, migration `0006_argo_ingestion.sql`, and scoped tests. Provider owns adapter native parsing/tests and committed notification YAML in `infra/argocd/`; verifies actual pinned controller via explicitly scoped sandbox. Frontend owns `features/argo-collection/` and settings composition. Coordinator owns shared manifests, entrypoints, readiness, architecture/runbooks and integration. Shared files require explicit handoff.
+
+## Independent enrichment
+
+The native contract above remains strict: consumer exposure is false and application provenance absent in native evidence. Separately authenticated enrichment receipts can qualify exact retained rollouts or attach immutable artifact/source provenance at a database cutoff. Producer grants, wire shapes, replay/rotation rules and operator responsibilities are documented in [independent Argo evidence](argo-enrichment.md) and the [implementation contract](../superpowers/specs/2026-10-10-argo-enrichment-design.md). Source rate and lifetime storage budgets are shared across both ingress kinds, including enrichment lock rows; adding producers cannot multiply capacity.
+
+Enrichment admission also reserves serialized snapshot headroom in the shared 8 MiB byte budget. This accounts for repeated evidence/policy references by their encoded byte lengths, independently of grant size. Artifact exposure reserves the maximum application-repository representation until an immutable digest mapping is known; an existing digest lock permits a smaller exact reservation. The 5000-row ceiling is an additional limit, not a promise that 5000 assertions fit. Exact replay consumes no new storage or headroom. Reservations are not refunded by rotation or later captures.

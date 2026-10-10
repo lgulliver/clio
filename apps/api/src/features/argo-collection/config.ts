@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, lstat, open, readFile, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import type { ArgoScope } from '@clio/adapters';
+import type { ArgoEnrichmentScope, ArgoScope } from '@clio/adapters';
 import { text } from '../github-collection/input.ts';
 import { object, uuid } from '../identity/input.ts';
 
@@ -10,7 +10,12 @@ export interface ArgoGrant extends ArgoScope {
   readonly tokenDigest: string;
   readonly fingerprint: string;
 }
+export interface ArgoProducerGrant extends ArgoEnrichmentScope {
+  readonly tokenDigest: string;
+  readonly fingerprint: string;
+}
 export interface ArgoConfig {
+  readonly producers?: readonly ArgoProducerGrant[];
   readonly grants: readonly ArgoGrant[];
 }
 export const scopeKeys = [
@@ -96,7 +101,11 @@ async function privateFile(path: string, maxBytes: number) {
 }
 
 export async function readArgoConfig(env: NodeJS.ProcessEnv): Promise<ArgoConfig | null> {
-  if (env.ARGO_INGESTION_GRANTS_FILE === undefined) return null;
+  if (env.ARGO_INGESTION_GRANTS_FILE === undefined) {
+    if (env.ARGO_ENRICHMENT_GRANTS_FILE !== undefined)
+      throw new Error('Invalid Argo ingestion configuration');
+    return null;
+  }
   try {
     const path = env.ARGO_INGESTION_GRANTS_FILE;
     if (!path) throw new Error('Invalid config');
@@ -127,7 +136,48 @@ export async function readArgoConfig(env: NodeJS.ProcessEnv): Promise<ArgoConfig
         }),
       );
     }
-    return Object.freeze({ grants: Object.freeze(grants) });
+    const producers: ArgoProducerGrant[] = [];
+    if (env.ARGO_ENRICHMENT_GRANTS_FILE !== undefined) {
+      const entries: unknown = JSON.parse(
+        await privateFile(env.ARGO_ENRICHMENT_GRANTS_FILE, 262144),
+      );
+      if (!Array.isArray(entries) || entries.length > 100) throw new Error('Invalid config');
+      const ids = new Set<string>(sources);
+      for (const entry of entries) {
+        const row = object(entry, [
+          'sourceId',
+          'producerId',
+          'capability',
+          'policyReference',
+          'repositoryIds',
+          'tokenFile',
+        ]);
+        const native = grants.find((g) => g.sourceId === uuid(row.sourceId));
+        if (!native) throw new Error('Invalid source');
+        const scope = parseProducerScope({
+          ...scopeFor(native),
+          producerId: row.producerId,
+          capability: row.capability,
+          policyReference: row.policyReference,
+          repositoryIds: row.repositoryIds,
+        });
+        const token = await privateFile(text(row.tokenFile, 4096), 65);
+        if (!/^[0-9a-f]{64}\n?$/.test(token)) throw new Error('Invalid token');
+        const tokenDigest = digest(token.trim());
+        if (ids.has(scope.producerId) || tokens.has(tokenDigest))
+          throw new Error('Duplicate grant');
+        ids.add(scope.producerId);
+        tokens.add(tokenDigest);
+        producers.push(
+          Object.freeze({
+            ...scope,
+            tokenDigest,
+            fingerprint: digest(JSON.stringify({ ...scope, tokenDigest })),
+          }),
+        );
+      }
+    }
+    return Object.freeze({ grants: Object.freeze(grants), producers: Object.freeze(producers) });
   } catch {
     throw new Error('Invalid Argo ingestion configuration');
   }
@@ -145,5 +195,54 @@ export function grantFor(
         (workspaceId === undefined || g.workspaceId === workspaceId) &&
         (serviceId === undefined || g.serviceId === serviceId),
     ) ?? null
+  );
+}
+
+export function parseProducerScope(value: unknown): ArgoEnrichmentScope {
+  const row = object(value, [
+    ...scopeKeys,
+    'producerId',
+    'capability',
+    'policyReference',
+    'repositoryIds',
+  ]);
+  const { producerId, capability, policyReference, repositoryIds, ...native } = row;
+  if (capability !== 'consumer_exposure' && capability !== 'application_provenance')
+    throw new Error('Invalid capability');
+  if (!Array.isArray(repositoryIds) || repositoryIds.length > 100)
+    throw new Error('Invalid repositories');
+  const repositories = repositoryIds
+    .map((value: unknown) => {
+      const id = text(value, 2048);
+      if (!/^[a-z][a-z0-9._-]*:[^\s:]+(?::[^\s:]+)*$/.test(id))
+        throw new Error('Invalid repository identity');
+      return id;
+    })
+    .sort();
+  if (
+    new Set(repositories).size !== repositories.length ||
+    (capability === 'consumer_exposure' ? repositories.length !== 0 : repositories.length === 0)
+  )
+    throw new Error('Invalid repositories');
+  return {
+    ...parseScope(native),
+    producerId: uuid(producerId),
+    capability,
+    policyReference: text(policyReference),
+    repositoryIds: Object.freeze(repositories),
+  };
+}
+export function producerScopeFor(grant: ArgoProducerGrant): ArgoEnrichmentScope {
+  return parseProducerScope({
+    ...scopeFor(grant),
+    producerId: grant.producerId,
+    capability: grant.capability,
+    policyReference: grant.policyReference,
+    repositoryIds: grant.repositoryIds,
+  });
+}
+export function producerFor(config: ArgoConfig | null, sourceId: string, producerId: string) {
+  return (
+    config?.producers?.find((g) => g.sourceId === sourceId && g.producerId === producerId) ?? null
   );
 }

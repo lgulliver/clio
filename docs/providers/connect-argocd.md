@@ -140,8 +140,8 @@ Recovery: disconnect the exhausted source, preserve its history/results, registe
 | No receipt despite Healthy | Subscription/template/destination connectivity, notification retry exhaustion and active connection. Healthy is not delivery proof. |
 | Provisional zero / unknown | Native exposure remains false; reporting window may exclude retained operations; coverage stays incomplete. |
 
-Polling/backfill, automatic UUID enrichment, exposure attestation, application-source provenance, complete delivery coverage and hosted onboarding remain future capabilities.
+Polling/backfill, automatic UUID enrichment, complete delivery coverage and hosted onboarding remain future capabilities. Independent exposure and application-source provenance use separate credentials and explicit operator policies.
 
-The proposed [consumer-exposure and provenance contract](../superpowers/specs/2026-10-10-argo-enrichment-design.md) defines independent capability-scoped producers, exact operation/artifact binding and immutable cutoff joins. It is a design artifact, not a receiver or exposure signal enabled by this setup.
+Follow the [independent evidence setup guide](argo-enrichment.md) to configure consumer-exposure and build-provenance producers. Their receiver, storage and cutoff joins are implemented and verified with fictional producers. Native notification setup alone does not enable an exposure signal.
 
 Read [provider rate limits](rate-limits.md) for shared cooldowns, retry behavior, ingress budgets and current collection-cost limits.

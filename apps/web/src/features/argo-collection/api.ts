@@ -2,6 +2,11 @@ import { oemsContract } from '@clio/oems/contract';
 import { ApiError, record } from '../identity/api';
 
 export type Scope = { workspaceId: string; serviceId: string };
+export type EnrichmentProducer = {
+  producerId: string;
+  capability: 'consumer_exposure' | 'application_provenance';
+  policyReference: string;
+};
 export type Connection = Scope & {
   mode: 'live';
   provider: 'argocd';
@@ -13,6 +18,7 @@ export type Connection = Scope & {
   instance: string;
   productionEnvironment: string;
   exposurePolicyReference: string | null;
+  enrichmentProducers?: EnrichmentProducer[];
   applicationOperationsBelongToService: true;
   observedAt: string;
 };
@@ -22,6 +28,7 @@ export type Source = {
   applicationNamespace: string;
   instance: string;
   environment: string;
+  enrichmentProducers?: EnrichmentProducer[];
 };
 export type Window = { start: string; end: string };
 export type Result = Scope & {
@@ -32,6 +39,12 @@ export type Result = Scope & {
   window: Window & { timezone: 'UTC'; calendarDays: number };
   evidenceCutoff: string;
   transportComplete: false;
+  enrichmentSummary?: {
+    retainedReceiptCount: number;
+    consumerExposureCount: number;
+    applicationProvenanceCount: number;
+    policies: EnrichmentProducer[];
+  };
   retainedReceiptCount: number;
   retainedEvidenceCount: number;
   recordedGapCount: number;
@@ -140,8 +153,50 @@ export function closedWindow(startDate: string, endDate: string, now = Date.now(
   if (days < 1 || days > 90 || Date.parse(end) > now) return fail();
   return { start, end };
 }
+function producers(value: unknown): EnrichmentProducer[] {
+  if (!Array.isArray(value) || value.length > 100) return fail();
+  const result = value
+    .map((entry: unknown): EnrichmentProducer => {
+      const row = exact(entry, ['producerId', 'capability', 'policyReference']);
+      if (row.capability !== 'consumer_exposure' && row.capability !== 'application_provenance')
+        return fail();
+      return {
+        producerId: uuid(row.producerId),
+        capability: row.capability,
+        policyReference: text(row.policyReference),
+      };
+    })
+    .sort((a, b) => a.producerId.localeCompare(b.producerId));
+  if (new Set(result.map((entry) => entry.producerId.toLowerCase())).size !== result.length)
+    return fail();
+  return result;
+}
+function enrichmentSummary(value: unknown) {
+  const row = exact(value, [
+    'retainedReceiptCount',
+    'consumerExposureCount',
+    'applicationProvenanceCount',
+    'policies',
+  ]);
+  const retainedReceiptCount = integer(row.retainedReceiptCount),
+    consumerExposureCount = integer(row.consumerExposureCount),
+    applicationProvenanceCount = integer(row.applicationProvenanceCount);
+  if (
+    retainedReceiptCount > 5000 ||
+    retainedReceiptCount !== consumerExposureCount + applicationProvenanceCount
+  )
+    return fail();
+  return {
+    retainedReceiptCount,
+    consumerExposureCount,
+    applicationProvenanceCount,
+    policies: producers(row.policies),
+  };
+}
 function connection(value: unknown, scope: Scope): Connection {
+  const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'enrichmentProducers') ? ['enrichmentProducers'] : []),
     'workspaceId',
     'serviceId',
     'mode',
@@ -180,10 +235,15 @@ function connection(value: unknown, scope: Scope): Connection {
       item.exposurePolicyReference === null ? null : text(item.exposurePolicyReference),
     applicationOperationsBelongToService: true,
     observedAt,
+    ...(Object.hasOwn(item, 'enrichmentProducers')
+      ? { enrichmentProducers: producers(item.enrichmentProducers) }
+      : {}),
   };
 }
 function source(value: unknown): Source {
+  const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'enrichmentProducers') ? ['enrichmentProducers'] : []),
     'sourceId',
     'applicationName',
     'applicationNamespace',
@@ -196,6 +256,9 @@ function source(value: unknown): Source {
     applicationNamespace: text(item.applicationNamespace),
     instance: text(item.instance),
     environment: text(item.environment),
+    ...(Object.hasOwn(item, 'enrichmentProducers')
+      ? { enrichmentProducers: producers(item.enrichmentProducers) }
+      : {}),
   };
 }
 export function parseConnection(
@@ -234,6 +297,7 @@ export function parseSavedConnection(
     | 'instance'
     | 'productionEnvironment'
     | 'exposurePolicyReference'
+    | 'enrichmentProducers'
   >,
 ): Connection {
   const parsed = connection(exact(value, ['connection']).connection, scope);
@@ -245,13 +309,18 @@ export function parseSavedConnection(
       parsed.applicationNamespace !== expected.applicationNamespace ||
       parsed.instance !== expected.instance ||
       parsed.productionEnvironment !== expected.productionEnvironment ||
-      parsed.exposurePolicyReference !== expected.exposurePolicyReference)
+      parsed.exposurePolicyReference !== expected.exposurePolicyReference ||
+      (expected.enrichmentProducers !== undefined &&
+        JSON.stringify(parsed.enrichmentProducers ?? []) !==
+          JSON.stringify(expected.enrichmentProducers)))
   )
     return fail();
   return parsed;
 }
 function result(value: unknown, scope: Scope, revision: number): Result {
+  const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'enrichmentSummary') ? ['enrichmentSummary'] : []),
     'mode',
     'provider',
     'workspaceId',
@@ -394,6 +463,9 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     },
     changeFailureRate: null,
     failedDeploymentRecoveryTime: null,
+    ...(Object.hasOwn(item, 'enrichmentSummary')
+      ? { enrichmentSummary: enrichmentSummary(item.enrichmentSummary) }
+      : {}),
   };
 }
 function run(value: unknown, scope: Scope): Run {

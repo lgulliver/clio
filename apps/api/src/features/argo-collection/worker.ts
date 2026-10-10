@@ -7,6 +7,8 @@ import { snapshotDigest } from '../github-collection/digest.ts';
 import { name, uuid } from '../identity/input.ts';
 import { captureArgo } from './capture.ts';
 import { type ArgoConfig, grantFor, parseScope, scopeFor } from './config.ts';
+import { eligibleProducers } from './enrichment-grants.ts';
+import { parseEnrichmentReceipt } from './enrichment-ingress.ts';
 import { boundedJson, maxBytes, maxRows, mergeHistory, parseEvidence } from './history.ts';
 import { databaseTime } from './ingress.ts';
 import { count, parseConnection, timestamp } from './input.ts';
@@ -57,7 +59,9 @@ export function createArgoWorker(
       connection.workspaceId,
       connection.serviceId,
     );
+    const producers = latest ? eligibleProducers(config, connection, latest.producers) : null;
     if (
+      producers === null ||
       !config ||
       !grant ||
       grant.fingerprint !== row.grant_fingerprint ||
@@ -67,7 +71,7 @@ export function createArgoWorker(
       !isDeepStrictEqual(latest.scope, scopeFor(grant))
     )
       throw new Revoked();
-    return { connection, window, serviceName, config, grant };
+    return { connection, window, serviceName, config, grant, producers };
   }
   async function locked<T>(
     claim: Claim,
@@ -139,6 +143,23 @@ export function createArgoWorker(
               retainedEvidenceCount += batch.deployments.length + batch.statuses.length;
             }
           }
+          const enrichmentRows = await client.query<Record<string, unknown>>(
+            `SELECT *,to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM argo_enrichment_receipts WHERE source_id=$1 AND workspace_id=$2 AND service_id=$3 AND native_fingerprint=$4 AND observed_at<=$5 ORDER BY producer_id,event_id LIMIT 5001`,
+            [
+              input.grant.sourceId,
+              input.connection.workspaceId,
+              input.connection.serviceId,
+              input.grant.fingerprint,
+              cutoff,
+            ],
+          );
+          if (enrichmentRows.rows.length > maxRows) throw new Error('Argo storage limit');
+          const argoEnrichments = enrichmentRows.rows.flatMap((row) => {
+            const producer = input.producers.find(
+              (p) => p.producerId === row.producer_id && p.fingerprint === row.producer_fingerprint,
+            );
+            return producer ? [parseEnrichmentReceipt(row, producer, input.grant.fingerprint)] : [];
+          });
           const boundaries = await client.query<Record<string, unknown>>(
             'SELECT count(*)::int AS count FROM argo_interruptions WHERE source_id=$1 AND grant_fingerprint=$2 AND observed_at<=$3',
             [input.grant.sourceId, input.grant.fingerprint, cutoff],
@@ -155,6 +176,7 @@ export function createArgoWorker(
             runId: claim.id,
             ...input,
             evidence: mergeHistory(batches),
+            argoEnrichments,
             databaseObservedAt: cutoff,
             stats: {
               retainedReceiptCount: found.rows.length,
@@ -191,13 +213,28 @@ export function createArgoWorker(
               digest,
             ],
           );
+          const freshConfig = configNow();
           const fresh = grantFor(
-            configNow(),
+            freshConfig,
             input.connection.sourceId,
             input.connection.workspaceId,
             input.connection.serviceId,
           );
-          if (fresh?.fingerprint !== input.grant.fingerprint) throw new Revoked();
+          if (
+            fresh?.fingerprint !== input.grant.fingerprint ||
+            eligibleProducers(
+              freshConfig,
+              input.connection,
+              (
+                await latestConnection(
+                  client,
+                  input.connection.workspaceId,
+                  input.connection.serviceId,
+                )
+              )?.producers ?? [],
+            ) === null
+          )
+            throw new Revoked();
           const done = await client.query(
             `WITH stamp AS(SELECT GREATEST(clock_timestamp(),$4::timestamptz) AS t) UPDATE argo_collection_runs SET status='succeeded',result=$3,completed_at=stamp.t,updated_at=stamp.t,lease_token=NULL,lease_until=NULL FROM stamp WHERE id=$1 AND status='running' AND lease_token=$2 AND lease_until>clock_timestamp()`,
             [claim.id, claim.token, JSON.stringify(capture.result), cutoff],

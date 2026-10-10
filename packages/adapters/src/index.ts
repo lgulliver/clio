@@ -1,3 +1,9 @@
+export type {
+  ArgoEnrichment,
+  ArgoEnrichmentEvidence,
+  ArgoEnrichmentScope,
+} from './argo-enrichment.ts';
+export { parseArgoEnrichment } from './argo-enrichment.ts';
 /** Server-only boundary. Never import this package from apps/web. */
 export type {
   ArgoGapNotification,

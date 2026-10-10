@@ -1,4 +1,10 @@
-import { type EvidenceBatch, identity, reconcileDeployments } from '@clio/adapters';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  type ArgoEnrichmentEvidence,
+  type EvidenceBatch,
+  identity,
+  reconcileDeployments,
+} from '@clio/adapters';
 import { calculate, oemsContract } from '@clio/oems';
 import { boundedJson } from './history.ts';
 import { type ArgoConnection, instant, timestamp, type windowInput } from './input.ts';
@@ -10,6 +16,7 @@ export function captureArgo(input: {
   serviceName: string;
   window: ReturnType<typeof windowInput>;
   evidence: EvidenceBatch;
+  argoEnrichments?: readonly ArgoEnrichmentEvidence[];
   stats: {
     retainedReceiptCount: number;
     retainedEvidenceCount: number;
@@ -30,6 +37,7 @@ export function captureArgo(input: {
     ...evidence.deployments,
     ...evidence.statuses,
     ...(evidence.completedStatusTraversals ?? []),
+    ...(input.argoEnrichments ?? []),
   ]) {
     if (instant(observation.observedAt) > instant(evidenceCutoff))
       throw new Error('Evidence observed after acquisition');
@@ -71,6 +79,8 @@ export function captureArgo(input: {
       correlations: [],
     },
     batches: [evidence],
+    argoEnrichments: input.argoEnrichments ?? [],
+    argoSourceId: connection.sourceId,
   });
   if (!reconciled.ok) throw new Error('Argo snapshot validation failed');
   const snapshot = reconciled.data.data,
@@ -95,6 +105,15 @@ export function captureArgo(input: {
       provider: 'argocd',
       transportComplete: false,
       ...input.stats,
+      enrichmentSummary: {
+        retainedReceiptCount: input.argoEnrichments?.length ?? 0,
+        consumerExposureCount:
+          input.argoEnrichments?.filter((r) => r.event.kind === 'consumer_exposure').length ?? 0,
+        applicationProvenanceCount:
+          input.argoEnrichments?.filter((r) => r.event.kind === 'application_provenance').length ??
+          0,
+        policies: connection.enrichmentProducers ?? [],
+      },
       deploymentCount: snapshot.deployments.length,
       qualifyingCount: snapshot.deployments.filter((r) => r.qualification === 'qualifying').length,
       unknownCount: snapshot.deployments.filter((r) => r.qualification === 'unknown').length,
@@ -115,7 +134,29 @@ export function captureArgo(input: {
     connection,
     window,
   );
-  const capture = { evidence, snapshot, metrics, oemsRevision: oemsContract.revision, result };
+  // Keep each exact grant scope once. Receipt events already carry the source/producer lookup key.
+  const enrichmentScopes = new Map<string, ArgoEnrichmentEvidence['scope']>();
+  const argoEnrichments = (input.argoEnrichments ?? []).map(({ scope, ...receipt }) => {
+    const key = identity(scope.sourceId, scope.producerId);
+    const previous = enrichmentScopes.get(key);
+    if (previous && !isDeepStrictEqual(previous, scope))
+      throw new Error('Conflicting captured enrichment scope');
+    enrichmentScopes.set(key, scope);
+    return receipt;
+  });
+  const capture = {
+    evidence: {
+      ...evidence,
+      argoEnrichments,
+      argoEnrichmentScopes: [...enrichmentScopes]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, scope]) => scope),
+    },
+    snapshot,
+    metrics,
+    oemsRevision: oemsContract.revision,
+    result,
+  };
   boundedJson(capture);
   return capture;
 }

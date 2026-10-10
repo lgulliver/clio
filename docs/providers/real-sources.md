@@ -304,3 +304,5 @@ The [local GitHub contract](live-github-contract.md) binds operator-granted scop
 | Argo 403/404 | Project, application namespace/name, role object and effective RBAC; project filtering affects missing-resource responses. |
 | Healthy app but no usable rollout | Check operation identity, retention, operation kind, consumer exposure and source provenance separately. |
 | Clio still shows mocks | Mock workflows remain separate. Configure the local GitHub App/grant and live worker using the connection guide; Argo uses its separate native notification grant, source connection and snapshot worker. |
+
+For independent Argo production activation or application artifact/source evidence, follow the [producer setup guide](argo-enrichment.md). Configure trusted observers and build producers under separate capability credentials and versioned policies; a GitOps sync or successful build alone cannot assert consumer exposure.

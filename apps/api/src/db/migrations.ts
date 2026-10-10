@@ -90,6 +90,15 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   checkApplied(result.rows, migrations, true);
   // Also detect missing tables/columns rather than trusting ledger alone.
   await pool.query(
+    'SELECT id,source_id,workspace_id,service_id,connection_revision,producer_id,event_id,native_fingerprint,producer_fingerprint,scope,event,digest,observed_at FROM argo_enrichment_receipts LIMIT 0',
+  );
+  await pool.query(
+    'SELECT source_id,application_uid,operation_id,subject FROM argo_enrichment_subjects LIMIT 0',
+  );
+  await pool.query(
+    'SELECT source_id,artifact_digest,repository_id,commit_sha FROM argo_enrichment_artifacts LIMIT 0',
+  );
+  await pool.query(
     'SELECT app_id,installation_id,next_request_at,blocked_until,consecutive_throttles,lease_token,lease_until FROM github_quota_state LIMIT 0',
   );
   await pool.query(
@@ -97,7 +106,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   );
   await pool.query('SELECT source_id,tokens,refilled_at FROM argo_ingress_buckets LIMIT 0');
   await pool.query(
-    'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by FROM argo_connection_revisions LIMIT 0',
+    'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by,enrichment_grants FROM argo_connection_revisions LIMIT 0',
   );
   await pool.query(
     'SELECT id,workspace_id,service_id,connection_revision,request_id,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code,result,lease_token,lease_until,available_at FROM argo_collection_runs LIMIT 0',

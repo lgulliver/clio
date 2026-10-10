@@ -3,6 +3,93 @@ import { closedWindow, parseConnection, parseRun, parseRuns, parseSavedConnectio
 import { completed, connection, result, scope, source } from './fixtures.test-support';
 
 describe('live Argo boundary', () => {
+  it('parses safe granted producers and separate enrichment counts without asserting coverage', () => {
+    const producer = {
+      producerId: '99999999-9999-4999-8999-999999999999',
+      capability: 'consumer_exposure',
+      policyReference: 'urn:fixture:traffic:v1',
+    };
+    const saved = { ...connection, enrichmentProducers: [producer] };
+    expect(
+      parseConnection(
+        {
+          connection: saved,
+          configured: true,
+          sources: [{ ...source, enrichmentProducers: [producer] }],
+        },
+        scope,
+      ).connection,
+    ).toEqual(saved);
+    const captured = {
+      ...result,
+      enrichmentSummary: {
+        retainedReceiptCount: 1,
+        consumerExposureCount: 1,
+        applicationProvenanceCount: 0,
+        policies: [producer],
+      },
+    };
+    expect(parseRun({ run: { ...completed, result: captured } }, scope).result).toEqual(captured);
+  });
+  it.each(
+    [
+      [
+        {
+          producerId: '99999999-9999-4999-8999-999999999999',
+          capability: 'native',
+          policyReference: 'policy/v1',
+        },
+      ],
+      [
+        {
+          producerId: '99999999-9999-4999-8999-999999999999',
+          capability: 'consumer_exposure',
+          policyReference: 'policy/v1',
+          token: 'private',
+        },
+      ],
+      [
+        {
+          producerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          capability: 'consumer_exposure',
+          policyReference: 'policy/v1',
+        },
+        {
+          producerId: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+          capability: 'consumer_exposure',
+          policyReference: 'policy/v1',
+        },
+      ],
+    ].map((enrichmentProducers) => ({ enrichmentProducers })),
+  )('rejects untrusted producer metadata %#', ({ enrichmentProducers }) => {
+    expect(() =>
+      parseConnection(
+        { connection: { ...connection, enrichmentProducers }, configured: true, sources: [source] },
+        scope,
+      ),
+    ).toThrow();
+  });
+  it('rejects inconsistent enrichment totals', () => {
+    expect(() =>
+      parseRun(
+        {
+          run: {
+            ...completed,
+            result: {
+              ...result,
+              enrichmentSummary: {
+                retainedReceiptCount: 0,
+                consumerExposureCount: 1,
+                applicationProvenanceCount: 0,
+                policies: [],
+              },
+            },
+          },
+        },
+        scope,
+      ),
+    ).toThrow();
+  });
   it('accepts storage interruption gaps when no notification receipt exists', () => {
     const captured = {
       ...result,
