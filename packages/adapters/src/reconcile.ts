@@ -175,12 +175,14 @@ export function reconcileDeployments(input: {
         : recordClasses.has('unknown')
           ? 'unknown'
           : 'non_production';
-      // Negative classification requires a completed current status traversal. Partial pages
-      // may contain staging while unfetched pages contain historical production exposure.
+      // Negative classification requires traversal completion at least as recent as every
+      // selected observation. Retained older completion cannot cover a newly seen status;
+      // unfetched pages may contain historical production exposure.
       if (
         classification === 'non_production' &&
         record.sourceId.startsWith('github:') &&
-        (completed.get(record.id) ?? -1n) < instant(record.observedAt)
+        (completed.get(record.id) ?? -1n) <
+          instant(latest([record.observedAt, ...events.map((event) => event.observedAt)]))
       )
         classification = 'unknown';
       classes.add(classification);

@@ -2,6 +2,8 @@
 
 This workflow uses a separate collection GitHub App, a trusted local operator grant, an owner-authorized service connection and a separate collection worker. GitHub login OAuth remains identity-only. Argo evidence and mock collection have separate workflows; no Argo ingestion endpoint is provided here.
 
+Read [GitHub ingestion → OEMS verification](github-oems-verification.md) for the checked mapping, executable controlled HTTP fixtures, repaired status-history edge case and limits of the evidence. Production success qualifies only under a deliberate consumer-exposure policy; a workflow run or environment name alone is insufficient.
+
 ## Prepare the provider and choose scope
 
 Follow [real-source preparation](real-sources.md) to register the collection App with **Deployments read-only** and **Metadata read-only**, selected repositories, and no user OAuth or webhook receiver. Record App ID, installation ID, installation account ID/type and stable repository ID. Check the installation account against the intended organization/user; the operator authorizes that installation for a Clio workspace separately.

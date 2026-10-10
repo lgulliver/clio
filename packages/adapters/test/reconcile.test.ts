@@ -211,6 +211,50 @@ describe('cutoff-safe one-service reconciliation', () => {
         ?.qualification,
     ).toBe('unknown');
   });
+  it('does not use an older complete traversal to exclude newly observed partial history', async () => {
+    const first = await github([status({ environment: 'staging' })]);
+    const collect = (time: string, pages: readonly Response[]) =>
+      collectGitHubDeployments({
+        instance: 'installation-1',
+        repositoryId: 11,
+        token: 'fictional-token',
+        clock: () => new Date(time),
+        fetch: transport([response(metadata), response([deployment()]), ...pages]).fetch,
+      });
+    const rows = [
+      status({ environment: 'staging' }),
+      status({
+        id: 32,
+        environment: 'staging',
+        created_at: '2026-01-02T11:00:00Z',
+        updated_at: '2026-01-02T11:00:00Z',
+      }),
+    ];
+    const partial = await collect('2026-01-05T00:00:00Z', [
+      response(rows, {
+        link: '<https://api.github.com/repos/renamed-owner/renamed-repo/deployments/21/statuses?per_page=100&page=2>; rel="next"',
+      }),
+      response({}, {}, 503),
+    ]);
+    expect(partial.transportComplete).toBe(false);
+    expect(partial.completedStatusTraversals).toEqual([]);
+    const earlier = snapshot([first, partial]);
+    expect(earlier.data.deployments[0]?.qualification).toBe('excluded');
+    const later = snapshot([first, partial], mapping(), '2026-01-05T00:00:00Z');
+    expect(later.data.deployments[0]).toMatchObject({
+      qualification: 'unknown',
+      environment: 'unknown',
+      effective_at: null,
+    });
+    expect(calculate(later)[0]?.qualification_unknown_count).toBe(1);
+    expect(snapshot([partial, first], mapping(), '2026-01-05T00:00:00Z').data).toEqual(later.data);
+    const complete = await collect('2026-01-06T00:00:00Z', [response(rows)]);
+    expect(
+      snapshot([first, partial, complete], mapping(), '2026-01-06T00:00:00Z').data.deployments[0]
+        ?.qualification,
+    ).toBe('excluded');
+    expect(earlier.data.deployments[0]?.qualification).toBe('excluded');
+  });
   it('dedupes full replay order-independently; opaque GitHub revisions reject', async () => {
     const batch = await github();
     const first = snapshot([batch, batch], mapping(true));
