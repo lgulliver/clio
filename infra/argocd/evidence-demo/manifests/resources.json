@@ -1,0 +1,100 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "clio-evidence-demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "artifact-caec442a9b61d0d572a24cc621655878d68e72f0c7024f5896e6de73784c612e",
+        "namespace": "clio-evidence-demo"
+      },
+      "immutable": true,
+      "binaryData": {
+        "index.html": "PCFkb2N0eXBlIGh0bWw+CjxodG1sIGxhbmc9ImVuIj48bWV0YSBjaGFyc2V0PSJ1dGYtOCI+PHRpdGxlPkNsaW8gc2FuZGJveCBjb25zdW1lcjwvdGl0bGU+Cjxib2R5PjxoMT5DbGlvIGV2aWRlbmNlIHNhbmRib3g8L2gxPjxwPlRoaXMgc3RhdGljIGFydGlmYWN0IHNlcnZlcyBzYW5kYm94IGNvbnN1bWVycyBvbmx5LiBJdCBpcyBub3QgcHJvZHVjdGlvbiB0cmFmZmljIG9yIHByb29mIG9mIHByb2R1Y3Rpb24gY292ZXJhZ2UuPC9wPjwvYm9keT48L2h0bWw+Cg=="
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-evidence-demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "sandbox-consumer"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "sandbox-consumer"
+            },
+            "annotations": {
+              "clio.artifact-digest": "sha256:caec442a9b61d0d572a24cc621655878d68e72f0c7024f5896e6de73784c612e"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "http",
+                "image": "docker.io/library/nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14",
+                "ports": [
+                  {
+                    "containerPort": 80
+                  }
+                ],
+                "volumeMounts": [
+                  {
+                    "name": "artifact",
+                    "mountPath": "/usr/share/nginx/html/index.html",
+                    "subPath": "index.html",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "artifact",
+                "configMap": {
+                  "name": "artifact-caec442a9b61d0d572a24cc621655878d68e72f0c7024f5896e6de73784c612e"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-evidence-demo"
+      },
+      "spec": {
+        "type": "ClusterIP",
+        "selector": {
+          "app": "sandbox-consumer"
+        },
+        "ports": [
+          {
+            "port": 80,
+            "targetPort": 80
+          }
+        ]
+      }
+    }
+  ]
+}
