@@ -13,7 +13,7 @@ RS256 GitHub App JWT with an RSA key of at least 2048 bits, a 60-second clock-sk
 and a maximum ten-minute claim lifetime. `createInstallationToken` receives the app ID,
 private key, installation ID and selected positive repository IDs in memory. It requests
 only those repositories and `deployments: read` (GitHub metadata permission is implicit).
-Responses are parsed from unknown; empty/invalid tokens and tokens expiring within 60 seconds are rejected. This helper requests narrow permissions but does not independently inspect granted permissions or repository lists in the response; a future live authorization boundary must verify installation ownership and scope. Errors contain
+Responses are parsed from unknown; empty/invalid tokens and tokens expiring within 60 seconds are rejected. This helper requests narrow permissions but does not independently inspect granted permissions or repository lists in the response; live callers use `verifyGitHubScope` below and the API operator-grant boundary to verify installation ownership and scope. Errors contain
 fixed codes/HTTP status numbers, without provider bodies, keys, JWTs or tokens. Nothing is
 persisted or logged. The returned token is a secret and must remain server-side.
 
@@ -166,3 +166,30 @@ Tests cover scoped token permissions and redaction, controlled pagination and re
 partial/rate-limit/cancelled collection, production promotion/earliest exposure, empty coverage,
 cutoffs/immutability, repeated SHA operations, Argo unknown/self-heal/retry evidence, explicit
 cross-provider correlation and conflicts, and pinned provisional/null metric outcomes.
+
+## Local live GitHub scope helpers
+
+`createBoundedGitHubTransport({fetch, timeoutMs?, maxBytes?})` wraps an injected
+server transport. Only HTTPS `api.github.com` requests are accepted; redirects
+are refused. Default limits are 10 seconds and 2,000,000 streamed bytes per
+request. One deadline includes fetch and body acquisition. Returned native
+responses contain buffered bodies. Caller abort and timeout settle even when
+injected fetch, body reads or stream cancellation ignore abort; such underlying
+work cannot be forcibly terminated by JavaScript.
+
+`verifyGitHubScope({appId, privateKey, installationId, accountId, accountType,
+repositoryId, clock, fetch, signal?})` validates App installation identity,
+unsuspended selected scope and exact Deployments/Metadata read permissions,
+issues a single-repository token, then checks numeric repository metadata and
+exact token repository listing. It uses the shared App JWT signer and bounded
+transport internally. Returns `{accountLogin, repositoryName, token, expiresAt}`;
+`repositoryName` is the repository name without owner (pair with `accountLogin`).
+Token stays server-only. Failures contain sanitized adapter codes.
+
+Operator grants, workspace ownership, persistence, collection deadlines and
+credential-file policy remain caller responsibilities. Helpers perform no
+network work until called. Controlled tests use fictional responses and an
+ephemeral signing key; they do not prove live access or complete evidence coverage.
+
+
+Scope-verification token lifecycle: if verification fails after token issuance, the unread/unreturned token may remain valid at GitHub until its one-hour expiry. This bounded read-only token is never logged or persisted. Verification does not promise remote token revocation; retirement/key rotation follows the provider setup guide. Live orchestration owns active-scope and revision fencing independently of token lifetime.

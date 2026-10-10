@@ -42,7 +42,9 @@ describe('application routing', () => {
     renderApp('/settings');
     expect(await screen.findByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
     expect(
-      screen.getByText('No sources connected. Provider connections are not available yet.'),
+      screen.getByText(
+        'Select a workspace and service to manage live GitHub connections or separate mock deployment settings.',
+      ),
     ).toBeVisible();
   });
 

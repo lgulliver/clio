@@ -1,6 +1,6 @@
 # Preparing real deployment sources
 
-This guide prepares and checks access to **real GitHub Deployments and Argo CD**. Provider-side setup can be done now. **Clio cannot connect these sources yet:** there is no live connection screen, provider credential store, live collection worker or Argo notification receiver. Saved settings and `pnpm worker:mock` remain fictional. Do not put collection secrets in the login OAuth settings or send notifications to Clio's API.
+This guide prepares and checks access to **real GitHub Deployments and Argo CD**. Provider-side setup prepares the scope and access checks. For the local GitHub connection workflow, continue with [connecting GitHub Deployments](connect-github.md): separate App key/grants files, service connection and live worker. `pnpm worker:mock` remains fictional. Argo has no live collector or notification receiver yet. Do not put collection secrets in login OAuth settings or send Argo notifications to Clio's API.
 
 Start with [local Clio setup](../getting-started.md). For an independent Argo practice environment, use the [optional Kubernetes-in-Docker sandbox](local-argocd.md). That sandbox supplies no data to Clio.
 
@@ -80,7 +80,7 @@ JS
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     'https://api.github.com/app/installations/INSTALLATION_ID' \
     > "$check_dir/installation.json"
-  jq '{account: {login: .account.login, id: .account.id}, repository_selection, permissions}' \
+  jq '{account: {login: .account.login, id: .account.id, type: .account.type}, repository_selection, permissions}' \
     "$check_dir/installation.json"
   jq --exit-status \
     '.repository_selection == "selected" and .permissions == {"deployments":"read","metadata":"read"}' \
@@ -288,9 +288,9 @@ argocd --argocd-context YOUR_CONTEXT --prompts-enabled proj role delete-token de
 
 See [token revocation](https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_proj_role_delete-token/). GitHub token revocation uses `DELETE /installation/token` authenticated with the token being retired. Delete local preflight token files after revocation. No long-lived credential is needed merely to keep a connection plan.
 
-**Stop here in the current Clio release.** Provider preparation is complete when scope, identities, exposure policy and sample evidence have been checked. Keep secrets in your private store; record only non-secret setup decisions in project notes. There are no supported live credential environment keys to add to Clio yet.
+**GitHub:** when scope, identities, exposure policy and sample evidence have been checked, continue with [the local connection guide](connect-github.md). Keep secrets in private files and record only non-secret setup decisions in project notes. **Argo:** stop at provider preparation; no authenticated Clio transport or connection configuration exists yet.
 
-The next connection implementation must bind credentials to an authorized workspace/service, verify installation/application ownership and scope, protect stored secrets, implement authenticated collection or durable receipt with replay protection, preserve immutable evidence and explicit gaps, and validate snapshots against the pinned OEMS revision. It must expose incomplete/unknown results honestly. Successful access checks, empty responses or transport completion do not establish metric coverage; deployment sources alone do not supply change failures, recovery evidence or complete commit lineage.
+The [local GitHub contract](live-github-contract.md) binds operator-granted scope to an authorized workspace/service, verifies installation/account/repository scope, keeps secrets outside PostgreSQL, and preserves immutable evidence and explicit gaps through pinned OEMS validation. Hosted self-service ownership proof and the Argo authenticated transport still require separate implementation. Results must expose incomplete/unknown states honestly. Successful access checks, empty responses or transport completion do not establish metric coverage; deployment sources alone do not supply change failures, recovery evidence or complete commit lineage.
 
 ## Troubleshooting
 
@@ -303,4 +303,4 @@ The next connection implementation must bind credentials to an authorized worksp
 | Argo 401 | Token expiry/revocation and correct Argo instance. |
 | Argo 403/404 | Project, application namespace/name, role object and effective RBAC; project filtering affects missing-resource responses. |
 | Healthy app but no usable rollout | Check operation identity, retention, operation kind, consumer exposure and source provenance separately. |
-| Clio still shows mocks | Expected: real-source connection and collection are not implemented in this release. |
+| Clio still shows mocks | Mock workflows remain separate. Configure the local GitHub App/grant and live worker using the connection guide; Argo remains supplied/mock evidence only. |

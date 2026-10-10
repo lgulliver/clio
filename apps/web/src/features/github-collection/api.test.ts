@@ -1,0 +1,135 @@
+import { describe, expect, it } from 'vitest';
+import {
+  closedWindow,
+  parseConnection,
+  parseRun,
+  parseRuns,
+  parseSavedConnection,
+  positiveId,
+} from './api';
+import { completed, connection, result, scope } from './fixtures.test-support';
+
+describe('live GitHub boundary', () => {
+  it('accepts workspace configured flag independent of historical active connection', () => {
+    expect(parseConnection({ connection, configured: false }, scope)).toEqual({
+      connection,
+      configured: false,
+    });
+    expect(parseConnection({ connection: null, configured: true }, scope).connection).toBeNull();
+    expect(parseRun({ run: completed }, scope, 1, completed.id)).toEqual(completed);
+  });
+  it.each([
+    { connection: { ...connection, token: 'private' }, configured: true },
+    { connection: { ...connection, mode: 'mock' }, configured: true },
+    { connection: { ...connection, provider: 'argocd' }, configured: true },
+    { connection: { ...connection, workspaceId: scope.serviceId }, configured: true },
+    { connection: { ...connection, serviceId: scope.workspaceId }, configured: true },
+    { connection: { ...connection, repositoryId: 9007199254740992 }, configured: true },
+    { connection: { ...connection, installationId: 0 }, configured: true },
+    {
+      connection: { ...connection, repositoryDeploymentsBelongToService: false },
+      configured: true,
+    },
+    { connection: { ...connection, verifiedAt: '2026-02-30T00:00:00Z' }, configured: true },
+    { connection: { ...connection, observedAt: '2026-01-04T00:00:00+00:00' }, configured: true },
+    { connection, configured: 'true' },
+    { connection, configured: true, privateKeyFile: '/secret' },
+  ])('rejects invalid/private connection fields %#', (value) =>
+    expect(() => parseConnection(value, scope)).toThrow(),
+  );
+  it('checks save/disconnect revision and active state', () => {
+    expect(
+      parseSavedConnection(
+        { connection: { ...connection, revision: 2, active: false } },
+        scope,
+        1,
+        false,
+      ).active,
+    ).toBe(false);
+    expect(() => parseSavedConnection({ connection }, scope, 1, true)).toThrow();
+    expect(() =>
+      parseSavedConnection({ connection: { ...connection, revision: 2 } }, scope, 1, false),
+    ).toThrow();
+  });
+  it.each([
+    { ...result, mode: 'mock' },
+    { ...result, connectionRevision: 2 },
+    { ...result, oemsRevision: 'other' },
+    { ...result, serviceId: scope.workspaceId },
+    { ...result, window: { ...result.window, calendarDays: 3 } },
+    { ...result, window: { ...result.window, start: '2026-01-01T01:00:00Z' } },
+    { ...result, window: { ...result.window, end: '2026-05-01T00:00:00Z', calendarDays: 120 } },
+    { ...result, evidenceCutoff: '2026-01-02T00:00:00Z' },
+    { ...result, transportComplete: 'yes' },
+    { ...result, coverage: { ...result.coverage, collectionComplete: true } },
+    { ...result, coverage: { ...result.coverage, deploymentHistoryComplete: true } },
+    { ...result, coverage: { ...result.coverage, recoveryEvidenceComplete: true } },
+    { ...result, deploymentFrequency: { ...result.deploymentFrequency, deploymentsPerDay: 0 } },
+    { ...result, deploymentFrequency: { ...result.deploymentFrequency, status: 'complete' } },
+    { ...result, deploymentFrequency: { ...result.deploymentFrequency, qualityReasons: [''] } },
+    { ...result, deploymentFrequency: { ...result.deploymentFrequency, qualityReasons: [] } },
+    { ...result, deploymentFrequency: { ...result.deploymentFrequency, count: 1 } },
+    { ...result, unknownCount: 3 },
+    { ...result, qualifyingCount: -1 },
+    { ...result, changeFailureRate: 0 },
+    { ...result, failedDeploymentRecoveryTime: 0 },
+    { ...result, rawEvidence: [] },
+  ])('rejects unverifiable quality/result fields %#', (value) =>
+    expect(() => parseRun({ run: { ...completed, result: value } }, scope)).toThrow(),
+  );
+  it('checks run scope/status/revision/detail ID/time and bounded unique newest history', () => {
+    for (const patch of [
+      { mode: 'mock' },
+      { workspaceId: scope.serviceId },
+      { attempts: 4 },
+      { status: 'pending' },
+      { failureCode: 'private failure' },
+      { completedAt: null },
+      { updatedAt: '2026-01-03T00:00:00Z' },
+      { completedAt: '2026-01-04T00:01:00Z' },
+      { leaseToken: 'secret' },
+    ])
+      expect(() => parseRun({ run: { ...completed, ...patch } }, scope)).toThrow();
+    expect(() => parseRun({ run: completed }, scope, 2)).toThrow();
+    expect(() =>
+      parseRun({ run: completed }, scope, 1, undefined, {
+        start: '2026-01-02T00:00:00Z',
+        end: '2026-01-03T00:00:00Z',
+      }),
+    ).toThrow();
+    expect(() => parseRun({ run: completed }, scope, undefined, scope.serviceId)).toThrow();
+    expect(() => parseRuns({ runs: [completed, completed] }, scope)).toThrow();
+    expect(() => parseRuns({ runs: Array.from({ length: 26 }, () => completed) }, scope)).toThrow();
+    expect(() =>
+      parseRuns(
+        {
+          runs: [
+            completed,
+            { ...completed, id: scope.serviceId, createdAt: '2026-01-04T00:00:02Z' },
+          ],
+        },
+        scope,
+      ),
+    ).toThrow();
+  });
+  it('accepts closed UTC 90 day window and rejects invalid/open/oversized dates', () => {
+    expect(closedWindow('2026-01-01', '2026-04-01', Date.parse('2026-04-01T00:00:00Z'))).toEqual({
+      start: '2026-01-01T00:00:00Z',
+      end: '2026-04-01T00:00:00Z',
+    });
+    for (const [start, end] of [
+      ['2026-01-01', '2026-04-02'],
+      ['2026-02-30', '2026-03-04'],
+      ['2026-01-01', '2026-01-01'],
+      ['2026-04-02', '2026-04-01'],
+      ['2026-04-01', '2026-04-02'],
+      ['2026-1-1', '2026-01-02'],
+    ])
+      expect(() =>
+        closedWindow(start ?? '', end ?? '', Date.parse('2026-04-01T12:00:00Z')),
+      ).toThrow();
+    expect(positiveId('00123')).toBe(123);
+    for (const id of ['0', '-1', '1.2', '1e3', '9007199254740992', ' 12', ''])
+      expect(() => positiveId(id)).toThrow();
+  });
+});

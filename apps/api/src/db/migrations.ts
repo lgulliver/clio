@@ -89,6 +89,18 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   );
   checkApplied(result.rows, migrations, true);
   // Also detect missing tables/columns rather than trusting ledger alone.
+  await pool.query(
+    'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,created_by FROM github_connection_revisions LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,service_id,connection_revision,request_id,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code,result,lease_token,lease_until,available_at FROM github_collection_runs LIMIT 0',
+  );
+  await pool.query(
+    'SELECT workspace_id,service_id,installation_id,repository_id,kind,record_key,observed_at,payload FROM github_collection_history LIMIT 0',
+  );
+  await pool.query(
+    'SELECT run_id,workspace_id,service_id,connection_revision,connection_input,service_name,evidence,snapshot,metrics,oems_revision,public_result,digest FROM github_collection_snapshots LIMIT 0',
+  );
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
   await pool.query('SELECT id, workspace_id, name, created_at FROM services LIMIT 0');
   await pool.query(

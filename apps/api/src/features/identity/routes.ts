@@ -5,6 +5,8 @@ import type { Pool } from 'pg';
 import { revision } from '../deployment-mappings/input.ts';
 import { previewMapping } from '../deployment-mappings/preview.ts';
 import { createMappingRepository } from '../deployment-mappings/repository.ts';
+import type { GitHubConfig } from '../github-collection/config.ts';
+import { registerGitHubRoutes } from '../github-collection/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
@@ -15,6 +17,7 @@ export interface IdentityDependencies {
   auth: ClioAuth;
   config: AuthConfig;
   pool: Pool;
+  github?: GitHubConfig | null;
 }
 
 function clientError(status: number) {
@@ -104,6 +107,30 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         return reply.code(409).send({ error: 'conflict' });
       return reply.code(503).send({ error: 'unavailable' });
     });
+    if (identity) {
+      registerGitHubRoutes(routes, { pool: identity.pool, github: identity.github ?? null, actor });
+    } else {
+      const base = '/api/workspaces/:workspaceId/services/:serviceId';
+      for (const path of [
+        '/github-connection',
+        '/github-connection/disconnect',
+        '/github-collection-runs',
+        '/github-collection-runs/:runId',
+      ]) {
+        routes.route({
+          method:
+            path === '/github-connection' || path === '/github-collection-runs'
+              ? ['GET', 'POST']
+              : path.endsWith('/disconnect')
+                ? 'POST'
+                : 'GET',
+          url: `${base}${path}`,
+          handler: async () => {
+            throw new IdentityError(503, 'unavailable');
+          },
+        });
+      }
+    }
     routes.route({
       method: ['GET', 'POST'],
       url: '/api/auth/*',

@@ -50,6 +50,30 @@ describe('unconfigured identity boundary', () => {
         ['POST', '/api/workspace-invitations/accept'],
         [
           'GET',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-connection',
+        ],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-connection',
+        ],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-connection/disconnect',
+        ],
+        [
+          'GET',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-collection-runs',
+        ],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-collection-runs',
+        ],
+        [
+          'GET',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/github-collection-runs/00000000-0000-0000-0000-000000000003',
+        ],
+        [
+          'GET',
           '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/deployment-mapping',
         ],
         [
@@ -147,6 +171,23 @@ it('rejects origin, scope escalation and public token/session endpoints', async 
           })
         ).statusCode,
       ).toBe(403);
+    }
+    for (const suffix of [
+      'github-connection',
+      'github-connection/disconnect',
+      'github-collection-runs',
+    ]) {
+      for (const origin of [undefined, 'https://evil.example', 'null']) {
+        const response = await server.inject({
+          method: 'POST',
+          url: `/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/${suffix}`,
+          headers: origin ? { origin } : {},
+          payload: {},
+        });
+        expect(response.statusCode).toBe(403);
+        expect(response.json()).toEqual({ error: 'forbidden' });
+        expect(response.headers['cache-control']).toBe('no-store');
+      }
     }
     for (const extra of [
       { scopes: ['repo'] },

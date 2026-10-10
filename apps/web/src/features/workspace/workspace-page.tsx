@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { DeploymentMappings } from '../deployment-mappings/deployment-mappings';
+import { GitHubCollection } from '../github-collection/github-collection';
 import {
   ApiError,
   errorMessage,
@@ -43,7 +44,8 @@ export function WorkspacePage({ authError }: { authError: boolean }) {
       <div className="panel">
         <h2 className="text-xl font-semibold">Connections</h2>
         <p className="mt-3 text-slate-600">
-          No sources connected. Provider connections are not available yet.
+          Select a workspace and service to manage live GitHub connections or separate mock
+          deployment settings.
         </p>
       </div>
     </section>
@@ -146,6 +148,7 @@ function WorkspaceScope({
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [denied, setDenied] = useState('');
   const [selectedService, setSelectedService] = useState('');
+  const [sourceMode, setSourceMode] = useState<'mock' | 'live'>('mock');
   const serviceSelection = useRef('');
   const mutationEpoch = useRef(0);
   const revision = session.revision;
@@ -286,13 +289,27 @@ function WorkspaceScope({
                         type="button"
                         className="control ml-2"
                         aria-label={`Mock settings for ${item.name}`}
-                        aria-pressed={selectedService === item.id}
+                        aria-pressed={selectedService === item.id && sourceMode === 'mock'}
                         onClick={() => {
-                          serviceSelection.current = item.id;
+                          serviceSelection.current = `mock:${item.id}`;
+                          setSourceMode('mock');
                           setSelectedService(item.id);
                         }}
                       >
                         Mock settings
+                      </button>
+                      <button
+                        type="button"
+                        className="control ml-2"
+                        aria-label={`Live GitHub for ${item.name}`}
+                        aria-pressed={selectedService === item.id && sourceMode === 'live'}
+                        onClick={() => {
+                          serviceSelection.current = `live:${item.id}`;
+                          setSourceMode('live');
+                          setSelectedService(item.id);
+                        }}
+                      >
+                        Live GitHub
                       </button>
                     </li>
                   ))}
@@ -300,14 +317,27 @@ function WorkspaceScope({
               ) : (
                 <p className="mt-3">No services yet.</p>
               )}
-              {activeService && (
+              {activeService && sourceMode === 'mock' && (
                 <DeploymentMappings
                   key={selectedService}
                   workspace={workspace}
                   serviceId={selectedService}
                   serviceName={activeService.name}
                   userId={userId}
-                  validSelection={() => valid() && serviceSelection.current === selectedService}
+                  validSelection={() =>
+                    valid() && serviceSelection.current === `mock:${selectedService}`
+                  }
+                />
+              )}
+              {activeService && sourceMode === 'live' && (
+                <GitHubCollection
+                  workspace={workspace}
+                  serviceId={selectedService}
+                  serviceName={activeService.name}
+                  userId={userId}
+                  validSelection={() =>
+                    valid() && serviceSelection.current === `live:${selectedService}`
+                  }
                 />
               )}
               {workspace.role === 'owner' ? (

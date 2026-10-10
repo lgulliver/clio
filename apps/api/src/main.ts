@@ -1,6 +1,7 @@
 import { readConfig } from './config.ts';
 import { checkReadiness, loadMigrations } from './db/migrations.ts';
 import { createPool } from './db/pool.ts';
+import { readGitHubConfig } from './features/github-collection/config.ts';
 import { createAuth } from './features/identity/auth.ts';
 import { readAuthConfig } from './features/identity/config.ts';
 import { createServer } from './server.ts';
@@ -8,6 +9,8 @@ import { createServer } from './server.ts';
 async function main() {
   const config = readConfig(process.env);
   const authConfig = readAuthConfig(process.env);
+  const github = await readGitHubConfig(process.env);
+  if (github && !authConfig) throw new Error('Live connections require identity configuration');
   const migrations = await loadMigrations();
   const pool = createPool(config.databaseUrl);
   const server = createServer(
@@ -15,7 +18,9 @@ async function main() {
       ready: () => checkReadiness(pool, migrations),
       close: () => pool.end(),
     },
-    authConfig ? { auth: createAuth(pool, authConfig), config: authConfig, pool } : undefined,
+    authConfig
+      ? { auth: createAuth(pool, authConfig), config: authConfig, pool, github }
+      : undefined,
   );
   let closing = false;
   const shutdown = async () => {

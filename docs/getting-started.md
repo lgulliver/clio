@@ -1,6 +1,6 @@
 # Getting started locally
 
-This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. No live provider is connected and no real measurements appear on the overview.
+This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider or populate real overview measurements. A separate [live GitHub workflow](providers/connect-github.md) is available after operator App/grant configuration.
 
 ## Prerequisites and clone
 
@@ -138,16 +138,16 @@ pnpm demo:providers --source=argocd --attest-exposure
 | Source/workflow | Available locally | Future live requirements |
 | --- | --- | --- |
 | GitHub OAuth | Real sign-in and database sessions | Separate from collection credentials |
-| GitHub deployments | Fictional adapter demo, saved mock settings, ephemeral preview and durable mock runs | Workspace-bound GitHub App installation and explicitly selected repository/environment scope |
+| GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow, broader metric evidence and scheduling |
 | Argo CD operations | Fictional supplied-evidence normalization and the same mock workflows | Authenticated ingestion or collection client, cluster/application scope, immutable operation evidence and exposure policy |
 | Optional Kind/Argo sandbox | Independent controller/UI learning environment | Does not connect to Clio or supply its mock runs |
-| Live measurements | Unavailable | Verified collection, history/coverage and evidence for each supported metric |
+| Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and actual overview presentation |
 
-For future GitHub access, select only intended repositories for a separate GitHub App. Initial permission design is **Deployments read-only**, with mandatory **Metadata read-only**; no source-code or commit-history access is assumed. Record stable repository IDs and explicit production environment names. A successful GitHub deployment status or `production_environment` flag alone cannot establish consumer exposure: choose and verify an exposure policy for the service. App signing keys and installation tokens stay server-side; storage/setup is not implemented by this guide.
+For live GitHub access, select only intended repositories for a separate GitHub App. Initial permission design is **Deployments read-only**, with mandatory **Metadata read-only**; no source-code or commit-history access is assumed. Record stable repository IDs and explicit production environment names. A successful GitHub deployment status or `production_environment` flag alone cannot establish consumer exposure: choose and verify an exposure policy for the service. App signing keys and installation tokens stay server-side; use the [live connection guide](providers/connect-github.md) for operator grants and worker configuration.
 
 For future Argo evidence, identify Argo instance, destination cluster and application UID/name, plus immutable operation/rollout identity and observation times. Keep the manifests repository/configuration revision distinct from the application's source repository and commit provenance. Preserve operation evidence before mutable application status/history is replaced. Synced/Healthy does not independently prove production exposure or source lineage. Map each source explicitly to a Clio service and correlate shared rollouts explicitly; equal SHAs never imply correlation automatically.
 
-[Real-source setup](providers/real-sources.md) covers GitHub App registration, installation access checks, scoped Argo tokens, production mapping and rotation. These provider-side steps work independently of Clio; live connection UI, credential storage and ingestion endpoints remain unimplemented. [Provider setup status](providers/local-setup.md) summarizes that boundary. No live connector is enabled by selecting a mock source. The [optional local Argo guide](providers/local-argocd.md) uses a separate Docker-backed Kubernetes sandbox and no private repository credentials.
+[Real-source setup](providers/real-sources.md) covers GitHub App registration, installation access checks, scoped Argo tokens, production mapping and rotation. These provider-side steps work independently of Clio; the [local GitHub connection](providers/connect-github.md) provides a separate service workflow while Argo transport and hosted credential storage remain unimplemented. [Provider setup status](providers/local-setup.md) summarizes that boundary. No live connector is enabled by selecting a mock source. The [optional local Argo guide](providers/local-argocd.md) uses a separate Docker-backed Kubernetes sandbox and no private repository credentials.
 
 ## Troubleshooting
 

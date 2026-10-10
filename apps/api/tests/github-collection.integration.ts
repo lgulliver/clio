@@ -1,0 +1,745 @@
+import { randomUUID } from 'node:crypto';
+import { type GitHubBatch, identity } from '@clio/adapters';
+import Fastify from 'fastify';
+import { Pool } from 'pg';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { databaseUrl } from '../src/config.ts';
+import { checkReadiness, loadMigrations, migrate } from '../src/db/migrations.ts';
+import { type GitHubConfig, parseGrants } from '../src/features/github-collection/config.ts';
+import { snapshotDigest } from '../src/features/github-collection/digest.ts';
+import { parseConnection } from '../src/features/github-collection/input.ts';
+import { type GitHubProvider, githubProvider } from '../src/features/github-collection/provider.ts';
+import { createGitHubRepository } from '../src/features/github-collection/repository.ts';
+import { registerGitHubRoutes } from '../src/features/github-collection/routes.ts';
+import { createGitHubWorker, processOne } from '../src/features/github-collection/worker.ts';
+import { IdentityError } from '../src/features/identity/input.ts';
+import { createIdentityRepository } from '../src/features/identity/repository.ts';
+
+if (!process.env.CLIO_TEST_DATABASE_URL)
+  throw new Error('CLIO_TEST_DATABASE_URL is required for PostgreSQL integration tests');
+const connectionString = databaseUrl(process.env.CLIO_TEST_DATABASE_URL);
+const schema = `clio_test_${randomUUID().replaceAll('-', '')}`;
+const admin = new Pool({ connectionString, connectionTimeoutMillis: 3000 });
+const pool = new Pool({
+  connectionString,
+  options: `-c search_path=${schema}`,
+  connectionTimeoutMillis: 3000,
+  statement_timeout: 10000,
+});
+const identities = createIdentityRepository(pool);
+const owner = { userId: 'github-owner', sessionId: 'github-owner-session' },
+  member = { userId: 'github-member', sessionId: 'github-member-session' },
+  outsider = { userId: 'github-outsider', sessionId: 'github-outsider-session' };
+let created = false;
+const migrations = await loadMigrations();
+const window = { start: '2026-01-01T00:00:00.000Z', end: '2026-01-03T00:00:00.000Z' };
+const settings = {
+  expectedRevision: null,
+  installationId: 10,
+  repositoryId: 20,
+  productionEnvironment: 'production',
+  exposurePolicyReference: 'urn:fixture:policy:v1',
+  repositoryDeploymentsBelongToService: true,
+};
+function batch(): GitHubBatch {
+  const sourceId = identity('github', '10'),
+    deploymentId = identity(sourceId, 'deployment', 20, 30),
+    observedAt = new Date().toISOString();
+  return {
+    deployments: [
+      {
+        id: deploymentId,
+        sourceId,
+        sourceDeploymentId: identity('repository', 20, 'deployment', 30),
+        revision: '2026-01-02T10:00:00Z',
+        environment: 'production',
+        eventAt: '2026-01-02T10:00:00Z',
+        observedAt,
+        sourceRef: `urn:clio:${identity('github', '10', 'repository', 20, 'deployment', 30)}`,
+        repository: {
+          repositoryId: identity('github', '10', 'repository', 20),
+          tipSha: 'a'.repeat(40),
+        },
+        reconciledConfigurationRevision: null,
+        configurationRepositoryId: null,
+        deploymentTask: null,
+        operationKind: 'rollout',
+      },
+    ],
+    statuses: [
+      {
+        id: identity(sourceId, 'status', 20, 40),
+        deploymentId,
+        revision: '2026-01-02T10:01:00Z',
+        environment: 'production',
+        signal: 'success',
+        health: null,
+        consumerExposure: false,
+        eventAt: '2026-01-02T10:01:00Z',
+        observedAt,
+        sourceRef: `urn:clio:${identity('github', '10', 'repository', 20, 'status', 40)}`,
+      },
+    ],
+    completedStatusTraversals: [{ deploymentId, observedAt }],
+    transportComplete: true,
+    diagnostics: [],
+  };
+}
+async function fixture(save = true) {
+  const workspace = await identities.createWorkspace(owner, `GitHub fixture ${randomUUID()}`);
+  const service = await identities.createService(owner, workspace.id, 'Fixture service');
+  await pool.query(
+    "INSERT INTO workspace_memberships(workspace_id,user_id,role) VALUES($1,$2,'member')",
+    [workspace.id, member.userId],
+  );
+  const config: GitHubConfig = Object.freeze({
+    appId: 12,
+    privateKey: 'fictional-not-a-signing-key',
+    grants: parseGrants(
+      [
+        {
+          workspaceId: workspace.id,
+          installationId: 10,
+          accountId: 11,
+          accountType: 'Organization',
+          repositoryIds: [20, 21],
+        },
+      ],
+      12,
+    ),
+  });
+  const provider = {
+    verify: vi.fn(async (_input: Parameters<GitHubProvider['verify']>[0]) => ({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    })),
+    collect: vi.fn(async (_input: Parameters<GitHubProvider['collect']>[0]) => batch()),
+  };
+  const repository = createGitHubRepository(pool, config, { provider });
+  if (save) await repository.save(owner, workspace.id, service.id, settings);
+  provider.verify.mockClear();
+  const enqueue = (requestId = randomUUID(), revision = 1, w = window) =>
+    repository.enqueue(owner, workspace.id, service.id, {
+      connectionRevision: revision,
+      requestId,
+      window: w,
+    });
+  return {
+    workspaceId: workspace.id,
+    serviceId: service.id,
+    config,
+    provider,
+    repository,
+    enqueue,
+    worker: createGitHubWorker(pool, config),
+  };
+}
+beforeAll(async () => {
+  await admin.query(`CREATE SCHEMA "${schema}"`);
+  created = true;
+  await migrate(pool, migrations);
+  for (const actor of [owner, member, outsider]) {
+    await pool.query('INSERT INTO auth_users(id,name,email,email_verified) VALUES($1,$1,$2,true)', [
+      actor.userId,
+      `${actor.userId}@example.com`,
+    ]);
+    await pool.query(
+      "INSERT INTO auth_sessions(id,user_id,token,expires_at) VALUES($1,$2,$1,now()+interval '1 day')",
+      [actor.sessionId, actor.userId],
+    );
+  }
+});
+afterEach(async () => {
+  await pool.query(
+    "UPDATE github_collection_runs SET status='failed',failure_code='github_connection_revoked',completed_at=statement_timestamp(),updated_at=statement_timestamp(),lease_token=NULL,lease_until=NULL WHERE status IN ('pending','running')",
+  );
+  await pool.query(
+    "UPDATE auth_sessions SET expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
+    [owner.sessionId],
+  );
+});
+afterAll(async () => {
+  await pool.end();
+  if (created) await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
+  await admin.end();
+});
+describe('live GitHub PostgreSQL boundaries', () => {
+  it('rejects ungranted scope before network; serializes revision races and rechecks owner/session after verification', async () => {
+    const f = await fixture(false);
+    await expect(
+      f.repository.save(owner, f.workspaceId, f.serviceId, { ...settings, repositoryId: 99 }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      f.repository.save(member, f.workspaceId, f.serviceId, settings),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(f.provider.verify).not.toHaveBeenCalled();
+    let release = () => {};
+    const verified = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.provider.verify.mockImplementationOnce(async () => {
+      await verified;
+      return {
+        accountLogin: 'fixture-owner',
+        repositoryName: 'fixture-repo',
+        token: 'private',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      };
+    });
+    const pending = f.repository.save(owner, f.workspaceId, f.serviceId, settings);
+    await vi.waitFor(() => expect(f.provider.verify).toHaveBeenCalledTimes(1));
+    await pool.query(
+      "UPDATE workspace_memberships SET role='member' WHERE workspace_id=$1 AND user_id=$2",
+      [f.workspaceId, owner.userId],
+    );
+    release();
+    await expect(pending).rejects.toMatchObject({ status: 403 });
+    await pool.query(
+      "UPDATE workspace_memberships SET role='owner' WHERE workspace_id=$1 AND user_id=$2",
+      [f.workspaceId, owner.userId],
+    );
+    f.provider.verify.mockImplementationOnce(async () => {
+      await pool.query(
+        "UPDATE auth_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+        [owner.sessionId],
+      );
+      return {
+        accountLogin: 'fixture-owner',
+        repositoryName: 'fixture-repo',
+        token: 'private',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      };
+    });
+    await expect(
+      f.repository.save(owner, f.workspaceId, f.serviceId, settings),
+    ).rejects.toMatchObject({ status: 401 });
+    await pool.query(
+      "UPDATE auth_sessions SET expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
+      [owner.sessionId],
+    );
+    const concurrent = await Promise.allSettled([
+      f.repository.save(owner, f.workspaceId, f.serviceId, settings),
+      f.repository.save(owner, f.workspaceId, f.serviceId, settings),
+    ]);
+    expect(concurrent.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(concurrent.find((r) => r.status === 'rejected')).toMatchObject({
+      reason: { status: 409 },
+    });
+  });
+  it('pins immutable requests, rejects changed replay/active concurrency, scopes member reads', async () => {
+    const f = await fixture(),
+      requestId = randomUUID();
+    const replay = await Promise.all([f.enqueue(requestId), f.enqueue(requestId)]);
+    expect(replay[0]).toEqual(replay[1]);
+    await expect(
+      f.enqueue(requestId, 1, { ...window, end: '2026-01-04T00:00:00.000Z' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(f.enqueue()).rejects.toMatchObject({ status: 409 });
+    await expect(
+      f.repository.enqueue(member, f.workspaceId, f.serviceId, {
+        connectionRevision: 1,
+        requestId: randomUUID(),
+        window,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(
+      await f.repository.getRun(member, f.workspaceId, f.serviceId, replay[0]?.id ?? ''),
+    ).toEqual(replay[0]);
+    await expect(f.repository.list(outsider, f.workspaceId, f.serviceId)).rejects.toMatchObject({
+      status: 404,
+    });
+    const other = await fixture();
+    await expect(
+      f.repository.getRun(owner, other.workspaceId, other.serviceId, replay[0]?.id ?? ''),
+    ).rejects.toMatchObject({ status: 404 });
+    await identities.revokeMember(owner, f.workspaceId, member.userId);
+    await expect(f.repository.list(member, f.workspaceId, f.serviceId)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(
+      pool.query("UPDATE github_collection_runs SET service_name='changed' WHERE id=$1", [
+        replay[0]?.id,
+      ]),
+    ).rejects.toThrow('immutable');
+  });
+  it('serializes distinct enqueue requests and allows independent service claims', async () => {
+    const f = await fixture();
+    const concurrent = await Promise.allSettled([f.enqueue(), f.enqueue()]);
+    expect(concurrent.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(concurrent.find((r) => r.status === 'rejected')).toMatchObject({
+      reason: { status: 409 },
+    });
+    const service = await identities.createService(
+      owner,
+      f.workspaceId,
+      'Independent GitHub service',
+    );
+    await f.repository.save(owner, f.workspaceId, service.id, settings);
+    await f.repository.enqueue(owner, f.workspaceId, service.id, {
+      connectionRevision: 1,
+      requestId: randomUUID(),
+      window,
+    });
+    const claims = await Promise.all([f.worker.claim(), f.worker.claim()]);
+    expect(new Set(claims.map((claim) => claim?.id)).size).toBe(2);
+    for (const claim of claims) {
+      if (!claim) throw new Error('Missing independent claim');
+      expect(await f.worker.complete(claim, batch(), new Date().toISOString())).toBe(true);
+    }
+  });
+  it('fences disconnect and changed revisions, preserving immutable historical input/replays', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const claim = await f.worker.claim();
+    if (!claim) throw new Error('Missing claim');
+    const disconnected = await f.repository.disconnect(owner, f.workspaceId, f.serviceId, {
+      expectedRevision: 1,
+    });
+    expect(disconnected).toMatchObject({ revision: 2, active: false });
+    expect(await f.worker.complete(claim, batch(), new Date().toISOString())).toBe(false);
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      failureCode: 'github_connection_revoked',
+    });
+    await expect(f.enqueue(randomUUID(), 2)).rejects.toMatchObject({ status: 409 });
+    await expect(
+      pool.query('DELETE FROM github_connection_revisions WHERE workspace_id=$1', [f.workspaceId]),
+    ).rejects.toThrow('immutable');
+    const saved = await f.repository.save(owner, f.workspaceId, f.serviceId, {
+      ...settings,
+      expectedRevision: 2,
+    });
+    expect(saved.revision).toBe(3);
+    const next = await f.enqueue(randomUUID(), 3);
+    await f.repository.save(owner, f.workspaceId, f.serviceId, {
+      ...settings,
+      expectedRevision: 3,
+    });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).toMatchObject({
+      status: 'failed',
+      attempts: 0,
+    });
+  });
+  it('rechecks grants before token issuance and completion; removed grants fence jobs', async () => {
+    const f = await fixture();
+    await f.enqueue();
+    const denied = { ...f.config, grants: [] };
+    await processOne(pool, denied, { provider: f.provider });
+    expect(f.provider.verify).not.toHaveBeenCalled();
+    expect((await f.repository.list(owner, f.workspaceId, f.serviceId))[0]).toMatchObject({
+      status: 'failed',
+      failureCode: 'github_connection_revoked',
+    });
+    const queued = await f.enqueue();
+    let current: GitHubConfig | null = f.config;
+    f.provider.collect.mockImplementationOnce(async () => {
+      current = denied;
+      return batch();
+    });
+    await processOne(pool, f.config, { provider: f.provider, configNow: () => current });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'failed',
+      failureCode: 'github_connection_revoked',
+    });
+    expect(
+      (
+        await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+          queued.id,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it('claims once concurrently, recovers expired leases, exhausts three attempts, rejects stale commits', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    const claims = await Promise.all([f.worker.claim(), f.worker.claim()]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const first = claims.find((c) => c !== null);
+    if (!first) throw new Error('Missing claim');
+    await pool.query(
+      "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
+      [queued.id],
+    );
+    const second = await f.worker.claim();
+    if (!second) throw new Error('Missing second claim');
+    expect(second.token).not.toBe(first.token);
+    expect(await f.worker.complete(first, batch(), new Date().toISOString())).toBe(false);
+    expect(await f.worker.fail(first)).toBe(false);
+    await pool.query(
+      "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
+      [queued.id],
+    );
+    const third = await f.worker.claim();
+    if (!third) throw new Error('Missing third claim');
+    await pool.query(
+      "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
+      [queued.id],
+    );
+    expect(await f.worker.claim()).toBeNull();
+    expect(await f.worker.complete(third, batch(), new Date().toISOString())).toBe(false);
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'failed',
+      attempts: 3,
+      failureCode: 'github_processing_failed',
+    });
+  });
+  it('stores useful partial evidence and earliest observations, retains old success after disappearance', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue(),
+      initial = batch();
+    f.provider.collect.mockResolvedValueOnce({
+      ...initial,
+      transportComplete: false,
+      diagnostics: [{ code: 'rate_limited', resource: 'private-path', retryAfterSeconds: 9999 }],
+    });
+    await processOne(pool, f.config, { provider: f.provider });
+    const done = await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id);
+    expect(done).toMatchObject({
+      status: 'succeeded',
+      result: {
+        transportComplete: false,
+        qualifyingCount: 1,
+        deploymentFrequency: { count: 1, deploymentsPerDay: null },
+        coverage: {
+          collectionComplete: false,
+          deploymentHistoryComplete: false,
+          recoveryEvidenceComplete: false,
+        },
+      },
+    });
+    const history = await pool.query<Record<string, unknown>>(
+      'SELECT payload FROM github_collection_history WHERE workspace_id=$1 AND kind=$2',
+      [f.workspaceId, 'status'],
+    );
+    expect(history.rows[0]?.payload).toEqual(initial.statuses[0]);
+    const next = await f.enqueue();
+    f.provider.collect.mockResolvedValueOnce({
+      deployments: [],
+      statuses: [],
+      completedStatusTraversals: [],
+      transportComplete: true,
+      diagnostics: [],
+    });
+    await processOne(pool, f.config, { provider: f.provider });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).toMatchObject({
+      status: 'succeeded',
+      result: { transportComplete: true, qualifyingCount: 1, deploymentFrequency: { count: 1 } },
+    });
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toEqual(done);
+    await expect(
+      pool.query("UPDATE github_collection_history SET payload='{}' WHERE workspace_id=$1", [
+        f.workspaceId,
+      ]),
+    ).rejects.toThrow('immutable');
+  });
+  it('bounds retry delays and three empty acquisition failures without exposing provider diagnostics', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue();
+    f.provider.collect.mockResolvedValue({
+      deployments: [],
+      statuses: [],
+      completedStatusTraversals: [],
+      transportComplete: false,
+      diagnostics: [{ code: 'private-reason', resource: 'private-path', retryAfterSeconds: 9999 }],
+    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await pool.query(
+        "UPDATE github_collection_runs SET available_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+        [queued.id],
+      );
+      await processOne(pool, f.config, { provider: f.provider });
+      const done = await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id);
+      expect(done).toMatchObject({
+        status: attempt === 3 ? 'failed' : 'pending',
+        attempts: attempt,
+        result: null,
+      });
+      expect(JSON.stringify(done)).not.toContain('private');
+      if (attempt < 3) {
+        expect(await f.worker.claim()).toBeNull();
+        const delay = await pool.query<Record<string, unknown>>(
+          'SELECT extract(epoch FROM available_at-clock_timestamp())::float AS delay FROM github_collection_runs WHERE id=$1',
+          [queued.id],
+        );
+        expect(Number(delay.rows[0]?.delay)).toBeGreaterThan(290);
+        expect(Number(delay.rows[0]?.delay)).toBeLessThanOrEqual(300);
+      }
+    }
+  });
+  it('keeps unchanged backfills flat while retaining new source observations and immutable snapshots', async () => {
+    const f = await fixture();
+    const counts = async () =>
+      (
+        await pool.query<{ count: number }>(
+          'SELECT count(*)::int AS count FROM github_collection_history WHERE workspace_id=$1 AND service_id=$2',
+          [f.workspaceId, f.serviceId],
+        )
+      ).rows[0]?.count;
+    for (let i = 0; i < 12; i++) {
+      const run = await f.enqueue();
+      await processOne(pool, f.config, { provider: f.provider });
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, run.id)).toMatchObject({
+        status: 'succeeded',
+      });
+      expect(await counts()).toBe(3);
+    }
+    f.provider.collect.mockImplementationOnce(async () => {
+      const next = batch();
+      const prior = next.statuses[0];
+      if (!prior) throw new Error('Missing status');
+      return {
+        ...next,
+        statuses: [
+          ...next.statuses,
+          {
+            ...prior,
+            id: identity(identity('github', '10'), 'status', 20, 41),
+            sourceRef: `urn:clio:${identity('github', '10', 'repository', 20, 'status', 41)}`,
+            signal: 'inactive',
+          },
+        ],
+      };
+    });
+    await f.enqueue();
+    await processOne(pool, f.config, { provider: f.provider });
+    expect(await counts()).toBe(5);
+    const snapshots = await pool.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM github_collection_snapshots WHERE workspace_id=$1 AND service_id=$2',
+      [f.workspaceId, f.serviceId],
+    );
+    expect(snapshots.rows[0]?.count).toBe(13);
+  });
+  it('aborts uncooperative acquisition on shutdown and never commits partial data afterwards', async () => {
+    const f = await fixture(),
+      queued = await f.enqueue(),
+      controller = new AbortController();
+    f.provider.collect.mockImplementationOnce(async () => new Promise<GitHubBatch>(() => {}));
+    const processing = processOne(pool, f.config, {
+      provider: f.provider,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(f.provider.collect).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await expect(processing).resolves.toBe(true);
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      result: null,
+    });
+    expect(
+      (
+        await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+          queued.id,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it('rolls back history and snapshot together when terminal commit fails; rejects immutable changes and conflict', async () => {
+    const f = await fixture();
+    await f.enqueue();
+    const claim = await f.worker.claim();
+    if (!claim) throw new Error('Missing claim');
+    await pool.query(
+      `CREATE FUNCTION reject_github_test_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='succeeded' THEN RAISE EXCEPTION 'test terminal failure'; END IF; RETURN NEW; END $$`,
+    );
+    await pool.query(
+      'CREATE TRIGGER test_github_completion BEFORE UPDATE ON github_collection_runs FOR EACH ROW EXECUTE FUNCTION reject_github_test_completion()',
+    );
+    const acquired = batch();
+    try {
+      await expect(f.worker.complete(claim, acquired, new Date().toISOString())).rejects.toThrow(
+        'test terminal failure',
+      );
+      expect(
+        (
+          await pool.query('SELECT payload FROM github_collection_history WHERE workspace_id=$1', [
+            f.workspaceId,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+            claim.id,
+          ])
+        ).rowCount,
+      ).toBe(0);
+    } finally {
+      await pool.query('DROP TRIGGER test_github_completion ON github_collection_runs');
+      await pool.query('DROP FUNCTION reject_github_test_completion()');
+    }
+    expect(await f.worker.complete(claim, acquired, new Date().toISOString())).toBe(true);
+    expect(await f.worker.complete(claim, acquired, new Date().toISOString())).toBe(false);
+    const stored = (
+      await pool.query<Record<string, unknown>>(
+        'SELECT * FROM github_collection_snapshots WHERE run_id=$1',
+        [claim.id],
+      )
+    ).rows[0];
+    if (!stored) throw new Error('Missing snapshot');
+    expect(stored.digest).toBe(
+      snapshotDigest({
+        connection: parseConnection(stored.connection_input),
+        serviceName: stored.service_name,
+        evidence: stored.evidence,
+        snapshot: stored.snapshot,
+        metrics: stored.metrics,
+        oemsRevision: stored.oems_revision,
+        result: stored.public_result,
+      }),
+    );
+    await expect(
+      pool.query('DELETE FROM github_collection_snapshots WHERE run_id=$1', [claim.id]),
+    ).rejects.toThrow('immutable');
+    await expect(
+      pool.query("UPDATE github_collection_runs SET result='{}' WHERE id=$1", [claim.id]),
+    ).rejects.toThrow('immutable');
+    const next = await f.enqueue(),
+      nextClaim = await f.worker.claim();
+    if (!nextClaim) throw new Error('Missing next claim');
+    const status = acquired.statuses[0];
+    if (!status) throw new Error('Missing status');
+    await expect(
+      f.worker.complete(
+        nextClaim,
+        { ...acquired, statuses: [{ ...status, signal: 'failure' }] },
+        new Date().toISOString(),
+      ),
+    ).rejects.toThrow('Conflicting source record');
+    expect((await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).status).toBe(
+      'running',
+    );
+  });
+  it('reports microsecond observations, independent empty coverage, newest 25; detects readiness drift', async () => {
+    const f = await fixture();
+    f.provider.collect.mockResolvedValue({
+      deployments: [],
+      statuses: [],
+      completedStatusTraversals: [],
+      transportComplete: true,
+      diagnostics: [],
+    });
+    for (let i = 0; i < 26; i++) {
+      await f.enqueue();
+      await processOne(pool, f.config, { provider: f.provider });
+    }
+    const listed = await f.repository.list(member, f.workspaceId, f.serviceId);
+    expect(listed).toHaveLength(25);
+    expect(listed.map((r) => r.createdAt)).toEqual(
+      listed
+        .map((r) => r.createdAt)
+        .sort()
+        .reverse(),
+    );
+    expect(listed[0]?.result).toMatchObject({
+      deploymentCount: 0,
+      qualifyingCount: 0,
+      unknownCount: 0,
+      transportComplete: true,
+      deploymentFrequency: { count: 0, deploymentsPerDay: null },
+      coverage: { collectionComplete: false },
+    });
+    const connection = (await f.repository.get(member, f.workspaceId, f.serviceId)).connection;
+    expect(connection?.observedAt).toMatch(/\.\d{6}Z$/);
+    await checkReadiness(pool, migrations);
+    await pool.query(
+      'ALTER TABLE github_collection_snapshots RENAME COLUMN evidence TO missing_evidence',
+    );
+    try {
+      await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+    } finally {
+      await pool.query(
+        'ALTER TABLE github_collection_snapshots RENAME COLUMN missing_evidence TO evidence',
+      );
+    }
+  });
+  it('keeps installed HTTP routes inside caller identity/origin/redaction hooks, exposes no secrets', async () => {
+    const f = await fixture();
+    const server = Fastify({ logger: false });
+    let current = owner;
+    const origin = 'http://localhost:5173';
+    server.register(async (routes) => {
+      routes.addHook('onRequest', async (_request, reply) => {
+        reply.header('cache-control', 'no-store');
+      });
+      routes.setErrorHandler((error, _request, reply) => {
+        const known = error instanceof IdentityError;
+        reply
+          .code(known ? error.status : 503)
+          .send({ error: known ? error.message : 'unavailable' });
+      });
+      registerGitHubRoutes(routes, {
+        pool,
+        github: f.config,
+        actor: async (request, reply, write) => {
+          if (write && request.headers.origin !== origin) throw new IdentityError(403, 'forbidden');
+          reply.header('set-cookie', 'renewed=fixture; HttpOnly');
+          return current;
+        },
+      });
+    });
+    const base = `/api/workspaces/${f.workspaceId}/services/${f.serviceId}`;
+    try {
+      const read = await server.inject(`${base}/github-connection`);
+      expect(read.statusCode).toBe(200);
+      expect(read.headers['cache-control']).toBe('no-store');
+      expect(read.headers['set-cookie']).toContain('renewed=fixture');
+      expect(read.json()).toMatchObject({ configured: true, connection: { mode: 'live' } });
+      const payload = { connectionRevision: 1, requestId: randomUUID(), window };
+      expect(
+        (await server.inject({ method: 'POST', url: `${base}/github-collection-runs`, payload }))
+          .statusCode,
+      ).toBe(403);
+      const queued = await server.inject({
+        method: 'POST',
+        url: `${base}/github-collection-runs`,
+        headers: { origin },
+        payload,
+      });
+      expect(queued.statusCode).toBe(202);
+      for (const secret of [
+        'privateKey',
+        'token',
+        'lease',
+        'grant_fingerprint',
+        'connection_input',
+        'requestId',
+      ])
+        expect(queued.body).not.toContain(secret);
+      current = member;
+      expect(
+        (
+          await server.inject({
+            method: 'POST',
+            url: `${base}/github-connection/disconnect`,
+            headers: { origin },
+            payload: { expectedRevision: 1 },
+          })
+        ).statusCode,
+      ).toBe(403);
+      const spy = vi
+        .spyOn(githubProvider, 'verify')
+        .mockRejectedValueOnce(new Error('private provider token'));
+      current = owner;
+      try {
+        const failed = await server.inject({
+          method: 'POST',
+          url: `${base}/github-connection`,
+          headers: { origin },
+          payload: { ...settings, expectedRevision: 1 },
+        });
+        expect(failed.statusCode).toBe(503);
+        expect(failed.json()).toEqual({ error: 'unavailable' });
+      } finally {
+        spy.mockRestore();
+      }
+      current = outsider;
+      expect((await server.inject(`${base}/github-collection-runs`)).statusCode).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
+});

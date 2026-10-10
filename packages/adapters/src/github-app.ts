@@ -5,22 +5,12 @@ export const githubApiVersion = '2026-03-10';
 export type FetchTransport = (url: string, init: RequestInit) => Promise<Response>;
 export type InstallationToken = Readonly<{ token: string; expiresAt: string }>;
 
-/** Authorization precondition: caller proves workspace owner + installation/repository scope. */
-export async function createInstallationToken(input: {
+/** Shared server-only signing boundary; signing failures never include key material. */
+export function signGitHubAppJwt(input: {
   appId: string;
   privateKey: string;
-  installationId: number;
-  repositoryIds: readonly number[];
   clock: () => Date;
-  fetch: FetchTransport;
-  signal?: AbortSignal;
-}): Promise<InstallationToken> {
-  positiveId(input.installationId);
-  string(input.appId);
-  if (input.repositoryIds.length === 0 || input.repositoryIds.length > 500) {
-    throw new AdapterError('invalid_repository_scope');
-  }
-  const repositoryIds = [...new Set(input.repositoryIds.map(positiveId))].sort((a, b) => a - b);
+}): string {
   const now = input.clock();
   const seconds = Math.floor(now.getTime() / 1000);
   if (!Number.isSafeInteger(seconds)) throw new AdapterError('invalid_clock');
@@ -40,6 +30,26 @@ export async function createInstallationToken(input: {
   } catch {
     throw new AdapterError('invalid_app_signing_key');
   }
+  return jwt;
+}
+
+/** Authorization precondition: caller proves workspace owner + installation/repository scope. */
+export async function createInstallationToken(input: {
+  appId: string;
+  privateKey: string;
+  installationId: number;
+  repositoryIds: readonly number[];
+  clock: () => Date;
+  fetch: FetchTransport;
+  signal?: AbortSignal;
+}): Promise<InstallationToken> {
+  positiveId(input.installationId);
+  string(input.appId);
+  if (input.repositoryIds.length === 0 || input.repositoryIds.length > 500) {
+    throw new AdapterError('invalid_repository_scope');
+  }
+  const repositoryIds = [...new Set(input.repositoryIds.map(positiveId))].sort((a, b) => a - b);
+  const jwt = signGitHubAppJwt(input);
   if (input.signal?.aborted) throw new AdapterError('cancelled');
   let response: Response;
   try {

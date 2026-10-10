@@ -1,8 +1,8 @@
 # Local provider setup
 
-Status: mocked adapter foundation implemented. Mocked evidence is the selected development mode; no provider registration or credentials are needed now. The steps below describe later live access. No live collection is available through the browser yet.
+Mock workflows need no provider registration or credentials. For real GitHub Deployments, follow [the local connection guide](connect-github.md) after provider preparation. Argo transport remains unimplemented; its steps below prepare access only.
 
-For concrete registration, scoped access checks, credential rotation and troubleshooting, follow [preparing real deployment sources](real-sources.md). For a separate practice controller, follow [the optional local Argo sandbox](local-argocd.md). Neither enables live Clio collection.
+For concrete registration, scoped access checks, credential rotation and troubleshooting, follow [preparing real deployment sources](real-sources.md). For a separate practice controller, follow [the optional local Argo sandbox](local-argocd.md). The sandbox does not connect to Clio; GitHub requires the separate local connection workflow.
 
 ## GitHub App
 
@@ -12,9 +12,9 @@ Create a separate GitHub App for collection. The existing Clio Local OAuth app r
 2. Set repository permissions: Deployments read-only. Metadata read-only is mandatory. Leave other repository, organization and account permissions disabled. This initial adapter does not fetch source code or commit history.
 3. Install the app only on explicitly selected repositories. GitHub registration/installation and permission grants remain maintainer actions.
 4. Generate an app private key. Keep it outside the repository, with owner-only read/write permissions. Do not paste its contents into chat, commit it, or put it in a VITE_ setting.
-5. Record app ID, installation ID, selected stable repository ID and production environment names. These identifiers are configuration, not proof of workspace authorization. The API connection slice will bind them to an authenticated workspace owner and verify installation scope.
+5. Record app ID, installation ID, selected stable repository ID and production environment names. These identifiers are configuration, not proof of workspace authorization. The local connection binds them through an operator workspace grant and authenticated workspace owner, then verifies installation/account/repository scope.
 
-The adapter receives signing material server-side and requests a short-lived installation token narrowed to repository IDs and Deployments read-only. No provider secrets are persisted in this slice. Environment names must be explicitly selected; they are not inferred from naming or the production_environment flag.
+The adapter receives signing material server-side and requests a short-lived installation token narrowed to repository IDs and Deployments read-only. Provider keys stay in operator-held private files; short-lived tokens stay in memory, never PostgreSQL. Environment names must be explicitly selected; they are not inferred from naming or the production_environment flag.
 
 ## Argo CD
 
