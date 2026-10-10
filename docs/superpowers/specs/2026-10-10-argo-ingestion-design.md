@@ -1,6 +1,6 @@
 # Local Argo CD notification ingestion
 
-Status: proposed design for maintainer review; not an implemented connector.
+Status: approved by maintainer on 2026-10-10; implementation and runtime verification pending.
 Date: 2026-10-10
 Base: `454931fe83f3e89aeb218f9d446941b4ed30e25d`
 
