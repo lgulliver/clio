@@ -175,6 +175,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@clio/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@clio/oems':
+        specifier: workspace:*
+        version: link:../../packages/oems
       '@fastify/cors':
         specifier: 11.3.1
         version: 11.3.1

@@ -92,6 +92,9 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
   await pool.query('SELECT id, workspace_id, name, created_at FROM services LIMIT 0');
   await pool.query(
+    'SELECT workspace_id, service_id, mode, revision, primary_provider, production_environment, exposure_attested, observed_at, created_by FROM deployment_mapping_revisions LIMIT 0',
+  );
+  await pool.query(
     'SELECT id, name, email, email_verified, image, created_at, updated_at FROM auth_users LIMIT 0',
   );
   await pool.query(

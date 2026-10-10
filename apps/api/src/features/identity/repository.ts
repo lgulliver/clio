@@ -38,6 +38,22 @@ async function member(client: PoolClient, actor: Actor, workspaceId: string, own
   if (owner && role !== 'owner') throw new IdentityError(403, 'forbidden');
 }
 
+/** Session and membership remain locked until the scoped storage operation completes. */
+export function authorizedWorkspaceTransaction<T>(
+  pool: Pool,
+  actor: Actor,
+  workspaceId: string,
+  owner: boolean,
+  operation: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const id = uuid(workspaceId);
+  return withTransaction(pool, async (client) => {
+    await currentUser(client, actor);
+    await member(client, actor, id, owner);
+    return operation(client);
+  });
+}
+
 function hash(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -57,11 +73,7 @@ export function createIdentityRepository(pool: Pool) {
     owner: boolean,
     operation: (client: PoolClient) => Promise<T>,
   ) {
-    const id = uuid(workspaceId);
-    return transaction(actor, async (client) => {
-      await member(client, actor, id, owner);
-      return operation(client);
-    });
+    return authorizedWorkspaceTransaction(pool, actor, workspaceId, owner, operation);
   }
   return {
     async listWorkspaces(actor: Actor) {

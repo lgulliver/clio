@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { DeploymentMappings } from '../deployment-mappings/deployment-mappings';
 import {
   ApiError,
   errorMessage,
@@ -144,6 +145,8 @@ function WorkspaceScope({
   const mounted = useRef(true);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [denied, setDenied] = useState('');
+  const [selectedService, setSelectedService] = useState('');
+  const serviceSelection = useRef('');
   const mutationEpoch = useRef(0);
   const revision = session.revision;
   const valid = () => mounted.current && session.current(revision) && validSelection();
@@ -216,6 +219,7 @@ function WorkspaceScope({
       throw error;
     }
   }
+  const activeService = services.data?.find((item) => item.id === selectedService);
   return (
     <>
       <ActionForm
@@ -276,11 +280,35 @@ function WorkspaceScope({
               {services.data?.length ? (
                 <ul className="mt-3 list-inside list-disc">
                   {services.data.map((item) => (
-                    <li key={item.id}>{item.name}</li>
+                    <li key={item.id}>
+                      {item.name}{' '}
+                      <button
+                        type="button"
+                        className="control ml-2"
+                        aria-label={`Mock settings for ${item.name}`}
+                        aria-pressed={selectedService === item.id}
+                        onClick={() => {
+                          serviceSelection.current = item.id;
+                          setSelectedService(item.id);
+                        }}
+                      >
+                        Mock settings
+                      </button>
+                    </li>
                   ))}
                 </ul>
               ) : (
                 <p className="mt-3">No services yet.</p>
+              )}
+              {activeService && (
+                <DeploymentMappings
+                  key={selectedService}
+                  workspace={workspace}
+                  serviceId={selectedService}
+                  serviceName={activeService.name}
+                  userId={userId}
+                  validSelection={() => valid() && serviceSelection.current === selectedService}
+                />
               )}
               {workspace.role === 'owner' ? (
                 <>

@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Live provider connections, collection API/UI and durable jobs are not implemented. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Workspace service deployment settings persist as immutable mock-only revisions. Owners configure GitHub or Argo CD plus production environment; members can read and run clearly labelled fictional previews. Live provider connections, credential storage, collection jobs and stored results are not implemented. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -46,6 +46,8 @@ packages/typescript-config/ Shared strict TypeScript configurations
 docs/                      Architecture and recorded decisions
 .github/workflows/         CI checks and production artifact
 ```
+
+For saved mock settings, sign in, select a workspace and service in Settings, then configure the deployment source. Previews use fictional evidence; they do not populate actual overview metrics. Read [the mapping contract](docs/providers/mapping-contract.md).
 
 For mocked provider evidence, run `pnpm demo:providers` and read [the configurable demo](docs/providers/mock-demo.md). It performs no network requests and needs no provider credentials.
 

@@ -48,6 +48,18 @@ describe('unconfigured identity boundary', () => {
         ['POST', '/api/auth/sign-in/social'],
         ['GET', '/api/auth/get-session'],
         ['POST', '/api/workspace-invitations/accept'],
+        [
+          'GET',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/deployment-mapping',
+        ],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/deployment-mapping',
+        ],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/deployment-preview',
+        ],
       ] as const) {
         const response = await server.inject({ method, url });
         expect(response.statusCode).toBe(503);

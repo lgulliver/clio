@@ -2,6 +2,9 @@ import cors from '@fastify/cors';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
+import { revision } from '../deployment-mappings/input.ts';
+import { previewMapping } from '../deployment-mappings/preview.ts';
+import { createMappingRepository } from '../deployment-mappings/repository.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
 import { IdentityError, object, opaqueId, uuid } from './input.ts';
@@ -46,6 +49,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       allowedHeaders: ['Content-Type'],
     });
   const repository = identity ? createIdentityRepository(identity.pool) : null;
+  const mappings = identity ? createMappingRepository(identity.pool) : null;
   async function session(request: FastifyRequest, reply: FastifyReply, write: boolean) {
     if (!identity || !repository) throw new IdentityError(503, 'unavailable');
     if (write && request.headers.origin !== identity.config.appOrigin)
@@ -201,6 +205,41 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       return reply
         .code(201)
         .send({ service: await repository.createService(current, id, body.name) });
+    });
+    const mappingBase = '/api/workspaces/:workspaceId/services/:serviceId';
+    routes.get(`${mappingBase}/deployment-mapping`, async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const values = params(request, ['workspaceId', 'serviceId']);
+      if (!mappings) throw new IdentityError(503, 'unavailable');
+      return {
+        mapping: await mappings.get(current, uuid(values.workspaceId), uuid(values.serviceId)),
+      };
+    });
+    routes.post(`${mappingBase}/deployment-mapping`, async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const values = params(request, ['workspaceId', 'serviceId']);
+      if (!mappings) throw new IdentityError(503, 'unavailable');
+      return {
+        mapping: await mappings.save(
+          current,
+          uuid(values.workspaceId),
+          uuid(values.serviceId),
+          request.body,
+        ),
+      };
+    });
+    routes.post(`${mappingBase}/deployment-preview`, async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const values = params(request, ['workspaceId', 'serviceId']);
+      const body = object(request.body, ['revision']);
+      if (!mappings) throw new IdentityError(503, 'unavailable');
+      const input = await mappings.previewInput(
+        current,
+        uuid(values.workspaceId),
+        uuid(values.serviceId),
+        revision(body.revision),
+      );
+      return { preview: previewMapping(input.mapping, input.service) };
     });
     routes.post('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
       const current = await actor(request, reply, true);

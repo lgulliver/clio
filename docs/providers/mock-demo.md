@@ -23,4 +23,4 @@ Service mapping is supplied separately from source normalization: stable service
 
 Argo CD configuration revision remains separate from application-source provenance. The fixture deliberately supplies no application provenance. This prevents a manifests SHA from silently becoming an application-source change link.
 
-The example constructs and validates an immutable snapshot through @clio/oems before calculating results. Adapter tests cover additional gaps, pagination, cutoff/replay and conflicting evidence. Persistent mappings, authorized source APIs, Argo CD HTTP ingestion, durable jobs and UI results are later slices.
+The example constructs and validates an immutable snapshot through @clio/oems before calculating results. Adapter tests cover additional gaps, pagination, cutoff/replay and conflicting evidence. The browser Settings page now saves mock-only service settings and requests authorized fictional previews. Real connection scopes, Argo CD HTTP ingestion, durable jobs and live results remain later slices.
