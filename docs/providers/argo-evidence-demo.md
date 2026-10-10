@@ -138,3 +138,15 @@ Today's fresh rollout is outside yesterday's closed reporting window. Retained q
 Keep private receipts for reproducibility. Stop only the demo port-forward when finished; cluster/workload/grants persist for inspection. Cluster deletion is a separate destructive operator action described in the sandbox guide.
 
 The sandbox trusts the operator to prevent intervening deployments, manual resource changes and endpoint replacement between baseline capture and the planned rollout. UUID binding does not prove that causal link. Capture immediately before the rollout and keep the dedicated workload under one operator during the exercise.
+
+## Verified local result, 2026-10-10
+
+The dedicated Kind sandbox synchronized configuration commit `72a71e265caaf6c8d8e02d527dcba8f86f928fb6` through its actual Argo controller. Argo expanded `resources.json` into four Synced resources: Namespace, immutable ConfigMap, Service and Deployment. The workload reached Ready and served the exact committed HTML artifact from application commit `de2295aa3bb078edea7af7c102f55f186d822ca5`, digest `sha256:caec442a9b61d0d572a24cc621655878d68e72f0c7024f5896e6de73784c612e`.
+
+A real different-byte baseline preceded the explicitly identified rollout. The independent loopback HTTP observation recorded activation at `2026-10-10T17:43:35.813Z`. Build publication returned `202`; exposure publication before the native anchor returned `409`. After authenticated operator submission of the actual native envelope returned `202`, retrying the same persisted exposure event returned `202`. A further identical replay still left exactly two enrichment receipts: one build assertion and one exposure assertion.
+
+Two owner-enqueued snapshots used `2026-10-09T00:00:00Z` to `2026-10-10T00:00:00Z`. Native plus build inventory retained one rollout with unknown qualification. The later snapshot retained one qualifying rollout, unknown count zero, and attached the exact application repository/commit through artifact provenance. Its shared provenance registry preserved the build producer, assertion UUID and evidence reference. Native exposure remained false, native application provenance remained absent, `tip_provenance` and changes stayed empty, and lead-time/rework metrics stayed unavailable. The first saved snapshot was compared again and remained identical.
+
+Overview displayed the later saved result, its reporting window, cutoff, pinned OEMS revision `5908bb12cdf24e7528088237dff9dca4c10ff45f`, retained qualifying count one and provisional window count zero. Activation happened after that window ended. Collection, deployment-history and recovery coverage all remained false. This verifies the sandbox operator-producer path, not automatic controller notification delivery or production traffic.
+
+Argo tracks the dedicated namespace as well as the workload. This walkthrough enables neither automatic synchronization nor pruning. Repeated new artifacts leave old immutable ConfigMaps until an operator deliberately cleans up the disposable sandbox; cascade deletion or namespace pruning must be treated as deletion of the whole dedicated workload.

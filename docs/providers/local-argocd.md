@@ -172,3 +172,5 @@ unset CLIO_ARGO_KUBECONFIG
 Do not use Docker pruning, unscoped cluster deletion or `docker compose down --volumes` for sandbox cleanup.
 
 Follow the [complete sandbox walkthrough](argo-evidence-demo.md) for source setup, a pre-rollout HTTP baseline, native delivery, independent evidence and immutable snapshot comparison.
+
+The independent artifact exercise was verified on 2026-10-10 through real Argo synchronization, different-byte HTTP baseline, exact artifact observation, authenticated native/enrichment receipts, two immutable worker snapshots and Overview. The later snapshot retained one independently qualified sandbox rollout with exact application-source provenance; its prior-day metric count remained zero. See the [recorded result and limits](argo-evidence-demo.md#verified-local-result-2026-10-10).
