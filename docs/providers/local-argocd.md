@@ -15,7 +15,7 @@ Pins checked against official sources on 2026-10-10:
 | Argo CD | `v3.5.4`, non-HA `manifests/install.yaml` | [Released tag](https://github.com/argoproj/argo-cd/releases/tag/v3.5.4) and [released manifest](https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.4/manifests/install.yaml) |
 | Guestbook Git revision | `f58c7ed8cfe28ad70701c5923fdbd0154388ea9f` | [Official example repository commit](https://github.com/argoproj/argocd-example-apps/commit/f58c7ed8cfe28ad70701c5923fdbd0154388ea9f) |
 
-Argo's [3.5 tested-version matrix](https://github.com/argoproj/argo-cd/blob/v3.5.4/docs/operator-manual/tested-kubernetes-versions.md) includes Kubernetes 1.36. These are selected compatible releases, not a claim of latest versions or current production suitability. Node digest and release manifest are fixed; guestbook container images use upstream tags, so this is not a fully image-digest-reproducible workload. Runtime installation/sync has not been exercised as part of writing this guide.
+Argo's [3.5 tested-version matrix](https://github.com/argoproj/argo-cd/blob/v3.5.4/docs/operator-manual/tested-kubernetes-versions.md) includes Kubernetes 1.36. These are selected compatible releases, not a claim of latest versions or current production suitability. Node digest and release manifest are fixed; guestbook container images use upstream tags, so this is not a fully image-digest-reproducible workload. Runtime installation/sync was verified on 2026-10-10: all seven Argo pods Ready, server/repo-server/controller rollout checks passed, and the pinned guestbook reached Synced/Healthy in a dedicated Kind cluster. This does not verify Clio ingestion, notification templates, production exposure or full image reproducibility.
 
 Upstream references: [Try Argo CD locally](https://argo-cd.readthedocs.io/en/stable/try_argo_cd_locally/), [Argo getting started](https://argo-cd.readthedocs.io/en/stable/getting_started/), [Kind quick start](https://kind.sigs.k8s.io/docs/user/quick-start/). Their floating examples may shift; use the explicit pins below.
 
@@ -109,6 +109,8 @@ spec:
     namespace: clio-guestbook
 YAML
 ```
+
+Application creation and controller reconciliation are asynchronous. Wait until the Application exists and the sync creates the workload before running deployment rollout checks; an immediate NotFound does not mean sync failed.
 
 In the Argo UI, open `clio-guestbook`, inspect the pinned revision and resources, then choose **Sync** and synchronize that revision. Automatic sync is not configured. Check the resulting controller operation and workload:
 
