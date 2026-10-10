@@ -1,0 +1,27 @@
+{
+  "name": "@clio/adapters",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "demo": "node examples/mock-demo.ts"
+  },
+  "dependencies": {
+    "@clio/oems": "workspace:*"
+  },
+  "devDependencies": {
+    "@clio/typescript-config": "workspace:*",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

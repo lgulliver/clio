@@ -5,7 +5,7 @@ Clio is an engineering-delivery application and an intended OEMS implementation.
 ## Stack and structure
 
 - Use TypeScript, React, Vite, TanStack Router/Query and Tailwind. Package versions are exact and pnpm-lock.yaml is committed.
-- apps/web owns browser UI. packages/oems owns the integration boundary with the pinned standard. packages/adapters is reserved for server-side collection; packages/typescript-config owns shared compiler policy.
+- apps/web owns browser UI. packages/oems owns the integration boundary with the pinned standard. packages/adapters owns server-only collection helpers and evidence reconciliation; packages/typescript-config owns shared compiler policy.
 - Keep future features together under src/features/<feature>; promote code to a shared package only when there is a real shared boundary.
 - Use pnpm with the version in packageManager and Node 24 LTS. Do not introduce npm/yarn lockfiles, another formatter or a second build system.
 

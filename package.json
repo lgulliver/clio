@@ -22,7 +22,8 @@
     "dev:api": "pnpm --filter @clio/api dev",
     "db:up": "docker compose up -d --wait postgres",
     "db:migrate": "pnpm --filter @clio/api migrate",
-    "test:integration": "pnpm --filter @clio/api test:integration"
+    "test:integration": "pnpm --filter @clio/api test:integration",
+    "demo:providers": "pnpm --filter @clio/adapters demo"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

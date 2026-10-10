@@ -2,7 +2,7 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Provider collection is not implemented. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Live provider connections, collection API/UI and durable jobs are not implemented. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
@@ -33,6 +33,7 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 | pnpm test:watch | Watch web tests |
 | pnpm build | Generate routes and build apps/web/dist |
 | pnpm preview | Serve the production build locally |
+| pnpm demo:providers | Run configurable fictional GitHub/Argo CD evidence through OEMS |
 
 ## Repository layout
 
@@ -40,11 +41,13 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 apps/web/                  React SPA, routing, query state and Tailwind
 apps/api/                  Local API, GitHub sessions, workspace authorization and persistence
 packages/oems/             Pinned schemas, snapshot validation and five metric calculations
-packages/adapters/         Reserved server-side provider boundary (documentation only)
+packages/adapters/         Server-only GitHub/Argo CD evidence and reconciliation
 packages/typescript-config/ Shared strict TypeScript configurations
 docs/                      Architecture and recorded decisions
 .github/workflows/         CI checks and production artifact
 ```
+
+For mocked provider evidence, run `pnpm demo:providers` and read [the configurable demo](docs/providers/mock-demo.md). It performs no network requests and needs no provider credentials.
 
 For PostgreSQL and API setup, read [apps/api/README.md](apps/api/README.md). API configuration is server-only; the browser consumes the authenticated API. CI runs the ordinary checks plus real PostgreSQL integration tests.
 

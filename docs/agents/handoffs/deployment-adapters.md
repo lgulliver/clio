@@ -1,0 +1,19 @@
+# Deployment adapter foundation handoff
+
+Base: 8f9c675. Codex provider specialist wrote packages/adapters source/tests/README in isolated codex/github-deployments worktree. Coordinator serially integrated source, owns manifests/lock/docs/demo, and added JSON token-request content type plus rejection of statuses predating deployment requests. Coordinator named reconciled configuration revision explicitly to avoid presenting it as desired state. Claude independently reviewed the integrated diff; coordinator addressed GitHub version replay and secondary-only cutoff gaps, restricted qualification to the primary source, retained task/reset metadata, and hardened near-expiry token rejection. Follow-up Claude review cleared both medium issues. Coordinator also addressed the partial-status exclusion finding using cutoff-aware completion markers; final targeted Claude review found no blocking defects and marked the slice ready to commit.
+
+## Behavior and boundaries
+
+Accepted ADR 0006: separate GitHub App, GitHub Deployments first, configurable deployment sources including Argo CD, mocked evidence now. Deployment sources remain separate from repository/change sources. Provider-neutral service mappings select primary source, exact operation bindings, environments, versioned exposure policy and explicit rollout correlation. Matching SHA/time never establishes canonical identity.
+
+Server-only helpers issue narrowed installation tokens, collect bounded unfiltered deployment/status pages, parse supplied Argo operation evidence, and reconcile one-service snapshots through the pinned OEMS validator. Safe diagnostics preserve partial evidence. Missing-primary correlation groups remain uncounted with diagnostics while valid groups survive. Non-production exclusion requires completed status traversal; incomplete status history remains unknown. No raw payloads, provider credentials or false coverage enter browser/results. Reconciled configuration provenance stays separate from application-source provenance. Missing exposure/classification/linkage/recovery remains unknown or unavailable. All three coverage flags stay false.
+
+The native configurable demo uses fictional injected transport, performs no network requests and needs no credentials. GitHub-only, Argo-only and explicitly correlated modes expose validated OEMS results without changing browser workspace data.
+
+## Verification
+
+Specialist scoped typecheck, 61 tests, Biome and whitespace passed. Coordinator integrated pnpm check passed lint, strict typechecks, 116 OEMS + 10 API + 70 adapter + 27 web tests (223 total) and production build. Coordinator verified frozen install and whitespace. Five native demo configurations passed: default unknown exposure; attested GitHub, Argo and both; unmatched environment remains unknown. Correlated dual-source evidence counts once; failure ratio and recovery duration remain null. No API/storage changes, so existing PostgreSQL tests were not repeated locally for this slice; CI still runs them.
+
+## Limits
+
+No live evidence, authenticated connection configuration API/UI, Argo polling/webhook receiver, ownership proof, provider credential store, persistent mapping revisions, durable jobs/checkpoints, incident source or results API. Exact operation bindings are supplied by trusted callers; repository/application selector expansion is future server work. GitHub revisions use parsed updated_at ordering after cutoff filtering and preserve historical observations; immutable conflicts and opaque Argo revision changes reject conservatively; paginated REST is not an atomic snapshot. Live GitHub revision/status timestamp behavior still requires verification; historical traversal markers do not prove that no later statuses exist. No complete coverage or conformance claim. Retained writer worktree may predate integrated fixes; committed main is authoritative.
