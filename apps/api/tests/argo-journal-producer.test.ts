@@ -12,7 +12,7 @@ import {
   sealJournal,
   statusJournal,
 } from '../../../infra/argocd/journal/journal.ts';
-import { object } from '../../../infra/argocd/journal/storage.ts';
+import { atomicState, locked, object } from '../../../infra/argocd/journal/storage.ts';
 
 const roots: string[] = [];
 const config = {
@@ -193,14 +193,14 @@ describe('journal failure and security boundaries', () => {
     ).rejects.toThrow();
     expect(await statusJournal(directory)).toMatchObject({ seals: 0, entries: 1 });
   });
-  it('holds one lock across HTTP; competing append/status fail without writes', async () => {
+  it('allows append/status during HTTP without overwriting retained progress', async () => {
     const { directory, root } = await setup();
     await appendJournal(directory, entry);
     const tokenFile = join(root, 'token');
     await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
     const fetcher: typeof fetch = async () => {
-      await expect(appendJournal(directory, entry)).rejects.toThrow('journal_locked');
-      await expect(statusJournal(directory)).rejects.toThrow('journal_locked');
+      await appendJournal(directory, entry);
+      expect(await statusJournal(directory)).toMatchObject({ entries: 2, acknowledgedRecords: 0 });
       return new Response('', { status: 202 });
     };
     await drainJournal(directory, {
@@ -210,7 +210,7 @@ describe('journal failure and security boundaries', () => {
       fetcher,
       maxAttempts: 1,
     });
-    expect(await statusJournal(directory)).toMatchObject({ entries: 1, acknowledgedRecords: 1 });
+    expect(await statusJournal(directory)).toMatchObject({ entries: 2, acknowledgedRecords: 1 });
   });
   it('detects digest tampering and a missing contiguous immutable file', async () => {
     const { directory } = await setup();
@@ -240,6 +240,12 @@ describe('journal failure and security boundaries', () => {
       tokenFile,
       env: {},
       sleep: async (ms: number) => {
+        const checkpoint = object(
+          JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')),
+        );
+        if (typeof checkpoint.nextAttemptAt !== 'string') throw new Error('missing_cooldown');
+        // Filesystem work consumes part of the delay; wait must reach its durable deadline.
+        expect(Date.now() + ms).toBeGreaterThanOrEqual(Date.parse(checkpoint.nextAttemptAt));
         waits.push(ms);
       },
       random: () => 0,
@@ -273,7 +279,8 @@ describe('journal failure and security boundaries', () => {
     });
     expect(result).toMatchObject({ acknowledgedRecords: 1, pendingRecords: 0 });
     expect(new Set(bodies).size).toBe(1);
-    expect(waits.every((ms) => ms >= 4000)).toBe(true);
+    expect(waits).toHaveLength(1);
+    expect(waits.every((ms) => ms > 0)).toBe(true);
   });
   it('does not acknowledge authentication/predecessor/storage conflicts', async () => {
     const { directory, root } = await setup();
@@ -651,4 +658,400 @@ it('rejects incompatible Unicode before persisting a journal entry', async () =>
     appendJournal(directory, { ...entry, notification: { unsupported: '\u0000' } }),
   ).rejects.toThrow();
   expect((await statusJournal(directory)).retainedRecords).toBe(0);
+});
+
+it('captures and seals during a stalled sender, excludes another sender and acknowledges fresh state', async () => {
+  const { directory, root } = await setup();
+  await appendJournal(directory, entry);
+  const tokenFile = join(root, 'token');
+  await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+  let started: () => void = () => {};
+  const sending = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release: () => void = () => {};
+  const stalled = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const options = { baseUrl: 'http://127.0.0.1:3001', tokenFile, env: {}, maxAttempts: 1 };
+  const body = await readFile(join(directory, 'records', '0000000001.json'), 'utf8');
+  const drain = drainJournal(directory, {
+    ...options,
+    fetcher: async (_url, request) => {
+      expect(request?.body).toBe(body);
+      started();
+      await stalled;
+      return new Response('', { status: 202 });
+    },
+  });
+  await sending;
+  try {
+    await expect(drainJournal(directory, options)).rejects.toThrow('journal_locked');
+    await sealJournal(directory, {
+      start: config.startupAt,
+      end: '2026-10-10T00:00:02Z',
+      evidenceRef: 'urn:fictional:concurrent-seal',
+    });
+    await captureJournal(directory, {
+      input: { phase: 'Running' },
+      format: 'notification',
+      evidenceRef: 'urn:fictional:concurrent-capture',
+    });
+    expect(await statusJournal(directory)).toMatchObject({
+      retainedRecords: 3,
+      acknowledgedRecords: 0,
+    });
+  } finally {
+    release();
+    await drain;
+  }
+  expect(await drain).toMatchObject({
+    retainedRecords: 3,
+    acknowledgedRecords: 1,
+    pendingRecords: 2,
+  });
+  const state = object(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')));
+  expect(state).toMatchObject({ retainedRecords: 3, acknowledgedRecords: 1, attempts: 1 });
+});
+
+it('deduplicates exact projected observations after a lost checkpoint while default capture still appends', async () => {
+  const { directory } = await setup();
+  const before = await readFile(join(directory, 'state.json'));
+  const input = {
+    kind: 'Application',
+    apiVersion: 'argoproj.io/v1alpha1',
+    metadata: { uid: 'uid', annotations: { bookkeeping: 'first' } },
+    spec: {},
+    status: {
+      operationState: {
+        phase: 'Running',
+        operation: { info: [{ name: 'clio.operation-id', value: 'id1' }] },
+      },
+    },
+  };
+  const options = {
+    input,
+    format: 'application' as const,
+    evidenceRef: 'urn:fictional:dedup',
+    deduplicate: true,
+  };
+  const first = await captureJournal(directory, options);
+  await writeFile(join(directory, 'state.json'), before, { mode: 0o600 });
+  const repeated = await captureJournal(directory, {
+    ...options,
+    evidenceRef: 'urn:fictional:restart',
+    input: { ...input, metadata: { uid: 'uid', annotations: { bookkeeping: 'second' } } },
+  });
+  expect(repeated).toEqual(first);
+  expect(await readdir(join(directory, 'records'))).toHaveLength(1);
+  const changed = await captureJournal(directory, {
+    ...options,
+    input: {
+      ...input,
+      status: { operationState: { ...input.status.operationState, phase: 'Succeeded' } },
+    },
+  });
+  expect(changed.sequence).toBe(2);
+  const manual = await captureJournal(directory, { ...options, deduplicate: false });
+  expect(manual.sequence).toBe(3);
+  expect(await captureJournal(directory, options)).toEqual(manual);
+});
+
+it.each(['Healthy', { unsupported: 'health' }])(
+  'retains health A/B/A without timestamps, deduplicating only latest entry across seals (%j)',
+  async (health) => {
+    const { directory } = await setup();
+    const input = {
+      kind: 'Application',
+      apiVersion: 'argoproj.io/v1alpha1',
+      metadata: { uid: 'uid' },
+      spec: {},
+      status: { health: { status: health } },
+    };
+    const options = {
+      input,
+      format: 'application' as const,
+      evidenceRef: 'urn:fictional:health-transition',
+      deduplicate: true,
+    };
+    const first = await captureJournal(directory, options);
+    const changed = await captureJournal(directory, {
+      ...options,
+      input: { ...input, status: { health: { status: 'Degraded' } } },
+    });
+    const restored = await captureJournal(directory, options);
+    expect([first.sequence, changed.sequence, restored.sequence]).toEqual([1, 2, 3]);
+    expect(restored.notification).toEqual(first.notification);
+    expect(restored.previous_digest).toBe(changed.digest);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    await sealJournal(directory, {
+      start: config.startupAt,
+      end: new Date().toISOString(),
+      evidenceRef: 'urn:fictional:health-seal',
+    });
+    expect(await captureJournal(directory, options)).toEqual(restored);
+    expect(await statusJournal(directory)).toMatchObject({ entries: 3, seals: 1 });
+  },
+);
+
+it.each([
+  'not-a-date-secret',
+  'Wed, 99 Oct 2026 00:00:00 GMT',
+  '9'.repeat(400),
+  '9000000000000',
+  'Wed, 01 Jan 10000 00:00:00 GMT',
+])(
+  'falls back safely for invalid or excessive Retry-After %s, preserving bytes and ack',
+  async (header) => {
+    const { directory, root } = await setup();
+    await appendJournal(directory, entry);
+    const tokenFile = join(root, 'token');
+    await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+    const bodies: unknown[] = [];
+    const options = {
+      baseUrl: 'http://127.0.0.1:3001',
+      tokenFile,
+      env: {},
+      maxAttempts: 1,
+      random: () => 0,
+    };
+    const before = Date.now();
+    const rejected = await drainJournal(directory, {
+      ...options,
+      fetcher: async (_url, request) => {
+        bodies.push(request?.body);
+        return new Response('', { status: 503, headers: { 'Retry-After': header } });
+      },
+    });
+    expect(rejected).toMatchObject({
+      acknowledgedRecords: 0,
+      pendingRecords: 1,
+      stoppedReason: 'receiver_503',
+    });
+    expect(typeof rejected.nextAttemptAt).toBe('string');
+    const state = object(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')));
+    expect(rejected.nextAttemptAt).toBe(state.nextAttemptAt);
+    if (typeof rejected.nextAttemptAt !== 'string') throw new Error('missing_cooldown');
+    const deadline = Date.parse(rejected.nextAttemptAt);
+    expect(deadline).toBeGreaterThanOrEqual(before + 4000);
+    expect(deadline).toBeLessThanOrEqual(Date.now() + 4000);
+    expect(await statusJournal(directory)).not.toHaveProperty('nextAttemptAt');
+    const resumed = await drainJournal(directory, {
+      ...options,
+      sleep: async (delay) => {
+        expect(Date.now() + delay).toBeGreaterThanOrEqual(deadline);
+        await appendJournal(directory, { ...entry, evidenceRef: 'urn:fictional:tail' });
+      },
+      fetcher: async (_url, request) => {
+        bodies.push(request?.body);
+        return new Response('', { status: 202 });
+      },
+    });
+    expect(resumed).toMatchObject({ acknowledgedRecords: 1, pendingRecords: 1 });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  },
+);
+
+it.each(['delta', 'date'])(
+  'returns durable receiver cooldown for valid Retry-After %s without changing status shape',
+  async (format) => {
+    const header = format === 'delta' ? '120' : new Date(Date.now() + 120000).toUTCString();
+    const { directory, root } = await setup();
+    const tokenFile = join(root, 'token');
+    await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+    const options = { baseUrl: 'http://127.0.0.1:3001', tokenFile, env: {}, maxAttempts: 1 };
+    expect(await drainJournal(directory, options)).toMatchObject({
+      nextAttemptAt: null,
+      attemptsThisRun: 0,
+    });
+    await appendJournal(directory, entry);
+    const before = Date.now();
+    const result = await drainJournal(directory, {
+      ...options,
+      fetcher: async () => new Response('', { status: 429, headers: { 'Retry-After': header } }),
+    });
+    if (typeof result.nextAttemptAt !== 'string') throw new Error('missing_cooldown');
+    expect(Date.parse(result.nextAttemptAt)).toBeGreaterThanOrEqual(
+      header === '120' ? before + 120000 : Date.parse(header),
+    );
+    let calls = 0;
+    expect(
+      await drainJournal(directory, {
+        ...options,
+        maxWaitMs: 0,
+        fetcher: async () => {
+          calls += 1;
+          return new Response('', { status: 202 });
+        },
+      }),
+    ).toMatchObject({
+      nextAttemptAt: result.nextAttemptAt,
+      attemptsThisRun: 0,
+      stoppedReason: 'retry_wait_exceeds_run_budget',
+    });
+    expect(calls).toBe(0);
+    expect(await statusJournal(directory)).not.toHaveProperty('nextAttemptAt');
+  },
+);
+
+it('named stale locks reclaim independently and capture checkpoint writes leave sender state intact', async () => {
+  const { directory } = await setup();
+  const original = await readFile(join(directory, 'state.json'), 'utf8');
+  for (const kind of ['sender', 'capture'] as const) {
+    const lock = join(directory, `.${kind}.lock`);
+    await mkdir(lock, { mode: 0o700 });
+    await writeFile(
+      join(lock, 'owner.dddddddd-dddd-4ddd-8ddd-dddddddddddd.json'),
+      JSON.stringify({ pid: 2147483647, boot: 'old-boot', start: '1' }),
+      { mode: 0o600 },
+    );
+  }
+  await locked(
+    directory,
+    async () => {
+      await locked(
+        directory,
+        async () => {
+          await expect(locked(directory, async () => {}, 'capture')).rejects.toThrow(
+            'journal_locked',
+          );
+          await Promise.all([
+            appendJournal(directory, entry),
+            atomicState(directory, { cursor: 'opaque' }, 'capture-state.json'),
+          ]);
+        },
+        'capture',
+      );
+    },
+    'sender',
+  );
+  expect(JSON.parse(await readFile(join(directory, 'capture-state.json'), 'utf8'))).toEqual({
+    cursor: 'opaque',
+  });
+  const current = object(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')));
+  expect(current).toEqual({ ...object(JSON.parse(original)), retainedRecords: 1 });
+  expect(await readdir(directory)).not.toContain('capture-state.pending');
+});
+
+it('allows capture during backoff and reloads the tail before exact-byte retry acknowledgement', async () => {
+  const { directory, root } = await setup();
+  await appendJournal(directory, entry);
+  const tokenFile = join(root, 'token');
+  await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+  const body = await readFile(join(directory, 'records', '0000000001.json'), 'utf8');
+  let calls = 0;
+  const result = await drainJournal(directory, {
+    baseUrl: 'http://127.0.0.1:3001',
+    tokenFile,
+    env: {},
+    maxAttempts: 2,
+    random: () => 0,
+    fetcher: async (_url, request) => {
+      expect(request?.body).toBe(body);
+      calls += 1;
+      return calls === 1
+        ? new Response('', { status: 429, headers: { 'Retry-After': '5' } })
+        : new Response('', { status: 202 });
+    },
+    sleep: async (delay) => {
+      expect(delay).toBeGreaterThan(4000);
+      await captureJournal(directory, {
+        input: { original: 'later capture' },
+        format: 'notification',
+        evidenceRef: 'urn:fictional:backoff',
+      });
+    },
+  });
+  expect(result).toMatchObject({
+    retainedRecords: 2,
+    acknowledgedRecords: 1,
+    pendingRecords: 1,
+    attemptsThisRun: 2,
+  });
+  expect(object(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')))).toMatchObject({
+    retainedRecords: 2,
+    acknowledgedRecords: 1,
+    attempts: 2,
+  });
+});
+
+it('fails closed instead of regressing progress when selected index changes during delivery', async () => {
+  const { directory, root } = await setup();
+  await appendJournal(directory, entry);
+  const tokenFile = join(root, 'token');
+  await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+  await expect(
+    drainJournal(directory, {
+      baseUrl: 'http://127.0.0.1:3001',
+      tokenFile,
+      env: {},
+      maxAttempts: 1,
+      fetcher: async () => {
+        const state = object(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')));
+        await atomicState(directory, { ...state, acknowledgedRecords: 1 });
+        return new Response('', { status: 202 });
+      },
+    }),
+  ).rejects.toThrow('journal_corrupt');
+  expect(await statusJournal(directory)).toMatchObject({ acknowledgedRecords: 1 });
+});
+
+it.each([202, 503])(
+  'receiver body cancellation failure does not abort status %i delivery state',
+  async (status) => {
+    const { directory, root } = await setup();
+    await appendJournal(directory, entry);
+    const tokenFile = join(root, 'token');
+    await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+    const result = await drainJournal(directory, {
+      baseUrl: 'http://127.0.0.1:3001',
+      tokenFile,
+      env: {},
+      maxAttempts: 1,
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              throw new Error('controlled private receiver body failure');
+            },
+          }),
+          { status },
+        ),
+    });
+    expect(result.acknowledgedRecords).toBe(status === 202 ? 1 : 0);
+    expect(result.stoppedReason).toBe(status === 202 ? null : 'receiver_503');
+    expect(await statusJournal(directory)).toMatchObject({
+      retainedRecords: 1,
+      acknowledgedRecords: result.acknowledgedRecords,
+    });
+  },
+);
+
+it('caps representable long Retry-After at one day without acknowledging or clearing pacing', async () => {
+  const { directory, root } = await setup();
+  await appendJournal(directory, entry);
+  const tokenFile = join(root, 'token');
+  await writeFile(tokenFile, 'a'.repeat(64), { mode: 0o600 });
+  const started = Date.now();
+  const result = await drainJournal(directory, {
+    baseUrl: 'http://127.0.0.1:3001',
+    tokenFile,
+    env: {},
+    maxAttempts: 1,
+    fetcher: async () => new Response('', { status: 429, headers: { 'Retry-After': '99999999' } }),
+  });
+  expect(result.acknowledgedRecords).toBe(0);
+  if (typeof result.nextAttemptAt !== 'string') throw new Error('missing_cooldown');
+  expect(Date.parse(result.nextAttemptAt)).toBeGreaterThanOrEqual(started + 86400000);
+  expect(Date.parse(result.nextAttemptAt)).toBeLessThanOrEqual(Date.now() + 86400000);
+  expect(
+    await drainJournal(directory, {
+      baseUrl: 'http://127.0.0.1:3001',
+      tokenFile,
+      env: {},
+      maxAttempts: 1,
+      maxWaitMs: 0,
+    }),
+  ).toMatchObject({ attemptsThisRun: 0, stoppedReason: 'retry_wait_exceeds_run_budget' });
 });

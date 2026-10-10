@@ -1280,3 +1280,158 @@ it.each(['\u0000', '\ud800', '\udfff'])(
     }
   },
 );
+
+// A controlled Kubernetes transport plus a real stalled loopback receiver exercise
+// acquisition through durable files, authenticated admission and immutable results.
+import { createServer as captureServer } from 'node:http';
+import type { CaptureConfig } from '../../../infra/argocd/capture/config.ts';
+import { runCapture } from '../../../infra/argocd/capture/run.ts';
+
+it('continuous capture retains changing operation during stalled delivery, then reconciles PostgreSQL without changing old result', async () => {
+  const f = await fixture();
+  const root = await journalMkdtemp(
+    journalJoin(await journalRealpath(journalTmpdir()), 'clio-watch-db-'),
+  );
+  await journalChmod(root, 0o700);
+  let markRequest: () => void = () => {};
+  const requestStarted = new Promise<void>((resolve) => {
+    markRequest = resolve;
+  });
+  let releaseRequest: () => void = () => {};
+  const receiverReleased = new Promise<void>((resolve) => {
+    releaseRequest = resolve;
+  });
+  const server = captureServer(async (request, response) => {
+    request.resume();
+    markRequest();
+    await receiverReleased;
+    response.writeHead(503);
+    response.end();
+  });
+  const stop = new AbortController();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('capture_listener');
+    const tokenFile = journalJoin(root, 'archive.token');
+    const kubeconfig = journalJoin(root, 'trusted-fixture.kubeconfig');
+    await journalWrite(tokenFile, 'c'.repeat(64), { mode: 0o600 });
+    await journalWrite(kubeconfig, '{}', { mode: 0o600 });
+    const directory = journalJoin(root, 'journal');
+    await initJournal(directory, {
+      sourceId: f.scope.sourceId,
+      producerId: f.archive.producerId,
+      journalId: f.archive.journalId,
+      policyReference: f.archive.policyReference,
+    });
+    const config: CaptureConfig = {
+      journalDirectory: directory,
+      kubectlPath: process.execPath,
+      kubeconfig,
+      context: 'controlled-fixture',
+      scope: f.scope,
+      producerId: f.archive.producerId,
+      journalId: f.archive.journalId,
+      policyReference: f.archive.policyReference,
+      receiver: { baseUrl: `http://127.0.0.1:${address.port}`, tokenFile },
+    };
+    const n = notification(f);
+    const application = (version: string, phase: string) => ({
+      apiVersion: 'argoproj.io/v1alpha1',
+      kind: 'Application',
+      metadata: {
+        uid: f.scope.applicationUid,
+        name: f.scope.applicationName,
+        namespace: f.scope.applicationNamespace,
+        resourceVersion: version,
+      },
+      spec: {
+        project: f.scope.project,
+        source: { repoURL: f.scope.repoURL },
+        destination: { server: f.scope.destinationServer, namespace: f.scope.destinationNamespace },
+      },
+      status: {
+        operationState: {
+          phase,
+          startedAt: n.operation.startedAt,
+          ...(phase === 'Succeeded' ? { finishedAt: n.operation.finishedAt } : {}),
+          operation: { info: n.operation.info, initiatedBy: n.operation.initiatedBy },
+          syncResult: { revision: n.operation.revision, revisions: [] },
+        },
+        health: n.health,
+      },
+    });
+    const beforeRun = await f.enqueue();
+    await createArgoWorker(pool, f.config()).runOnce();
+    const before = JSON.stringify(await f.repo.getRun(owner, f.w, f.s, beforeRun.id));
+    const progress = await runCapture(config, {
+      signal: stop.signal,
+      env: {},
+      progress(value) {
+        if (value.captured >= 2) {
+          stop.abort();
+          releaseRequest();
+        }
+      },
+      transport: {
+        list: async () => ({
+          apiVersion: 'argoproj.io/v1alpha1',
+          kind: 'ApplicationList',
+          metadata: { resourceVersion: 'opaque-1' },
+          items: [application('opaque-1', 'Running')],
+        }),
+        async *watch() {
+          await requestStarted;
+          // The real HTTP request remains blocked while this durable append runs.
+          yield { type: 'MODIFIED', object: application('opaque-2', 'Succeeded') };
+        },
+      },
+    });
+    expect(progress.captured).toBe(2);
+    expect(await statusJournal(directory)).toMatchObject({ entries: 2, acknowledgedRecords: 0 });
+    let loseAck = true;
+    const bodies: string[] = [];
+    const replay = await drainJournal(directory, {
+      ...config.receiver,
+      env: {},
+      maxAttempts: 12,
+      sleep: async () => {},
+      fetcher: async (_url, options) => {
+        if (typeof options?.body !== 'string') throw new Error('capture_body');
+        bodies.push(options.body);
+        await f.resetRate();
+        const response = await f.post(JSON.parse(options.body));
+        if (loseAck && response.statusCode === 202) {
+          loseAck = false;
+          throw new Error('controlled lost acknowledgement');
+        }
+        return new Response(response.body, { status: response.statusCode });
+      },
+    });
+    expect(replay.pendingRecords).toBe(0);
+    expect(bodies[0]).toBe(bodies[1]);
+    const afterRun = await f.enqueue();
+    await createArgoWorker(pool, f.config()).runOnce();
+    const after = await f.repo.getRun(owner, f.w, f.s, afterRun.id);
+    expect(after.result?.deploymentCount).toBe(1);
+    expect(after.result?.archiveSummary).toMatchObject({ entryCount: 2, lastSequence: 2 });
+    expect(after.result?.coverage).toEqual({
+      collectionComplete: false,
+      deploymentHistoryComplete: false,
+      recoveryEvidenceComplete: false,
+    });
+    expect(JSON.stringify(await f.repo.getRun(owner, f.w, f.s, beforeRun.id))).toBe(before);
+  } finally {
+    stop.abort();
+    releaseRequest();
+    if (server.listening)
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    await f.app.close();
+    await journalRemove(root, { recursive: true, force: true });
+  }
+}, 25000);

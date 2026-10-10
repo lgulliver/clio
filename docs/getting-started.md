@@ -151,7 +151,7 @@ Live deployment counts are provisional. Unknown qualification and incomplete col
 | --- | --- | --- |
 | GitHub OAuth | Real sign-in and database sessions | Separate from collection credentials |
 | GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow, broader metric evidence and scheduling |
-| Argo CD operations | Scoped native notifications, durable source journal/historical import, immutable receipt/gap history, closed UTC snapshots and browser reporting bounds | Real continuous journal capture, outbound polling, automatic operation UUIDs, independent exposure/provenance producers and complete coverage |
+| Argo CD operations | Scoped native notifications, opt-in scoped list/watch capture, durable source journal/historical import, immutable receipt/gap history, closed UTC snapshots and browser reporting bounds | Production installation/supervision, automatic operation UUIDs, independent exposure/provenance producers and complete coverage |
 | Optional Kind/Argo sandbox | Independent controller and native producer verification environment | Requires deliberate private grant/producer setup to connect; never supplies mock runs |
 | Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and historical repository labels |
 
@@ -183,4 +183,4 @@ For repository verification, `pnpm check` runs lint, types, behavior tests and b
 
 For a reproducible independent build/activation exercise, follow the [Argo artifact evidence walkthrough](providers/argo-evidence-demo.md). It uses a dedicated sandbox service and separate producer credentials.
 
-For retained original operation observations and receiver-outage replay, follow [Argo source history](providers/argo-history.md). Configure a separate archive producer, retain observations before delivery, select it in Settings and inspect sealed capture bounds separately from the reporting window and evidence cutoff. Real continuous capture requires an operator-integrated producer; journal replay does not make metric coverage complete.
+For retained original operation observations and receiver-outage replay, follow [Argo source history](providers/argo-history.md). Configure a separate archive producer, retain observations before delivery, select it in Settings and inspect sealed capture bounds separately from the reporting window and evidence cutoff. For continuous acquisition, follow [scoped Application capture](providers/argo-continuous-capture.md): supply explicit private kubeconfig/context and read-only RBAC, then run the collector under your supervisor. Missed periods and finite capacity remain explicit; journal replay does not make metric coverage complete.

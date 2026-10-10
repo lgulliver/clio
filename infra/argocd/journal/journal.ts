@@ -310,6 +310,7 @@ export interface CaptureOptions {
   input: unknown;
   format: 'application' | 'notification';
   evidenceRef: string;
+  deduplicate?: boolean;
 }
 export async function captureJournal(
   directory: string,
@@ -326,6 +327,18 @@ export async function captureJournal(
       { notification, evidenceRef: options.evidenceRef },
       capturedAt,
     );
+    if (options.deduplicate) {
+      const digest = archiveRecordDigest({ notification: record.notification });
+      // Seals do not change the latest observation; earlier matching states are transitions.
+      const retained = loaded.records.findLast(
+        ({ record: prior }) => prior.kind === 'entry',
+      )?.record;
+      if (
+        retained?.kind === 'entry' &&
+        archiveRecordDigest({ notification: retained.notification }) === digest
+      )
+        return retained;
+    }
     await persist(directory, loaded, record);
     return record;
   });
@@ -437,13 +450,16 @@ function retryDelay(response: Response | null, attempt: number, random: () => nu
   const header = response?.headers.get('retry-after');
   let minimum = 0;
   if (header !== null && header !== undefined) {
-    if (/^\d+$/.test(header)) minimum = Number(header) * 1000;
-    else {
-      const date = Date.parse(header);
-      if (!Number.isFinite(date)) fail('journal_retry_after');
-      minimum = Math.max(0, date - Date.now());
-    }
-    if (!Number.isFinite(minimum)) fail('journal_retry_after');
+    const now = Date.now();
+    const candidate = /^\d+$/.test(header)
+      ? Number(header) * 1000
+      : Math.max(0, Date.parse(header) - now);
+    // Receiver data must not overflow Date or our four-digit UTC checkpoint format.
+    // Reserve one run's wait budget at the calendar boundary for checkpoint work.
+    const latestDeadline = Date.parse('9999-12-31T23:59:59.999Z') - 60000;
+    if (Number.isSafeInteger(candidate) && candidate >= 0 && now + candidate <= latestDeadline)
+      minimum = Math.min(candidate, 86400000);
+    // Malformed/unrepresentable cooldowns use the existing bounded backoff.
   }
   const jitter = random();
   if (!Number.isFinite(jitter) || jitter < 0 || jitter >= 1) fail('journal_retry_jitter');
@@ -452,82 +468,138 @@ function retryDelay(response: Response | null, attempt: number, random: () => nu
     Math.min(30000, 1000 * 2 ** Math.min(attempt - 1, 5)) + Math.floor(jitter * 1000),
   );
 }
+/** Credential faults are recoverable delivery failures, separate from journal corruption. */
+export class JournalCredentialError extends Error {}
 export async function drainJournal(directory: string, options: DrainOptions) {
   const maxAttempts = integer(options.maxAttempts ?? 15, 1, 100);
   const maxWaitMs = integer(options.maxWaitMs ?? 60000, 0, 60000);
   const env = options.env ?? process.env;
   if (Object.entries(env).some(([key, value]) => /^(?:https?|all|no)_proxy$/i.test(key) && value))
     fail('journal_proxy_environment');
-  await outsideGit(options.tokenFile);
-  const tokenText = await readPrivate(options.tokenFile, 4096);
-  if (!/^[0-9a-f]{64}\n?$/.test(tokenText)) fail('journal_token');
+  const tokenText = await (async () => {
+    await outsideGit(options.tokenFile);
+    return readPrivate(options.tokenFile, 4096);
+  })().catch((error: unknown) => {
+    const code =
+      error instanceof Error && /^journal_[a-z_]+$/.test(error.message)
+        ? error.message
+        : 'journal_credential_unavailable';
+    throw new JournalCredentialError(code);
+  });
+  if (!/^[0-9a-f]{64}\n?$/.test(tokenText)) throw new JournalCredentialError('journal_token');
   const token = tokenText.trim();
-  return locked(directory, async () => {
-    const loaded = await load(directory);
-    const url = endpoint(options.baseUrl, loaded.config);
-    const fetcher = options.fetcher ?? fetch;
-    const sleep =
-      options.sleep ??
-      ((milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds)));
-    let attempts = 0;
-    let consecutiveFailures = 0;
-    let delay =
-      loaded.state.nextAttemptAt === null
-        ? 0
-        : Math.max(0, Date.parse(loaded.state.nextAttemptAt) - Date.now());
-    let reason: string | null = null;
-    // Repair retained count from immutable fsynced files; acknowledge only durable state.
-    loaded.state.retainedRecords = loaded.records.length;
-    while (loaded.state.acknowledgedRecords < loaded.records.length && attempts < maxAttempts) {
-      if (delay > maxWaitMs) {
-        reason = 'retry_wait_exceeds_run_budget';
-        break;
-      }
-      if (delay) await sleep(delay);
-      const current = loaded.records[loaded.state.acknowledgedRecords];
-      if (!current) fail('journal_corrupt');
-      attempts += 1;
-      loaded.state.attempts = integer(loaded.state.attempts + 1, 1, Number.MAX_SAFE_INTEGER);
-      loaded.state.lastAttemptAt = new Date().toISOString();
-      loaded.state.nextAttemptAt = new Date(Date.now() + 4000).toISOString();
-      await atomicState(directory, loaded.state);
-      let response: Response | null = null;
-      try {
-        response = await fetcher(url, {
-          method: 'POST',
-          redirect: 'error',
-          signal: AbortSignal.timeout(5000),
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: current.body,
+  return locked(
+    directory,
+    async () => {
+      const fetcher = options.fetcher ?? fetch;
+      const sleep =
+        options.sleep ??
+        ((milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds)));
+      let attempts = 0;
+      let consecutiveFailures = 0;
+      let reason: string | null = null;
+      let waitedUntil: string | null = null;
+      // Sender ownership spans the run; writer ownership spans only durable transactions.
+      while (attempts < maxAttempts) {
+        const selected = await locked(directory, async () => {
+          const loaded = await load(directory);
+          const url = endpoint(options.baseUrl, loaded.config);
+          const index = loaded.state.acknowledgedRecords;
+          const current = loaded.records[index];
+          if (!current) return { kind: 'done' as const };
+          const delay =
+            loaded.state.nextAttemptAt === null
+              ? 0
+              : Math.max(0, Date.parse(loaded.state.nextAttemptAt) - Date.now());
+          if (delay > maxWaitMs) return { kind: 'budget' as const };
+          if (delay && waitedUntil !== loaded.state.nextAttemptAt)
+            return { kind: 'wait' as const, delay, until: loaded.state.nextAttemptAt };
+          await atomicState(directory, {
+            ...loaded.state,
+            retainedRecords: loaded.records.length,
+            attempts: integer(loaded.state.attempts + 1, 1, Number.MAX_SAFE_INTEGER),
+            lastAttemptAt: new Date().toISOString(),
+            nextAttemptAt: new Date(Date.now() + 4000).toISOString(),
+          });
+          return { kind: 'send' as const, index, body: current.body, url };
         });
-      } catch {
-        reason = 'transport_failed';
-      }
-      if (response?.status === 202) {
-        await response.body?.cancel();
-        loaded.state.acknowledgedRecords += 1;
-        await atomicState(directory, loaded.state);
-        consecutiveFailures = 0;
-        delay = 4000;
-        reason = null;
-      } else {
+        if (selected.kind === 'done') break;
+        if (selected.kind === 'budget') {
+          reason = 'retry_wait_exceeds_run_budget';
+          break;
+        }
+        if (selected.kind === 'wait') {
+          await sleep(selected.delay);
+          waitedUntil = selected.until;
+          continue;
+        }
+        waitedUntil = null;
+        attempts += 1;
+        let response: Response | null = null;
+        try {
+          response = await fetcher(selected.url, {
+            method: 'POST',
+            redirect: 'error',
+            signal: AbortSignal.timeout(5000),
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: selected.body,
+          });
+        } catch {
+          reason = 'transport_failed';
+        }
+        const accepted = response?.status === 202;
         const retryable =
           response === null ||
           response.status === 429 ||
           response.status === 408 ||
           response.status >= 500;
-        if (response) reason = `receiver_${response.status}`;
-        await response?.body?.cancel();
-        if (!retryable) break;
-        consecutiveFailures += 1;
-        delay = Math.max(
-          4000,
-          retryDelay(response, consecutiveFailures, options.random ?? Math.random),
-        );
-        loaded.state.nextAttemptAt = new Date(Date.now() + delay).toISOString();
-        await atomicState(directory, loaded.state);
+        if (response) reason = accepted ? null : `receiver_${response.status}`;
+        await response?.body?.cancel().catch(() => undefined);
+        if (accepted) consecutiveFailures = 0;
+        else if (retryable) consecutiveFailures += 1;
+        const delay =
+          !accepted && retryable
+            ? Math.max(
+                4000,
+                retryDelay(response, consecutiveFailures, options.random ?? Math.random),
+              )
+            : null;
+        await locked(directory, async () => {
+          const loaded = await load(directory);
+          // Appends/seals can change the tail, never the selected immutable index/body.
+          if (
+            loaded.state.acknowledgedRecords !== selected.index ||
+            loaded.records[selected.index]?.body !== selected.body
+          )
+            fail('journal_corrupt');
+          await atomicState(directory, {
+            ...loaded.state,
+            retainedRecords: loaded.records.length,
+            acknowledgedRecords: selected.index + (accepted ? 1 : 0),
+            nextAttemptAt:
+              !accepted && !retryable
+                ? loaded.state.nextAttemptAt
+                : new Date(
+                    Math.max(
+                      loaded.state.nextAttemptAt === null
+                        ? 0
+                        : Date.parse(loaded.state.nextAttemptAt),
+                      Date.now() + (delay ?? 4000),
+                    ),
+                  ).toISOString(),
+          });
+        });
+        if (!accepted && !retryable) break;
       }
-    }
-    return { ...summary(loaded), attemptsThisRun: attempts, stoppedReason: reason };
-  });
+      return {
+        ...(await locked(directory, async () => {
+          const loaded = await load(directory);
+          return { ...summary(loaded), nextAttemptAt: loaded.state.nextAttemptAt };
+        })),
+        attemptsThisRun: attempts,
+        stoppedReason: reason,
+      };
+    },
+    'sender',
+  );
 }

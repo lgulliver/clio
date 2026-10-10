@@ -120,25 +120,32 @@ export async function writeExclusive(path: string, body: string): Promise<void> 
   }
   await syncDirectory(dirname(path));
 }
-export async function atomicState(directory: string, value: unknown): Promise<void> {
-  const pending = join(directory, 'state.pending');
+export async function atomicState(
+  directory: string,
+  value: unknown,
+  file: 'state.json' | 'capture-state.json' = 'state.json',
+): Promise<void> {
+  const pending = join(
+    directory,
+    file === 'state.json' ? 'state.pending' : 'capture-state.pending',
+  );
   // A crash may leave a flushed pending state. It never overrides acknowledged state.
-  const file = await open(
+  const handle = await open(
     pending,
     constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     0o600,
   );
   try {
-    const stat = await file.stat();
+    const stat = await handle.stat();
     if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o777) !== 0o600)
       fail('journal_private_file');
-    await file.truncate(0);
-    await file.writeFile(JSON.stringify(value));
-    await file.sync();
+    await handle.truncate(0);
+    await handle.writeFile(JSON.stringify(value));
+    await handle.sync();
   } finally {
-    await file.close();
+    await handle.close();
   }
-  await rename(pending, join(directory, 'state.json'));
+  await rename(pending, join(directory, file));
   await syncDirectory(directory);
 }
 function code(error: unknown): unknown {
@@ -157,8 +164,12 @@ async function processIdentity(pid: number): Promise<string | null> {
     throw error;
   }
 }
-async function reclaim(directory: string, boot: string): Promise<void> {
-  const lock = join(directory, '.lock');
+type LockKind = 'journal' | 'sender' | 'capture';
+function lockPath(directory: string, kind: LockKind): string {
+  return join(directory, kind === 'journal' ? '.lock' : `.${kind}.lock`);
+}
+async function reclaim(directory: string, boot: string, kind: LockKind): Promise<void> {
+  const lock = lockPath(directory, kind);
   await privateDirectory(lock);
   const names = await readdir(lock);
   if (!names.length) return; // Only a released lock can be empty; prepared claims publish atomically.
@@ -185,7 +196,11 @@ async function reclaim(directory: string, boot: string): Promise<void> {
 /** Linux PID + boot ID + /proc start ticks, atomically published nonempty lock directory.
  * Unique owner filename makes concurrent stale reclamation safe. No PID reuse guessing.
  */
-export async function locked<T>(directory: string, work: () => Promise<T>): Promise<T> {
+export async function locked<T>(
+  directory: string,
+  work: () => Promise<T>,
+  kind: LockKind = 'journal',
+): Promise<T> {
   await privateDirectory(directory);
   const boot = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
   const start = await processIdentity(process.pid);
@@ -193,7 +208,7 @@ export async function locked<T>(directory: string, work: () => Promise<T>): Prom
   const nonce = randomUUID();
   const name = `owner.${nonce}.json`;
   const claim = join(directory, `.claim-${nonce}`);
-  const lock = join(directory, '.lock');
+  const lock = lockPath(directory, kind);
   await mkdir(claim, { mode: 0o700 });
   await writeExclusive(join(claim, name), JSON.stringify({ pid: process.pid, boot, start }));
   let acquired = false;
@@ -205,7 +220,7 @@ export async function locked<T>(directory: string, work: () => Promise<T>): Prom
       } catch (error) {
         if (code(error) !== 'ENOTEMPTY' && code(error) !== 'EEXIST') throw error;
         try {
-          await reclaim(directory, boot);
+          await reclaim(directory, boot, kind);
         } catch (failure) {
           if (!isMissing(failure)) throw failure;
         }
