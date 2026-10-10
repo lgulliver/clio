@@ -2,6 +2,8 @@
 
 Status: mocked adapter foundation implemented. Mocked evidence is the selected development mode; no provider registration or credentials are needed now. The steps below describe later live access. No live collection is available through the browser yet.
 
+For concrete registration, scoped access checks, credential rotation and troubleshooting, follow [preparing real deployment sources](real-sources.md). For a separate practice controller, follow [the optional local Argo sandbox](local-argocd.md). Neither enables live Clio collection.
+
 ## GitHub App
 
 Create a separate GitHub App for collection. The existing Clio Local OAuth app remains for sign-in.

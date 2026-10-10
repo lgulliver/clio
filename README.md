@@ -6,7 +6,7 @@ Status: local backend foundation and browser shell. PostgreSQL workspace/service
 
 ## Quick start
 
-Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
+Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. Use [real-source preparation and access checks](docs/providers/real-sources.md) for GitHub App registration and scoped Argo access; live Clio connection remains pending. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
 
 Use Node 24 LTS (24.21.0 is pinned in .node-version) and pnpm 12.10.1:
 

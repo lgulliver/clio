@@ -147,7 +147,7 @@ For future GitHub access, select only intended repositories for a separate GitHu
 
 For future Argo evidence, identify Argo instance, destination cluster and application UID/name, plus immutable operation/rollout identity and observation times. Keep the manifests repository/configuration revision distinct from the application's source repository and commit provenance. Preserve operation evidence before mutable application status/history is replaced. Synced/Healthy does not independently prove production exposure or source lineage. Map each source explicitly to a Clio service and correlate shared rollouts explicitly; equal SHAs never imply correlation automatically.
 
-[Future provider setup](providers/local-setup.md) records requirements, not usable live connection UI, environment keys or ingestion endpoints. No live connector is enabled by selecting a mock source. The [optional local Argo guide](providers/local-argocd.md) uses a separate Docker-backed Kubernetes sandbox and no private repository credentials.
+[Real-source setup](providers/real-sources.md) covers GitHub App registration, installation access checks, scoped Argo tokens, production mapping and rotation. These provider-side steps work independently of Clio; live connection UI, credential storage and ingestion endpoints remain unimplemented. [Provider setup status](providers/local-setup.md) summarizes that boundary. No live connector is enabled by selecting a mock source. The [optional local Argo guide](providers/local-argocd.md) uses a separate Docker-backed Kubernetes sandbox and no private repository credentials.
 
 ## Troubleshooting
 
