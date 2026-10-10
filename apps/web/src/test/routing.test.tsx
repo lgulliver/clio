@@ -24,9 +24,9 @@ describe('application routing', () => {
       vi.fn(async () => new Response('{}', { status: 401 })),
     );
   });
-  it('renders an honest empty state before evidence is connected', async () => {
+  it('asks signed-out visitors to sign in before inspecting evidence', async () => {
     renderApp();
-    expect(await screen.findByRole('heading', { name: 'No service evidence yet' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Stored service evidence' })).toBeVisible();
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
   });
 
@@ -52,6 +52,6 @@ describe('application routing', () => {
     const user = userEvent.setup();
     renderApp('/missing');
     await user.click(await screen.findByRole('link', { name: 'Return to overview' }));
-    expect(await screen.findByRole('heading', { name: 'No service evidence yet' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Stored service evidence' })).toBeVisible();
   });
 });

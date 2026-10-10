@@ -1,6 +1,6 @@
 # Getting started locally
 
-This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider or populate real overview measurements. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md).
+This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider. Overview keeps saved fictional results separate from live-source histories. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md).
 
 ## Prerequisites and clone
 
@@ -133,15 +133,25 @@ pnpm demo:providers
 pnpm demo:providers --source=argocd --attest-exposure
 ```
 
+## Inspect stored results in Overview
+
+After a worker succeeds, open **Overview**, select a workspace, then select a service. Workspace and service selections remain in memory and reset on navigation, identity changes or session rechecks, including when the browser tab is hidden. Owners and members can read authorized stored results; this page never starts collection.
+
+**Live GitHub**, **Live Argo CD** and **Mock — fictional evidence** have separate histories. Each card considers up to the 25 newest collection requests, shows the newest request's status, and displays the newest successful stored result within that history. A newer pending, running or failed request does not replace an older saved result. No success in this bounded history does not prove that older results are absent. Use each card's **Refresh history** control to check progress; Overview does not poll automatically.
+
+Saved results retain their original UTC window (end exclusive), evidence cutoff, completion time, connection or mapping revision, and OEMS revision. These can differ from current settings. Provider labels identify GitHub or Argo CD; historical repository/Application names are not included in the safe result contract. Do not add counts across sources: evidence may overlap.
+
+Live deployment counts are provisional. Unknown qualification and incomplete collection, deployment history and recovery coverage remain visible. Argo cards also show receipt observation periods, recorded gaps, rejected receipts and scope drift; observation does not establish continuous coverage. A recorded count of zero does not establish that no production deployments occurred. Deployment rates and unsupported metrics stay unavailable. Fictional mock results never measure live delivery. Expired sessions or revoked service access hide stored results; select another accessible service or refresh your session before retrying.
+
 ## Source support and future setup
 
 | Source/workflow | Available locally | Future live requirements |
 | --- | --- | --- |
 | GitHub OAuth | Real sign-in and database sessions | Separate from collection credentials |
 | GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow, broader metric evidence and scheduling |
-| Argo CD operations | Separate scoped native notification ingress, immutable receipt/gap history, closed UTC snapshot worker and browser results | Polling/backfill, automatic operation UUIDs, exposure/application-source provenance and complete coverage |
+| Argo CD operations | Separate scoped native notification ingress, immutable receipt/gap history, closed UTC snapshot worker and browser results | Polling/backfill, automatic operation UUIDs, real independent exposure/provenance producers and complete coverage |
 | Optional Kind/Argo sandbox | Independent controller and native producer verification environment | Requires deliberate private grant/producer setup to connect; never supplies mock runs |
-| Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and actual overview presentation |
+| Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and historical repository labels |
 
 For live GitHub access, select only intended repositories for a separate GitHub App. Initial permission design is **Deployments read-only**, with mandatory **Metadata read-only**; no source-code or commit-history access is assumed. Record stable repository IDs and explicit production environment names. A successful GitHub deployment status or `production_environment` flag alone cannot establish consumer exposure: choose and verify an exposure policy for the service. App signing keys and installation tokens stay server-side; use the [live connection guide](providers/connect-github.md) for operator grants and worker configuration.
 
