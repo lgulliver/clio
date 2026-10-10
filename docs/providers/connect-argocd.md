@@ -141,3 +141,5 @@ Recovery: disconnect the exhausted source, preserve its history/results, registe
 | Provisional zero / unknown | Native exposure remains false; reporting window may exclude retained operations; coverage stays incomplete. |
 
 Polling/backfill, automatic UUID enrichment, exposure attestation, application-source provenance, complete delivery coverage and hosted onboarding remain future capabilities.
+
+The proposed [consumer-exposure and provenance contract](../superpowers/specs/2026-10-10-argo-enrichment-design.md) defines independent capability-scoped producers, exact operation/artifact binding and immutable cutoff joins. It is a design artifact, not a receiver or exposure signal enabled by this setup.

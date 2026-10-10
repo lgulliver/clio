@@ -14,9 +14,11 @@ The workspace has these boundaries:
 
 Internal TypeScript packages expose source to the workspace bundler and have no separate publishing/build pipeline. All packages are private. Introduce distributable builds only when there is a real external consumer.
 
-## Evidence flow to implement next
+## Evidence flow
 
 Provider collection on a trusted server -> reconciled evidence snapshot -> pinned OEMS validation/calculation -> result API -> TanStack Query -> UI.
+
+The [GitHub mapping verification](providers/github-oems-verification.md) traces controlled HTTP responses through stored history and the actual capture into all five OEMS calculations. The proposed [Argo enrichment contract](superpowers/specs/2026-10-10-argo-enrichment-design.md) keeps consumer-exposure and artifact/source assertions separate from immutable native operation receipts; that receiver/join is not implemented yet.
 
 Do not skip the validation/quality boundary or send provider credentials to the browser. The result must retain service, window, cutoff, version and provisional-quality information. Query clients must be scoped to an application/workspace/request rather than a cross-user global cache. Browser identity checks hide private workspace UI, cancel queries and clear caches on mount/focus identity changes and visibility transitions. Identity revisions and workspace scope guard late query and mutation results. Workspace selection and invitation tokens remain in memory, never browser storage.
 
