@@ -259,7 +259,7 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
       <h3 className="text-xl font-semibold">Live Argo · {serviceName}</h3>
       <p className="mt-2">
         Inspect retained real Argo notification evidence. Mock settings and attestations remain
-        separate. Results do not populate overview measurements.
+        separate. Saved results are available separately in Overview with incomplete coverage.
       </p>
       {unavailable ? (
         <p role="alert">Live Argo data is no longer available to you.</p>

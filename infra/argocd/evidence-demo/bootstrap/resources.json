@@ -1,0 +1,62 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-evidence-demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "sandbox-consumer"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "sandbox-consumer"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "http",
+                "image": "docker.io/library/nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14",
+                "ports": [
+                  {
+                    "containerPort": 80
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-evidence-demo"
+      },
+      "spec": {
+        "type": "ClusterIP",
+        "selector": {
+          "app": "sandbox-consumer"
+        },
+        "ports": [
+          {
+            "port": 80,
+            "targetPort": 80
+          }
+        ]
+      }
+    }
+  ]
+}

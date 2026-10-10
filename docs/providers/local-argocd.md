@@ -140,6 +140,10 @@ portable local installation step. For your installation, provide a trusted HTTPS
 reachable by the notification controller as described in [connecting Argo CD](connect-argocd.md).
 Do not assume that a successful localhost request proves controller connectivity.
 
+## Independent artifact evidence demo
+
+The [artifact evidence workflow](../../infra/argocd/evidence-demo/README.md) uses a separate `clio-evidence-demo` Application and workload namespace, leaving guestbook unchanged. It builds exact committed HTML bytes, deploys an immutable content-addressed ConfigMap through Argo, and probes the served artifact independently before asserting sandbox consumer exposure. The artifact digest identifies HTML bytes, not the NGINX image. Distinct producer policies and credentials keep provenance separate from activation. Real production traffic and complete coverage remain unproved.
+
 ## Diagnostics and cleanup
 
 If installation stalls, check resources, pull access and events only in the sandbox:
@@ -166,3 +170,5 @@ unset CLIO_ARGO_KUBECONFIG
 ```
 
 Do not use Docker pruning, unscoped cluster deletion or `docker compose down --volumes` for sandbox cleanup.
+
+Follow the [complete sandbox walkthrough](argo-evidence-demo.md) for source setup, a pre-rollout HTTP baseline, native delivery, independent evidence and immutable snapshot comparison.

@@ -2,7 +2,7 @@
 
 Clio accepts two independent producer capabilities alongside native Argo notifications: `consumer_exposure` confirms production activation; `application_provenance` maps an immutable artifact digest to an application repository and commit. Native `Healthy`/`Succeeded` remains insufficient. A failed rollout can still expose a canary to consumers, and build provenance alone never qualifies a deployment.
 
-The receiver, immutable storage, cutoff joins and owner selection are implemented. Tests use fictional producers. Clio does not supply a production traffic observer or build attestation service, establish your activation policy, or claim complete history. Start with [native Argo setup](connect-argocd.md); the exact admission contract is [documented here](../superpowers/specs/2026-10-10-argo-enrichment-design.md).
+The receiver, immutable storage, cutoff joins and owner selection are implemented. Tests use fictional producers. A reproducible [local HTTP artifact sandbox](../../infra/argocd/evidence-demo/README.md) also supplies a committed-artifact build producer and independent HTTP observer; its activation policy is evaluation-only. Clio does not supply a production traffic observer or build attestation service, establish your activation policy, or claim complete history. Start with [native Argo setup](connect-argocd.md); the exact admission contract is [documented here](../superpowers/specs/2026-10-10-argo-enrichment-design.md).
 
 ## Configure real producers
 
@@ -107,3 +107,5 @@ Integration fixtures create and remove only random test schemas. They exercise s
 Enrichment admission also reserves serialized snapshot headroom in the shared 8 MiB byte budget. This accounts for repeated evidence/policy references by their encoded byte lengths, independently of grant size. Artifact exposure reserves the maximum application-repository representation until an immutable digest mapping is known; an existing digest lock permits a smaller exact reservation. The 5000-row ceiling is an additional limit, not a promise that 5000 assertions fit. Exact replay consumes no new storage or headroom. Reservations are not refunded by rotation or later captures.
 
 Producer policy and evidence references are opaque text. Canonical OEMS source references use stable namespaced SHA-256 URI aliases; original text remains in the exposure/provenance assertions and private receipts. Unicode labels cannot invalidate a stored OEMS snapshot and are never dereferenced.
+
+Follow the [complete sandbox walkthrough](argo-evidence-demo.md) for source setup, a pre-rollout HTTP baseline, native delivery, independent evidence and immutable snapshot comparison.

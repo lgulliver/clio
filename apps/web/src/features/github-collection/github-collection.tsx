@@ -238,7 +238,7 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
       <h3 className="text-xl font-semibold">Live GitHub · {serviceName}</h3>
       <p className="mt-2">
         Collect real GitHub deployment evidence. Mock settings and attestations remain separate.
-        Results do not populate overview measurements.
+        Saved results are available separately in Overview with incomplete coverage.
       </p>
       {unavailable ? (
         <p role="alert">Live GitHub data is no longer available to you.</p>

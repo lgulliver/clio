@@ -133,6 +133,8 @@ pnpm demo:providers
 pnpm demo:providers --source=argocd --attest-exposure
 ```
 
+For a reproducible independent Argo evidence path, use the [local artifact demo](../infra/argocd/evidence-demo/README.md). It checks build provenance and HTTP activation under explicit sandbox policies; it does not assert real production exposure.
+
 ## Inspect stored results in Overview
 
 After a worker succeeds, open **Overview**, select a workspace, then select a service. Workspace and service selections remain in memory and reset on navigation, identity changes or session rechecks, including when the browser tab is hidden. Owners and members can read authorized stored results; this page never starts collection.
@@ -178,3 +180,5 @@ For native Argo evidence, identify Argo instance, destination cluster and applic
 | Argo sandbox fails | Follow its context-bound diagnostics; it is independent of Clio/PostgreSQL. |
 
 For repository verification, `pnpm check` runs lint, types, behavior tests and build. Database integration tests are separate and require `CLIO_TEST_DATABASE_URL`; see [API verification](../apps/api/README.md#verification). These checks do not collect live provider evidence.
+
+For a reproducible independent build/activation exercise, follow the [Argo artifact evidence walkthrough](providers/argo-evidence-demo.md). It uses a dedicated sandbox service and separate producer credentials.

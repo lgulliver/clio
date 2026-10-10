@@ -2,6 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import {
+  artifactDigest,
+  buildPolicy,
+  captureBaseline,
+  exposurePolicy,
+  observeArtifact,
+  provenanceEvent,
+} from '../../../infra/argocd/evidence-demo/producers.ts';
 import { loadMigrations, migrate } from '../src/db/migrations.ts';
 import {
   type ArgoConfig,
@@ -48,7 +56,7 @@ afterAll(async () => {
   if (created) await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
   await admin.end();
 });
-async function fixture() {
+async function fixture(sandboxPolicies = false) {
   const ids = createIdentityRepository(pool),
     w = await ids.createWorkspace(owner, randomUUID()),
     s = await ids.createService(owner, w.id, 'Argo fixture');
@@ -69,7 +77,7 @@ async function fixture() {
     ...scope,
     producerId: randomUUID(),
     capability: 'consumer_exposure' as const,
-    policyReference: 'urn:fixture:exposure:v1',
+    policyReference: sandboxPolicies ? exposurePolicy : 'urn:fixture:exposure:v1',
     repositoryIds: [],
     tokenDigest: digest('c'.repeat(64)),
     fingerprint: digest(randomUUID()),
@@ -78,7 +86,7 @@ async function fixture() {
     ...scope,
     producerId: randomUUID(),
     capability: 'application_provenance' as const,
-    policyReference: 'urn:fixture:build:v1',
+    policyReference: sandboxPolicies ? buildPolicy : 'urn:fixture:build:v1',
     repositoryIds: ['github:fixture/app'],
     tokenDigest: digest('d'.repeat(64)),
     fingerprint: digest(randomUUID()),
@@ -457,7 +465,8 @@ it('snapshot cutoff includes separate enrichment evidence, late provenance enric
   try {
     const native = notification(f);
     expect((await f.post(native)).statusCode).toBe(202);
-    expect((await f.enrich(exposureEvent(f, native))).statusCode).toBe(202);
+    const exposure = exposureEvent(f, native);
+    expect((await f.enrich(exposure)).statusCode).toBe(202);
     const first = await f.enqueue();
     await createArgoWorker(pool, f.config).runOnce();
     const saved = await f.repo.getRun(member, f.w, f.s, first.id);
@@ -472,7 +481,8 @@ it('snapshot cutoff includes separate enrichment evidence, late provenance enric
       changeFailureRate: null,
       failedDeploymentRecoveryTime: null,
     });
-    expect((await f.enrich(buildEvent(f), f.build)).statusCode).toBe(202);
+    const build = buildEvent(f);
+    expect((await f.enrich(build, f.build)).statusCode).toBe(202);
     const next = await f.enqueue();
     await createArgoWorker(pool, f.config).runOnce();
     expect((await f.repo.getRun(member, f.w, f.s, next.id)).result).toMatchObject({
@@ -489,6 +499,35 @@ it('snapshot cutoff includes separate enrichment evidence, late provenance enric
     expect(snapshot?.evidence.argoEnrichments).toHaveLength(2);
     expect(snapshot?.evidence.statuses[0].consumerExposure).toBe(false);
     expect(snapshot?.evidence.deployments[0].repository).toBeNull();
+    expect(snapshot?.snapshot.deployments[0].effective_at).toBe(exposure.effective_at);
+    expect(snapshot?.snapshot.deployments[0].extensions.tip_provenance).toEqual([]);
+    const assertionsRef = `urn:clio:argo-provenance:${f.scope.sourceId}:${artifact}`;
+    expect(snapshot?.snapshot.deployments[0].extensions.artifact_source_provenance).toEqual([
+      {
+        repository_id: build.repository_id,
+        commit_sha: build.commit_sha,
+        artifact_digest: artifact,
+        assertions_ref: assertionsRef,
+        assertion_count: 1,
+      },
+    ]);
+    expect(snapshot?.snapshot.services[0].extensions.argo_artifact_provenance).toEqual([
+      expect.objectContaining({
+        id: assertionsRef,
+        source_id: f.scope.sourceId,
+        artifact_digest: artifact,
+        repository_id: build.repository_id,
+        commit_sha: build.commit_sha,
+        assertions: [
+          expect.objectContaining({
+            producer_id: f.build.producerId,
+            event_id: build.event_id,
+            policy_reference: f.build.policyReference,
+            evidence_ref: build.evidence_ref,
+          }),
+        ],
+      }),
+    ]);
     expect(snapshot?.snapshot.changes).toEqual([]);
     expect(snapshot?.metrics[0].change_lead_time.median_seconds).toBeNull();
     expect(snapshot?.metrics[0].deployment_rework_rate.ratio).toBeNull();
@@ -791,5 +830,78 @@ it('reserves snapshot headroom before admission and tightens artifact reserve on
     await unknown.app.close();
     await known.app.close();
     await exhausted.app.close();
+  }
+});
+
+it('generated demo producer events traverse ingress, cutoff storage and OEMS without health-derived exposure', async () => {
+  const f = await fixture(true);
+  try {
+    const bytes = Buffer.from('<html>Sandbox activation only</html>');
+    const receipt = {
+      contract: 'clio.sandbox.git-artifact.v1',
+      repository_id: 'github:fixture/app',
+      commit_sha: 'f'.repeat(40),
+      artifact_digest: artifactDigest(bytes),
+      source_path: 'infra/argocd/evidence-demo/app/index.html',
+    };
+    const endpoint = 'http://127.0.0.1:8099/index.html';
+    const operationId = randomUUID();
+    const baseline = await captureBaseline(
+      endpoint,
+      operationId,
+      async () => new Response(null, { status: 404 }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const native = notification(f, operationId);
+    native.operation.startedAt = new Date().toISOString();
+    native.operation.finishedAt = native.operation.startedAt;
+    native.operation.phase = 'Failed';
+    native.health.status = 'Degraded';
+    native.health.lastTransitionTime = native.operation.finishedAt;
+    expect((await f.post(native)).statusCode).toBe(202);
+    const first = await f.enqueue();
+    await createArgoWorker(pool, f.config).runOnce();
+    const earlier = await f.repo.getRun(member, f.w, f.s, first.id);
+    const exposure = await observeArtifact(
+      {
+        endpoint,
+        bytes,
+        receipt,
+        notification: native,
+        baseline,
+        producer: { sourceId: f.scope.sourceId, producerId: f.exposure.producerId },
+      },
+      async () => new Response(bytes),
+    );
+    const provenance = provenanceEvent(bytes, receipt, {
+      sourceId: f.scope.sourceId,
+      producerId: f.build.producerId,
+    });
+    expect((await f.enrich(provenance, f.build)).statusCode).toBe(202);
+    expect((await f.enrich(exposure.event, f.exposure)).statusCode).toBe(202);
+    const next = await f.enqueue();
+    await createArgoWorker(pool, f.config).runOnce();
+    expect((await f.repo.getRun(member, f.w, f.s, next.id)).result).toMatchObject({
+      qualifyingCount: 1,
+      deploymentFrequency: { count: 0 },
+      enrichmentSummary: { consumerExposureCount: 1, applicationProvenanceCount: 1 },
+    });
+    const saved = (
+      await pool.query('SELECT snapshot FROM argo_collection_snapshots WHERE run_id=$1', [next.id])
+    ).rows[0]?.snapshot;
+    expect(saved.deployments[0].effective_at).toBe(exposure.event.effective_at);
+    expect(saved.deployments[0].extensions.tip_provenance).toEqual([]);
+    expect(saved.deployments[0].extensions.artifact_source_provenance).toEqual([
+      expect.objectContaining({
+        repository_id: provenance.repository_id,
+        commit_sha: provenance.commit_sha,
+        artifact_digest: receipt.artifact_digest,
+        assertion_count: 1,
+      }),
+    ]);
+    expect(saved.changes).toEqual([]);
+    expect((await f.repo.getRun(member, f.w, f.s, first.id)).result).toEqual(earlier.result);
+  } finally {
+    await f.app.close();
   }
 });
