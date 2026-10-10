@@ -85,7 +85,7 @@ Runs pin connection revision and reporting period. Editing/disconnecting a conne
 
 Deployment requests and every status are collected without filtering only on the deployment's current environment, so status promotions are retained. Persisted normalized history keeps earliest observations and earlier exposure when later responses omit or deactivate records. Conflicting source content fails closed; revisions never rewrite saved snapshots. Each result records reporting window, evidence cutoff, connection revision and OEMS pin.
 
-Interrupted acquisitions consume an attempt; three interruptions/failures can exhaust a run. Completion shares the acquisition deadline and can await lease expiry if that budget runs out. Keep local API/worker/PostgreSQL clocks synchronized: an API clock ahead of PostgreSQL can temporarily reject immediate enqueue after save. Hosted clock and shutdown policy remain follow-up work.
+Accepted partial acquisitions can save provisional results and durable [checkpoints](github-checkpoints.md). Enqueue another run to continue the sweep; a successful partial run does not enqueue its own continuation. Hard interruptions and failures consume an attempt; three can exhaust a run. Completion uses the remaining database lease budget after bounded network acquisition. Keep local API/worker/PostgreSQL clocks synchronized: an API clock ahead of PostgreSQL can temporarily reject immediate enqueue after save. Hosted clock and shutdown policy remain follow-up work.
 
 Acquisition is bounded to 100 pages, 5000 records, 1 MiB per response and 8 MiB per traversal. Repeated unchanged traversals do not append redundant history rows; genuinely new metadata/status observations do. Stored normalized history also has a 5000-record/8 MiB ceiling; there is no automatic pruning policy. Hitting these bounds fails closed.
 
@@ -107,3 +107,5 @@ REST traversal completion is shown separately from metric coverage. Initial coll
 The current transport is tested with controlled GitHub responses and actual PostgreSQL. A real App/installation run still requires your own configured credentials and deliberate repository selection. Argo transport, automatic scheduling, task-level monorepo binding and incident/change collectors remain subsequent slices.
 
 Read [provider rate limits](rate-limits.md) for shared cooldowns, retry behavior, ingress budgets and current collection-cost limits.
+
+Apply migration `0008_github_checkpoints.sql` explicitly and restart API and worker before using resumable acquisition.

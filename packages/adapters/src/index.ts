@@ -9,8 +9,8 @@ export type {
 } from './argo-notification.ts';
 export { argoNotificationDigest, parseArgoNotification } from './argo-notification.ts';
 export { normalizeArgoOperation } from './argocd.ts';
-export type { CollectionDiagnostic, GitHubBatch } from './github.ts';
-export { collectGitHubDeployments } from './github.ts';
+export type { CollectionDiagnostic, GitHubBatch, GitHubCheckpoint } from './github.ts';
+export { collectGitHubDeployments, parseGitHubCheckpoint } from './github.ts';
 export type { FetchTransport, InstallationToken } from './github-app.ts';
 export { createInstallationToken, githubApiVersion } from './github-app.ts';
 export { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';

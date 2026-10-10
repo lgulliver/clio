@@ -92,6 +92,9 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query(
     'SELECT app_id,installation_id,next_request_at,blocked_until,consecutive_throttles,lease_token,lease_until FROM github_quota_state LIMIT 0',
   );
+  await pool.query(
+    'SELECT workspace_id,service_id,connection_revision,app_id,installation_id,repository_id,grant_fingerprint,run_id,lease_token,cursor,updated_at FROM github_collection_checkpoints LIMIT 0',
+  );
   await pool.query('SELECT source_id,tokens,refilled_at FROM argo_ingress_buckets LIMIT 0');
   await pool.query(
     'SELECT workspace_id,service_id,revision,connection,grant_fingerprint,scope,created_by FROM argo_connection_revisions LIMIT 0',

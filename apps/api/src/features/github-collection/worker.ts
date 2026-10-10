@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { AdapterError, type GitHubBatch, GitHubRateLimitError } from '@clio/adapters';
+import {
+  AdapterError,
+  type GitHubBatch,
+  GitHubRateLimitError,
+  parseGitHubCheckpoint,
+} from '@clio/adapters';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { name, uuid } from '../identity/input.ts';
 import { captureGitHub } from './capture.ts';
+import { readCheckpoint, readHistory, saveCheckpoint } from './checkpoint.ts';
 import { type GitHubConfig, grantFor } from './config.ts';
 import { storedRevision } from './db-value.ts';
 import { abortable } from './deadline.ts';
@@ -152,7 +158,14 @@ export function createGitHubWorker(
       });
     },
     preflight(claim: Claim) {
-      return locked(claim, async (_client, input) => input);
+      return locked(claim, async (client, input) => {
+        const retained = await readHistory(client, input.connection);
+        const checkpoint = await readCheckpoint(client, input);
+        return {
+          ...input,
+          incremental: { checkpoint, deployments: retained.evidence.deployments },
+        };
+      });
     },
     async complete(
       claim: Claim,
@@ -175,37 +188,14 @@ export function createGitHubWorker(
       try {
         return await locked(claim, async (client, input) => {
           if (signal?.aborted) throw new LeaseLost();
-          const scope = [
-            input.connection.workspaceId,
-            input.connection.serviceId,
-            input.connection.installationId,
-            input.connection.repositoryId,
-          ];
-          const totals = await client.query<Record<string, unknown>>(
-            'SELECT count(*)::int AS count,coalesce(sum(octet_length(payload::text)),0)::text AS bytes FROM github_collection_history WHERE workspace_id=$1 AND service_id=$2 AND installation_id=$3 AND repository_id=$4',
-            scope,
-          );
-          if (
-            Number(totals.rows[0]?.count) > maxHistoryRecords ||
-            Number(totals.rows[0]?.bytes) > maxStoredBytes
-          )
-            throw new Error('Stored history limit');
-          const history = await client.query<Record<string, unknown>>(
-            'SELECT kind,payload FROM github_collection_history WHERE workspace_id=$1 AND service_id=$2 AND installation_id=$3 AND repository_id=$4 ORDER BY kind,record_key,observed_at LIMIT 5001',
-            scope,
-          );
-          const previous = parseEvidence(
-            {
-              deployments: history.rows
-                .filter((r) => r.kind === 'deployment')
-                .map((r) => r.payload),
-              statuses: history.rows.filter((r) => r.kind === 'status').map((r) => r.payload),
-              completedStatusTraversals: history.rows
-                .filter((r) => r.kind === 'traversal')
-                .map((r) => r.payload),
-            },
-            input.connection,
-          );
+          const { scope, totals, evidence: previous } = await readHistory(client, input.connection);
+          const checkpoint =
+            batch.checkpoint === undefined
+              ? undefined
+              : batch.checkpoint === null
+                ? null
+                : parseGitHubCheckpoint(batch.checkpoint);
+          const oldCheckpoint = await readCheckpoint(client, input);
           const acquired = parseEvidence(
             {
               deployments: batch.deployments,
@@ -220,7 +210,27 @@ export function createGitHubWorker(
           if (batch.diagnostics.some((d) => d.code === 'conflicting_source_record'))
             throw new Error('Conflicting source record');
           const evidence = mergeHistory(previous, acquired);
-          if (!batch.transportComplete && evidence.deployments.length === 0)
+          if (
+            checkpoint?.statuses.some(
+              (cursor) =>
+                !evidence.deployments.some(
+                  (record) =>
+                    record.sourceDeploymentId ===
+                    `repository:${input.connection.repositoryId}:deployment:${cursor.deploymentId}`,
+                ),
+            )
+          )
+            throw new Error('Unresolved checkpoint deployment');
+          if (batch.transportComplete && checkpoint) throw new Error('Incomplete checkpoint');
+          const progressed =
+            checkpoint !== undefined &&
+            !isDeepStrictEqual(checkpoint, oldCheckpoint ?? { deploymentPage: 1, statuses: [] });
+          if (
+            !batch.transportComplete &&
+            !progressed &&
+            (evidence.deployments.length === 0 ||
+              (checkpoint !== undefined && batch.diagnostics.length > 0))
+          )
             throw new Retry(delay ?? retryDelay(null), limits.length > 0);
           const time = await client.query<Record<string, unknown>>(
             `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed`,
@@ -303,6 +313,7 @@ export function createGitHubWorker(
               digest,
             ],
           );
+          if (checkpoint !== undefined) await saveCheckpoint(client, input, claim, checkpoint);
           if (signal?.aborted) throw new LeaseLost();
           // Current in-memory grants are rechecked immediately before terminal write too.
           const config = configNow(),
@@ -401,12 +412,15 @@ export async function processOne(
         installationId: input.connection.installationId,
         repositoryId: input.connection.repositoryId,
         token: scope.token,
+        incremental: input.incremental,
         clock,
         signal: collectionSignal,
       }),
       signal,
     );
     if (signal.aborted) throw new Error('Acquisition cancelled');
+    if (dependencies.provider === undefined && batch.checkpoint === undefined)
+      throw new Error('Missing production checkpoint');
     await worker.complete(
       claim,
       batch,

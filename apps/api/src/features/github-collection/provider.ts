@@ -39,6 +39,7 @@ export interface GitHubProvider {
     clock: () => Date;
     signal: AbortSignal;
     fetch?: FetchTransport;
+    incremental?: NonNullable<Parameters<typeof collectGitHubDeployments>[0]['incremental']>;
   }): ReturnType<typeof collectGitHubDeployments>;
 }
 function transport(

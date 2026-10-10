@@ -20,11 +20,41 @@ export type CollectionDiagnostic = Readonly<{
   resource: string;
   retryAfterSeconds: number | null;
 }>;
+/** A bounded traversal cursor, not a coverage assertion. URLs and credentials are excluded. */
+export type GitHubCheckpoint = Readonly<{
+  deploymentPage: number | null;
+  statuses: readonly Readonly<{ deploymentId: number; page: number }>[];
+}>;
+
+export function parseGitHubCheckpoint(value: unknown): GitHubCheckpoint {
+  const row = object(value);
+  if (Object.keys(row).length !== 2 || !('deploymentPage' in row) || !('statuses' in row))
+    throw new AdapterError('invalid_checkpoint');
+  const deploymentPage = row.deploymentPage === null ? null : positiveId(row.deploymentPage);
+  if (!Array.isArray(row.statuses) || row.statuses.length > 100)
+    throw new AdapterError('invalid_checkpoint');
+  const seen = new Set<number>();
+  const statuses = row.statuses.map((entry: unknown) => {
+    const item = object(entry);
+    if (Object.keys(item).length !== 2 || !('deploymentId' in item) || !('page' in item))
+      throw new AdapterError('invalid_checkpoint');
+    const deploymentId = positiveId(item.deploymentId);
+    const page = positiveId(item.page);
+    if (seen.has(deploymentId)) throw new AdapterError('invalid_checkpoint');
+    seen.add(deploymentId);
+    return Object.freeze({ deploymentId, page });
+  });
+  if (deploymentPage === null && statuses.length === 0)
+    throw new AdapterError('invalid_checkpoint');
+  return Object.freeze({ deploymentPage, statuses: Object.freeze(statuses) });
+}
+
 export type GitHubBatch = EvidenceBatch &
   Readonly<{
-    /** REST traversal only; never an OEMS coverage assertion or durable checkpoint. */
+    /** Traversal finished in this mode; a resumed sweep is not a fresh full-history scan or OEMS coverage assertion. */
     transportComplete: boolean;
     diagnostics: readonly CollectionDiagnostic[];
+    checkpoint?: GitHubCheckpoint | null;
   }>;
 
 function nextPage(header: string | null, current: URL, expectedPath: string): URL | null {
@@ -93,6 +123,10 @@ export async function collectGitHubDeployments(input: {
   signal?: AbortSignal;
   maxPages?: number;
   maxRecords?: number;
+  incremental?: Readonly<{
+    checkpoint: GitHubCheckpoint | null;
+    deployments: readonly DeploymentEvidence[];
+  }>;
 }): Promise<GitHubBatch> {
   const sourceId = identity('github', string(input.instance));
   const repositoryId = positiveId(input.repositoryId);
@@ -101,6 +135,13 @@ export async function collectGitHubDeployments(input: {
   const maxRecords = input.maxRecords ?? 100_000;
   positiveId(maxPages);
   positiveId(maxRecords);
+  const initialCheckpoint =
+    input.incremental?.checkpoint == null
+      ? null
+      : parseGitHubCheckpoint(input.incremental.checkpoint);
+  let deploymentPage: number | null = initialCheckpoint?.deploymentPage ?? 1;
+  if (initialCheckpoint?.deploymentPage === null) deploymentPage = null;
+  const pendingStatuses = [...(initialCheckpoint?.statuses ?? [])];
   const deployments = new Map<string, DeploymentEvidence>();
   const statuses = new Map<string, StatusEvidence>();
   const diagnostics: CollectionDiagnostic[] = [];
@@ -145,9 +186,12 @@ export async function collectGitHubDeployments(input: {
     path: string,
     parse: (value: unknown, observedAt: string) => T,
     accept: (page: T[]) => void,
+    startPage = 1,
+    advance?: (next: number | null) => void,
+    singlePage = false,
   ): Promise<void> {
     resource = path;
-    let url: URL | null = new URL(`https://api.github.com${path}?per_page=100&page=1`);
+    let url: URL | null = new URL(`https://api.github.com${path}?per_page=100&page=${startPage}`);
     while (url) {
       const current: URL = url;
       const response = await request(current);
@@ -158,10 +202,11 @@ export async function collectGitHubDeployments(input: {
       records += body.length;
       if (records > maxRecords) throw new AdapterError('record_limit');
       const page = body.map((value: unknown) => parse(value, observedAt));
-      // Reject malicious pagination before accepting this page; a retry starts full backfill.
+      // Reject malicious pagination before accepting this page or advancing its cursor.
       const next = nextPage(response.headers.get('link'), current, path);
       accept(page);
-      url = next;
+      advance?.(next === null ? null : positiveId(Number(next.searchParams.get('page'))));
+      url = singlePage ? null : next;
     }
   }
   try {
@@ -178,44 +223,43 @@ export async function collectGitHubDeployments(input: {
       throw new AdapterError('repository_binding_mismatch');
     const repoPath = `/repos/${owner}/${name}`;
     const repositoryKey = identity('github', input.instance, 'repository', repositoryId);
-    await traverse(
-      `${repoPath}/deployments`,
-      (value, observedAt): DeploymentEvidence => {
-        const row = object(value);
-        const deploymentId = positiveId(row.id);
-        const eventAt = timestamp(row.created_at);
-        const revision = timestamp(row.updated_at);
-        eventBeforeObservation(eventAt, observedAt);
-        eventBeforeObservation(revision, observedAt);
-        return Object.freeze({
-          id: identity(sourceId, 'deployment', repositoryId, deploymentId),
-          sourceId,
-          sourceDeploymentId: identity('repository', repositoryId, 'deployment', deploymentId),
-          revision,
-          environment: string(row.environment),
-          eventAt,
-          observedAt,
-          sourceRef: `urn:clio:${identity('github', input.instance, 'repository', repositoryId, 'deployment', deploymentId)}`,
-          repository: Object.freeze({ repositoryId: repositoryKey, tipSha: sha(row.sha) }),
-          reconciledConfigurationRevision: null,
-          configurationRepositoryId: null,
-          deploymentTask: row.task === undefined || row.task === null ? null : string(row.task),
-          operationKind: 'rollout',
-        });
-      },
-      (page) => {
-        const accepted = deploymentVersions([...deployments.values(), ...page]);
-        deployments.clear();
-        for (const record of accepted)
-          deployments.set(identity(record.id, record.revision), record);
-      },
-    );
-    // Query every deployment, including those whose current environment is staging.
-    for (const deployment of currentDeployments([...deployments.values()])) {
-      const deploymentId = deployment.sourceDeploymentId.split(':').at(-1);
+    const parseDeployment = (value: unknown, observedAt: string): DeploymentEvidence => {
+      const row = object(value);
+      const deploymentId = positiveId(row.id);
+      const eventAt = timestamp(row.created_at);
+      const revision = timestamp(row.updated_at);
+      eventBeforeObservation(eventAt, observedAt);
+      eventBeforeObservation(revision, observedAt);
+      return Object.freeze({
+        id: identity(sourceId, 'deployment', repositoryId, deploymentId),
+        sourceId,
+        sourceDeploymentId: identity('repository', repositoryId, 'deployment', deploymentId),
+        revision,
+        environment: string(row.environment),
+        eventAt,
+        observedAt,
+        sourceRef: `urn:clio:${identity('github', input.instance, 'repository', repositoryId, 'deployment', deploymentId)}`,
+        repository: Object.freeze({ repositoryId: repositoryKey, tipSha: sha(row.sha) }),
+        reconciledConfigurationRevision: null,
+        configurationRepositoryId: null,
+        deploymentTask: row.task === undefined || row.task === null ? null : string(row.task),
+        operationKind: 'rollout',
+      });
+    };
+    const acceptDeployments = (page: DeploymentEvidence[]) => {
+      const accepted = deploymentVersions([...deployments.values(), ...page]);
+      deployments.clear();
+      for (const record of accepted) deployments.set(identity(record.id, record.revision), record);
+    };
+    const collectStatuses = async (
+      deployment: DeploymentEvidence,
+      startPage: number,
+      advance?: (next: number | null) => void,
+    ): Promise<void> => {
+      const deploymentId = positiveId(Number(deployment.sourceDeploymentId.split(':').at(-1)));
       await traverse(
         `${repoPath}/deployments/${deploymentId}/statuses`,
-        (value, observedAt): StatusEvidence => {
+        (value: unknown, observedAt: string): StatusEvidence => {
           const row = object(value);
           const statusId = positiveId(row.id);
           const eventAt = timestamp(row.created_at);
@@ -251,13 +295,65 @@ export async function collectGitHubDeployments(input: {
           });
         },
         (page) => merge(statuses, page),
+        startPage,
+        advance,
       );
-      completedStatusTraversals.push(
-        Object.freeze({
-          deploymentId: deployment.id,
-          observedAt: timestamp(input.clock().toISOString()),
-        }),
-      );
+      // Offset pagination can shift between runs. Only a fresh scan completed now proves traversal.
+      if (startPage === 1)
+        completedStatusTraversals.push(
+          Object.freeze({
+            deploymentId: deployment.id,
+            observedAt: timestamp(input.clock().toISOString()),
+          }),
+        );
+    };
+    if (!input.incremental) {
+      await traverse(`${repoPath}/deployments`, parseDeployment, acceptDeployments);
+      for (const deployment of currentDeployments([...deployments.values()]))
+        await collectStatuses(deployment, 1);
+    } else {
+      const knownDeployments = (): DeploymentEvidence[] =>
+        currentDeployments(
+          deploymentVersions([...(input.incremental?.deployments ?? []), ...deployments.values()]),
+        );
+      while (pendingStatuses.length > 0 || deploymentPage !== null) {
+        while (pendingStatuses.length > 0) {
+          const cursor = pendingStatuses[0];
+          if (!cursor) throw new AdapterError('invalid_checkpoint');
+          const deployment = knownDeployments().find(
+            (record) =>
+              record.sourceId === sourceId &&
+              record.id === identity(sourceId, 'deployment', repositoryId, cursor.deploymentId) &&
+              record.sourceDeploymentId ===
+                identity('repository', repositoryId, 'deployment', cursor.deploymentId),
+          );
+          if (!deployment) throw new AdapterError('checkpoint_deployment_missing');
+          await collectStatuses(deployment, cursor.page, (next) => {
+            if (next === null) pendingStatuses.shift();
+            else pendingStatuses[0] = { deploymentId: cursor.deploymentId, page: next };
+          });
+        }
+        if (deploymentPage !== null) {
+          await traverse(
+            `${repoPath}/deployments`,
+            parseDeployment,
+            (page) => {
+              if (page.length > 100) throw new AdapterError('invalid_page');
+              acceptDeployments(page);
+              for (const deployment of currentDeployments(page))
+                pendingStatuses.push({
+                  deploymentId: positiveId(Number(deployment.sourceDeploymentId.split(':').at(-1))),
+                  page: 1,
+                });
+            },
+            deploymentPage,
+            (next) => {
+              deploymentPage = next;
+            },
+            true,
+          );
+        }
+      }
     }
   } catch (error) {
     diagnostics.push(
@@ -272,7 +368,21 @@ export async function collectGitHubDeployments(input: {
     deployments: Object.freeze([...deployments.values()]),
     statuses: Object.freeze([...statuses.values()]),
     completedStatusTraversals: Object.freeze(completedStatusTraversals),
-    transportComplete: diagnostics.length === 0,
+    transportComplete:
+      diagnostics.length === 0 &&
+      (initialCheckpoint === null ||
+        (initialCheckpoint.deploymentPage === 1 && initialCheckpoint.statuses.length === 0)),
     diagnostics: Object.freeze(diagnostics),
+    ...(input.incremental
+      ? {
+          checkpoint:
+            deploymentPage === null && pendingStatuses.length === 0
+              ? null
+              : Object.freeze({
+                  deploymentPage,
+                  statuses: Object.freeze(pendingStatuses.map((cursor) => Object.freeze(cursor))),
+                }),
+        }
+      : {}),
   });
 }

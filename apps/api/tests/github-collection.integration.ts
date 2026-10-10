@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AdapterError, type GitHubBatch, identity } from '@clio/adapters';
+import { AdapterError, collectGitHubDeployments, type GitHubBatch, identity } from '@clio/adapters';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -167,6 +167,308 @@ afterAll(async () => {
   await admin.end();
 });
 describe('live GitHub PostgreSQL boundaries', () => {
+  it('resumes persisted status pages with retained evidence across workers and resets after a sweep', async () => {
+    const f = await fixture();
+    const calls: string[] = [];
+    const collect: GitHubProvider['collect'] = async (input) =>
+      collectGitHubDeployments({
+        ...input,
+        instance: String(input.installationId),
+        maxPages: 3,
+        fetch: async (url) => {
+          const parsed = new URL(url);
+          calls.push(parsed.pathname + parsed.search);
+          if (parsed.pathname === '/repositories/20')
+            return Response.json({
+              id: 20,
+              name: 'fixture-repo',
+              owner: { login: 'fixture-owner' },
+            });
+          if (parsed.pathname.endsWith('/deployments'))
+            return Response.json([
+              {
+                id: 30,
+                created_at: '2026-01-02T10:00:00Z',
+                updated_at: '2026-01-02T10:00:00Z',
+                environment: 'staging',
+                sha: 'a'.repeat(40),
+              },
+            ]);
+          const page = parsed.searchParams.get('page');
+          return Response.json(
+            [
+              {
+                id: page === '1' ? 40 : 41,
+                created_at: '2026-01-02T10:01:00Z',
+                updated_at: '2026-01-02T10:01:00Z',
+                environment: page === '1' ? 'staging' : 'production',
+                state: 'success',
+              },
+            ],
+            page === '1'
+              ? {
+                  headers: {
+                    link: '<https://api.github.com/repos/fixture-owner/fixture-repo/deployments/30/statuses?per_page=100&page=2>; rel="next"',
+                  },
+                }
+              : {},
+          );
+        },
+      });
+    f.provider.collect.mockImplementation(collect);
+    const first = await f.enqueue();
+    await processOne(pool, f.config, { provider: f.provider });
+    const cursor = (
+      await pool.query<Record<string, unknown>>(
+        'SELECT cursor FROM github_collection_checkpoints WHERE workspace_id=$1',
+        [f.workspaceId],
+      )
+    ).rows[0]?.cursor;
+    expect(cursor).toEqual({ deploymentPage: null, statuses: [{ deploymentId: 30, page: 2 }] });
+    const firstStored = (
+      await pool.query<Record<string, unknown>>(
+        'SELECT evidence,digest FROM github_collection_snapshots WHERE run_id=$1',
+        [first.id],
+      )
+    ).rows[0];
+    calls.length = 0;
+    const second = await f.enqueue();
+    // A newly constructed worker/provider resumes exclusively from PostgreSQL state.
+    await processOne(pool, f.config, { provider: { verify: f.provider.verify, collect } });
+    expect(calls).toEqual([
+      '/repositories/20',
+      '/repos/fixture-owner/fixture-repo/deployments/30/statuses?per_page=100&page=2',
+    ]);
+    expect(
+      (await f.repository.getRun(owner, f.workspaceId, f.serviceId, second.id)).result,
+    ).toMatchObject({ qualifyingCount: 1, coverage: { collectionComplete: false } });
+    const latest = (
+      await pool.query<Record<string, unknown>>(
+        'SELECT evidence FROM github_collection_snapshots WHERE run_id=$1',
+        [second.id],
+      )
+    ).rows[0]?.evidence;
+    expect(latest).toMatchObject({
+      deployments: expect.any(Array),
+      statuses: expect.arrayContaining([
+        expect.objectContaining({ id: identity(identity('github', '10'), 'status', 20, 40) }),
+        expect.objectContaining({ id: identity(identity('github', '10'), 'status', 20, 41) }),
+      ]),
+      completedStatusTraversals: [],
+    });
+    expect(
+      (
+        await pool.query<Record<string, unknown>>(
+          'SELECT cursor FROM github_collection_checkpoints WHERE workspace_id=$1',
+          [f.workspaceId],
+        )
+      ).rows[0]?.cursor,
+    ).toBeNull();
+    expect(
+      (
+        await pool.query<Record<string, unknown>>(
+          'SELECT evidence,digest FROM github_collection_snapshots WHERE run_id=$1',
+          [first.id],
+        )
+      ).rows[0],
+    ).toEqual(firstStored);
+    calls.length = 0;
+    await f.enqueue();
+    await processOne(pool, f.config, { provider: f.provider });
+    expect(calls[1]).toContain('/deployments?per_page=100&page=1');
+  });
+  it('commits empty-page cursor progress without claiming complete coverage', async () => {
+    const f = await fixture();
+    f.provider.collect.mockResolvedValueOnce({
+      deployments: [],
+      statuses: [],
+      completedStatusTraversals: [],
+      transportComplete: false,
+      diagnostics: [{ code: 'page_limit', resource: 'deployments', retryAfterSeconds: null }],
+      checkpoint: { deploymentPage: 2, statuses: [] },
+    });
+    const run = await f.enqueue();
+    await processOne(pool, f.config, { provider: f.provider });
+    expect(
+      (await f.repository.getRun(owner, f.workspaceId, f.serviceId, run.id)).result,
+    ).toMatchObject({
+      deploymentCount: 0,
+      transportComplete: false,
+      coverage: { collectionComplete: false },
+    });
+    const next = await f.enqueue();
+    const claim = await f.worker.claim();
+    if (!claim) throw new Error('Missing claim');
+    expect((await f.worker.preflight(claim)).incremental.checkpoint).toEqual({
+      deploymentPage: 2,
+      statuses: [],
+    });
+    await f.worker.fail(claim, null, true);
+    await f.repository.save(owner, f.workspaceId, f.serviceId, {
+      ...settings,
+      expectedRevision: 1,
+    });
+    await f.enqueue(randomUUID(), 2);
+    const revised = await f.worker.claim();
+    if (!revised) throw new Error('Missing revised claim');
+    expect((await f.worker.preflight(revised)).incremental.checkpoint).toBeNull();
+    const other = await fixture();
+    await other.enqueue();
+    // Installation acquisition is serialized; complete previous lease before another service claims.
+    await f.worker.fail(revised, null, true);
+    const isolated = await other.worker.claim();
+    if (!isolated) throw new Error('Missing isolated claim');
+    expect((await other.worker.preflight(isolated)).incremental.checkpoint).toBeNull();
+    expect((await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).status).toBe(
+      'failed',
+    );
+  });
+  it('preserves committed progress after stale lease and revoked grant completion attempts', async () => {
+    const f = await fixture();
+    const initial: GitHubBatch = {
+      ...batch(),
+      transportComplete: false,
+      checkpoint: { deploymentPage: 2, statuses: [{ deploymentId: 30, page: 2 }] },
+    };
+    await f.enqueue();
+    const first = await f.worker.claim();
+    if (!first) throw new Error('Missing first claim');
+    await f.worker.complete(first, initial, new Date().toISOString());
+    await f.enqueue();
+    const stale = await f.worker.claim();
+    if (!stale) throw new Error('Missing stale claim');
+    await pool.query(
+      "UPDATE github_collection_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
+      [stale.id],
+    );
+    await pool.query(
+      "UPDATE github_quota_state SET lease_until=clock_timestamp()-interval '1 second' WHERE app_id=12 AND installation_id=10",
+    );
+    const replacement = await f.worker.claim();
+    if (!replacement) throw new Error('Missing replacement claim');
+    expect(
+      await f.worker.complete(stale, { ...initial, checkpoint: null }, new Date().toISOString()),
+    ).toBe(false);
+    const revoked = createGitHubWorker(pool, f.config, { configNow: () => null });
+    await expect(
+      revoked.complete(replacement, { ...initial, checkpoint: null }, new Date().toISOString()),
+    ).rejects.toThrow();
+    expect(
+      (
+        await pool.query<Record<string, unknown>>(
+          'SELECT cursor,run_id FROM github_collection_checkpoints WHERE workspace_id=$1',
+          [f.workspaceId],
+        )
+      ).rows[0],
+    ).toEqual({ cursor: initial.checkpoint, run_id: first.id });
+    expect(
+      (
+        await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+          replacement.id,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it('fails stalled deleted-resource runs after bounded retries without advancing their checkpoint', async () => {
+    const f = await fixture();
+    await f.enqueue();
+    const first = await f.worker.claim();
+    if (!first) throw new Error('Missing initial claim');
+    const checkpoint = { deploymentPage: null, statuses: [{ deploymentId: 30, page: 2 }] };
+    await f.worker.complete(
+      first,
+      { ...batch(), transportComplete: false, checkpoint },
+      new Date().toISOString(),
+    );
+    f.provider.collect.mockImplementation(async (input) =>
+      collectGitHubDeployments({
+        ...input,
+        instance: String(input.installationId),
+        fetch: async (url) =>
+          new URL(url).pathname === '/repositories/20'
+            ? Response.json({ id: 20, name: 'fixture-repo', owner: { login: 'fixture-owner' } })
+            : Response.json({ message: 'Not Found' }, { status: 404 }),
+      }),
+    );
+    const blocked = await f.enqueue();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0)
+        await pool.query(
+          'UPDATE github_collection_runs SET available_at=clock_timestamp() WHERE id=$1',
+          [blocked.id],
+        );
+      await processOne(pool, f.config, { provider: f.provider });
+    }
+    expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, blocked.id)).toMatchObject({
+      status: 'failed',
+      attempts: 3,
+      failureCode: 'github_processing_failed',
+      result: null,
+    });
+    expect(
+      (
+        await pool.query<Record<string, unknown>>(
+          'SELECT cursor,run_id FROM github_collection_checkpoints WHERE workspace_id=$1',
+          [f.workspaceId],
+        )
+      ).rows[0],
+    ).toEqual({ cursor: checkpoint, run_id: first.id });
+    expect(
+      (
+        await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+          blocked.id,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it('rejects production collection batches that omit required durable cursor state', async () => {
+    const f = await fixture();
+    const queued = await f.enqueue();
+    const verify = vi.spyOn(githubProvider, 'verify').mockResolvedValue({
+      accountLogin: 'fixture-owner',
+      repositoryName: 'fixture-repo',
+      token: 'private-fixture-token',
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const collect = vi.spyOn(githubProvider, 'collect').mockResolvedValue(batch());
+    try {
+      await processOne(pool, f.config);
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(collect).toHaveBeenCalledTimes(1);
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'pending', attempts: 1, result: null },
+      );
+      expect(
+        (
+          await pool.query('SELECT run_id FROM github_collection_snapshots WHERE run_id=$1', [
+            queued.id,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            'SELECT run_id FROM github_collection_checkpoints WHERE workspace_id=$1',
+            [f.workspaceId],
+          )
+        ).rowCount,
+      ).toBe(0);
+      collect.mockResolvedValue({ ...batch(), checkpoint: null });
+      await pool.query(
+        'UPDATE github_collection_runs SET available_at=clock_timestamp() WHERE id=$1',
+        [queued.id],
+      );
+      await processOne(pool, f.config);
+      expect(verify).toHaveBeenCalledTimes(2);
+      expect(collect).toHaveBeenCalledTimes(2);
+      expect(await f.repository.getRun(owner, f.workspaceId, f.serviceId, queued.id)).toMatchObject(
+        { status: 'succeeded', attempts: 2 },
+      );
+    } finally {
+      verify.mockRestore();
+      collect.mockRestore();
+    }
+  });
   it('rejects ungranted scope before network; serializes revision races and rechecks owner/session after verification', async () => {
     const f = await fixture(false);
     await expect(
@@ -563,6 +865,20 @@ describe('live GitHub PostgreSQL boundaries', () => {
       );
       expect(fetch.mock.calls.length).toBeLessThan(10);
       expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+      const before = await f.worker.claim();
+      expect(before).toBeNull();
+      fetch.mockClear();
+      const resumed = await f.enqueue();
+      await processOne(pool, f.config, { acquisitionBudgetMs: 4000 });
+      expect(
+        (await f.repository.getRun(owner, f.workspaceId, f.serviceId, resumed.id)).status,
+      ).toBe('succeeded');
+      expect(
+        fetch.mock.calls.some(([url]) => new URL(String(url)).pathname.endsWith('/deployments')),
+      ).toBe(false);
+      expect(
+        fetch.mock.calls.some(([url]) => new URL(String(url)).pathname.endsWith('/statuses')),
+      ).toBe(true);
     } finally {
       verify.mockRestore();
       fetch.mockRestore();
@@ -771,7 +1087,11 @@ describe('live GitHub PostgreSQL boundaries', () => {
     await pool.query(
       'CREATE TRIGGER test_github_completion BEFORE UPDATE ON github_collection_runs FOR EACH ROW EXECUTE FUNCTION reject_github_test_completion()',
     );
-    const acquired = batch();
+    const acquired: GitHubBatch = {
+      ...batch(),
+      transportComplete: false,
+      checkpoint: { deploymentPage: 2, statuses: [{ deploymentId: 30, page: 2 }] },
+    };
     try {
       await expect(f.worker.complete(claim, acquired, new Date().toISOString())).rejects.toThrow(
         'test terminal failure',
@@ -790,12 +1110,25 @@ describe('live GitHub PostgreSQL boundaries', () => {
           ])
         ).rowCount,
       ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            'SELECT cursor FROM github_collection_checkpoints WHERE workspace_id=$1',
+            [f.workspaceId],
+          )
+        ).rowCount,
+      ).toBe(0);
     } finally {
       await pool.query('DROP TRIGGER test_github_completion ON github_collection_runs');
       await pool.query('DROP FUNCTION reject_github_test_completion()');
     }
     expect(await f.worker.complete(claim, acquired, new Date().toISOString())).toBe(true);
     expect(await f.worker.complete(claim, acquired, new Date().toISOString())).toBe(false);
+    await expect(
+      pool.query('UPDATE github_collection_checkpoints SET cursor=NULL WHERE workspace_id=$1', [
+        f.workspaceId,
+      ]),
+    ).rejects.toThrow('current captured snapshot');
     const stored = (
       await pool.query<Record<string, unknown>>(
         'SELECT * FROM github_collection_snapshots WHERE run_id=$1',
@@ -828,13 +1161,21 @@ describe('live GitHub PostgreSQL boundaries', () => {
     await expect(
       f.worker.complete(
         nextClaim,
-        { ...acquired, statuses: [{ ...status, signal: 'failure' }] },
+        { ...acquired, checkpoint: null, statuses: [{ ...status, signal: 'failure' }] },
         new Date().toISOString(),
       ),
     ).rejects.toThrow('Conflicting source record');
     expect((await f.repository.getRun(owner, f.workspaceId, f.serviceId, next.id)).status).toBe(
       'running',
     );
+    expect(
+      (
+        await pool.query<Record<string, unknown>>(
+          'SELECT cursor FROM github_collection_checkpoints WHERE workspace_id=$1',
+          [f.workspaceId],
+        )
+      ).rows[0]?.cursor,
+    ).toEqual(acquired.checkpoint);
   });
   it('reports microsecond observations, independent empty coverage, newest 25; detects readiness drift', async () => {
     const f = await fixture();

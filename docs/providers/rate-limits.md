@@ -14,7 +14,7 @@ Response metadata is observed before returning to the adapter. `Retry-After` and
 
 Useful partial evidence can still produce an immutable provisional snapshot. Its shared cooldown persists even when the run succeeds; a later run cannot bypass it. Empty acquisitions retry at most three times, and generic acquisition failures also use exponential backoff with jitter. Provider diagnostics remain server-side. Incomplete acquisition never establishes complete OEMS coverage or turns missing evidence into zero.
 
-Collection still performs bounded full backfills (100 pages, 5,000 records and the existing byte/deadline limits). Incremental checkpoints, conditional response caching, webhook updates and automatic scheduling are future work. Pacing and deadlines can stop a traversal below those maximum bounds. Without incremental checkpoints, repeated runs can revisit the same prefix; large histories may remain incomplete. A requested period bounds the metric window; it does not make the REST traversal incremental. Collections should be requested deliberately while that limitation remains.
+Collection uses durable [resumable traversal checkpoints](github-checkpoints.md), bounded to 100 pages and 5,000 records per acquisition plus existing byte/deadline limits. Accepted pages and pending status scans progress across explicitly requested runs. A requested period bounds the metric window, not the traversal. Conditional response caching, webhook updates and automatic scheduling remain future work.
 
 Connection saves can return a redacted `503` while an installation is collecting, cooling down, or queued pacing exceeds the verification timeout; retry after ongoing acquisition or cooldown.
 

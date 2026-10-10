@@ -33,3 +33,8 @@ Provider writer exports `createBoundedGitHubTransport({fetch,timeoutMs?,maxBytes
 ## Worker and persistence
 
 Migration 0005 allocated to live GitHub tables only. Existing migrations never edited. Backend writer owns new feature, migration, readiness and tests; coordinator wires main/server/routes/root scripts after integration. Worker `worker-github.ts` entry point, `processOne` exported for controlled integration testing. Use lease >= total run deadline + commit budget (e.g. 120s lease, 60s acquisition), bounded maxPages/maxRecords/evidence bytes. No provider calls in storage transactions. Retry at most three; respect bounded provider retry delays, generic fallback where token exchange gives no delay. Preserve prior scoped normalized history and trusted original observation times. Validate conflicts before commit; immutable snapshots and terminal records, stale worker/config/revision cannot commit. Partial evidence must remain visibly incomplete and never silently disappear. Stored public results strictly parsed; no raw evidence route.
+
+
+## Resumable acquisition
+
+Migration `0008_github_checkpoints.sql` stores revision-scoped bounded traversal cursors, with App/installation/repository/grant identity and committing run/lease provenance. Preflight reads strictly parsed retained context. Completion commits cursor, retained evidence, immutable snapshot and terminal result atomically. Expired leases, revoked grants, conflicts and failed retention checks cannot advance progress. Cursors are private server state; public HTTP shapes are unchanged. See [checkpoint behavior and limitations](github-checkpoints.md).
