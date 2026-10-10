@@ -10,7 +10,8 @@
     "migrate": "node --env-file-if-exists=.env src/migrate.ts",
     "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "worker:mock": "node --env-file-if-exists=.env src/worker-mock.ts"
   },
   "dependencies": {
     "fastify": "5.12.5",

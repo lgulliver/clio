@@ -2,9 +2,11 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Workspace service deployment settings persist as immutable mock-only revisions. Owners configure GitHub or Argo CD plus production environment; members can read and run clearly labelled fictional previews. Live provider connections, credential storage, collection jobs and stored results are not implemented. Liam Gulliver is the sole maintainer.
+Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Workspace service deployment settings persist as immutable mock-only revisions. Owners configure GitHub or Argo CD plus production environment, queue durable fictional collection runs, and inspect saved snapshots through safe results. Members can read history and run clearly labelled ephemeral previews. A separate PostgreSQL-backed mock worker processes leased jobs with bounded retries. Live provider connections and credential storage are not implemented. Liam Gulliver is the sole maintainer.
 
 ## Quick start
+
+Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
 
 Use Node 24 LTS (24.21.0 is pinned in .node-version) and pnpm 12.10.1:
 
@@ -33,6 +35,8 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 | pnpm test:watch | Watch web tests |
 | pnpm build | Generate routes and build apps/web/dist |
 | pnpm preview | Serve the production build locally |
+| pnpm worker:mock | Process queued fictional collection runs (separate local worker) |
+| pnpm worker:mock --once | Process at most one eligible fictional run, then exit |
 | pnpm demo:providers | Run configurable fictional GitHub/Argo CD evidence through OEMS |
 
 ## Repository layout
@@ -47,7 +51,7 @@ docs/                      Architecture and recorded decisions
 .github/workflows/         CI checks and production artifact
 ```
 
-For saved mock settings, sign in, select a workspace and service in Settings, then configure the deployment source. Previews use fictional evidence; they do not populate actual overview metrics. Read [the mapping contract](docs/providers/mapping-contract.md).
+For saved mock settings, sign in, select a workspace and service in Settings, then configure the deployment source. Previews and durable runs use fictional evidence; they do not populate actual overview metrics. Read [the mapping contract](docs/providers/mapping-contract.md) and [durable run contract](docs/providers/mock-collection-contract.md).
 
 For mocked provider evidence, run `pnpm demo:providers` and read [the configurable demo](docs/providers/mock-demo.md). It performs no network requests and needs no provider credentials.
 
@@ -61,6 +65,6 @@ Codex and Claude project specialists share [team guidance](docs/agents/team.md),
 
 ## OEMS and licensing
 
-The OEMS revision is explicitly pinned in packages/oems/src/index.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. Do not duplicate metric semantics in application code.
+The OEMS revision is explicitly pinned in packages/oems/src/contract.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. Do not duplicate metric semantics in application code.
 
 Clio's licence has not been selected. Public visibility does not grant an open licence; workspace packages are private and marked UNLICENSED. OEMS is separately licensed under Apache 2.0.

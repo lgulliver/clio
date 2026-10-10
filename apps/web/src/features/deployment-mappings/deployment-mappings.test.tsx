@@ -94,6 +94,7 @@ const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestI
         },
       ],
     });
+  if (path.endsWith('/mock-collection-runs')) return json({ runs: [] });
   return mappingHandler(path, options);
 });
 function mount(strict = false) {

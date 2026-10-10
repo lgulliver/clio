@@ -1,6 +1,6 @@
 # Clio API
 
-Local Node 24 TypeScript server with Fastify, node-postgres and PostgreSQL 17. Compose and CI use the same digest-pinned image. Native Node TypeScript execution needs no separate build. This package implements persistence, health checks, GitHub login through Better Auth 1.7.7, and workspace authorization. It also stores mock-only deployment settings and runs ephemeral fictional previews through the pinned OEMS boundary. It has no collection credentials, live collectors, jobs or persistent metric results. Browser workspace/settings workflows consume the authorized API. Internal workspace repositories require explicit scope; public routes use the separate identity repository, which checks current sessions and memberships in the storage transaction.
+Local Node 24 TypeScript server with Fastify, node-postgres and PostgreSQL 17. Compose and CI use the same digest-pinned image. Native Node TypeScript execution needs no separate build. This package implements persistence, health checks, GitHub login through Better Auth 1.7.7, and workspace authorization. It also stores mock-only deployment settings and runs ephemeral fictional previews through the pinned OEMS boundary. It also exposes mock-only durable collection runs and safe stored results, processed by a separate local PostgreSQL-backed worker. It has no collection credentials or live collectors. Browser workspace/settings workflows consume the authorized API. Internal workspace repositories require explicit scope; public routes use the separate identity repository, which checks current sessions and memberships in the storage transaction.
 
 ## Local setup
 
@@ -89,3 +89,22 @@ Better Auth organization plugin was reviewed and remains disabled: its organizat
 [The deployment mapping contract](../../docs/providers/mapping-contract.md) defines per-service settings and ephemeral preview routes. Migration `0003_deployment_mappings.sql` adds immutable, workspace-scoped revisions; apply it explicitly using the existing migrate command. No provider credentials or GitHub App registration are needed. Owners save with an expected revision; stale/concurrent edits return 409. Members can read and preview. Exact service/workspace scope and database session/membership are checked inside the transaction. Preview computation follows transaction release and performs no network requests.
 
 Mock exposure attestation applies only to fictional previews. Real repository/application scope, provider authorization and live exposure policy require separate configuration later. Preview results are not stored or displayed as live workspace measurements. Mock snapshots retain false collection/history/recovery coverage and unknown failure/recovery evidence. No source payload or secret enters public JSON.
+
+## Durable mock collection
+
+Read [getting started](../../docs/getting-started.md), [ADR 0007](../../docs/decisions/0007-mock-collection-runs.md) and [the exact HTTP/run contract](../../docs/providers/mock-collection-contract.md). Apply migration `0004_mock_collection_runs.sql` explicitly before restarting the API or worker.
+
+From the repository root:
+
+```sh
+pnpm db:migrate
+pnpm dev:api
+# Separate terminal; requires DATABASE_URL, loads apps/api/.env if present.
+pnpm worker:mock
+# Or process at most one eligible run, then exit.
+pnpm worker:mock --once
+```
+
+Owners enqueue saved mock revisions with an idempotent request UUID. Members read the latest 25 scoped runs and individual saved results. New requests require the latest saved mapping; replay returns the original run. Only one pending/running run per service is allowed. Later mapping edits do not rewrite queued inputs or stored snapshots. The fixed sample reporting window and incomplete coverage remain fictional.
+
+The worker checks readiness, claims jobs with database-clock leases and fencing tokens, computes outside database transactions, and commits immutable snapshot plus successful state atomically. Retries and expired lease recovery are bounded to three attempts. Raw evidence, all calculated metric records and snapshot digests remain server-side; public responses expose the safe preview shape only. No live GitHub/Argo requests, automatic migrations or implicit worker start occurs. Stop workers with SIGINT/SIGTERM; pending jobs remain in PostgreSQL. Retention/account erasure and hosted supervision remain undecided.

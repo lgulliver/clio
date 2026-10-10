@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { revision } from '../deployment-mappings/input.ts';
 import { previewMapping } from '../deployment-mappings/preview.ts';
 import { createMappingRepository } from '../deployment-mappings/repository.ts';
+import { createMockCollectionRepository } from '../mock-collection/repository.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
 import { IdentityError, object, opaqueId, uuid } from './input.ts';
@@ -50,6 +51,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
     });
   const repository = identity ? createIdentityRepository(identity.pool) : null;
   const mappings = identity ? createMappingRepository(identity.pool) : null;
+  const runs = identity ? createMockCollectionRepository(identity.pool) : null;
   async function session(request: FastifyRequest, reply: FastifyReply, write: boolean) {
     if (!identity || !repository) throw new IdentityError(503, 'unavailable');
     if (write && request.headers.origin !== identity.config.appOrigin)
@@ -225,6 +227,39 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
           uuid(values.workspaceId),
           uuid(values.serviceId),
           request.body,
+        ),
+      };
+    });
+    const runsBase = `${mappingBase}/mock-collection-runs`;
+    routes.post(runsBase, async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const values = params(request, ['workspaceId', 'serviceId']);
+      if (!runs) throw new IdentityError(503, 'unavailable');
+      return reply.code(202).send({
+        run: await runs.enqueue(
+          current,
+          uuid(values.workspaceId),
+          uuid(values.serviceId),
+          request.body,
+        ),
+      });
+    });
+    routes.get(runsBase, async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const values = params(request, ['workspaceId', 'serviceId']);
+      if (!runs) throw new IdentityError(503, 'unavailable');
+      return { runs: await runs.list(current, uuid(values.workspaceId), uuid(values.serviceId)) };
+    });
+    routes.get(`${runsBase}/:runId`, async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const values = params(request, ['workspaceId', 'serviceId', 'runId']);
+      if (!runs) throw new IdentityError(503, 'unavailable');
+      return {
+        run: await runs.get(
+          current,
+          uuid(values.workspaceId),
+          uuid(values.serviceId),
+          uuid(values.runId),
         ),
       };
     });

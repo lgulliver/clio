@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MockCollectionHistory } from '../mock-collection/mock-collection';
 import {
   type Draft,
   type Mapping,
@@ -178,6 +179,23 @@ export function DeploymentMappings({
               });
             }}
           />
+          {query.data && (
+            <MockCollectionHistory
+              key={`${userId}:${revision}:${workspace.id}:${serviceId}`}
+              mapping={query.data}
+              owner={workspace.role === 'owner' && !editingDenied}
+              userId={userId}
+              validSelection={valid}
+              reloadMapping={async () => {
+                const result = await execute('deployment-mapping', (value) =>
+                  parseMapping(value, scope),
+                );
+                client.setQueryData(key, result);
+                setReload((previous) => previous + 1);
+                setNotice('Saved settings reloaded.');
+              }}
+            />
+          )}
         </>
       )}
     </section>

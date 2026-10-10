@@ -53,7 +53,7 @@ export function fictionalEvidence(provider: DeploymentMapping['primaryProvider']
   };
 }
 
-export function previewMapping(
+export function captureMapping(
   mapping: DeploymentMapping,
   service: { id: string; name: string },
   evidence: EvidenceBatch = fictionalEvidence(mapping.primaryProvider),
@@ -120,7 +120,8 @@ export function previewMapping(
   });
   if (!result.ok) throw new Error('Fictional preview failed validation');
   const data = result.data.data;
-  const metric = calculate(result.data).find((row) => row.service_id === service.id);
+  const metrics = calculate(result.data);
+  const metric = metrics.find((row) => row.service_id === service.id);
   const rollout = data.deployments[0];
   if (
     !metric ||
@@ -135,7 +136,7 @@ export function previewMapping(
     metric.failed_deployment_recovery_time.median_seconds !== null
   )
     throw new Error('Unexpected fictional preview quality');
-  return {
+  const preview = {
     mode: mapping.mode,
     workspaceId: mapping.workspaceId,
     serviceId: service.id,
@@ -164,4 +165,13 @@ export function previewMapping(
     changeFailureRate: metric.change_fail_rate.ratio,
     failedDeploymentRecoveryTime: metric.failed_deployment_recovery_time.median_seconds,
   };
+  return { preview, evidence, snapshot: data, metrics, oemsRevision: oemsContract.revision };
+}
+
+export function previewMapping(
+  mapping: DeploymentMapping,
+  service: { id: string; name: string },
+  evidence: EvidenceBatch = fictionalEvidence(mapping.primaryProvider),
+) {
+  return captureMapping(mapping, service, evidence).preview;
 }
