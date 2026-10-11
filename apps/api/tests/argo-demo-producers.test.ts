@@ -647,5 +647,12 @@ describe('controlled lifecycle functional probes', () => {
     expect(broken).toContain(Buffer.from(bytes).toString('base64'));
     expect(renderManifest(bytes, receipt, image, 'recovery')).not.toContain('503');
     expect(() => renderManifest(bytes, receipt, image, 'production')).toThrow();
+    expect(renderManifest(bytes, receipt, image, 'healthy', 'clio-lifecycle-fresh')).toContain(
+      'clio-lifecycle-fresh',
+    );
+    expect(() => renderManifest(bytes, receipt, image, 'healthy', 'production')).toThrow();
+    expect(() =>
+      renderManifest(bytes, receipt, image, undefined, 'clio-lifecycle-fresh'),
+    ).toThrow();
   });
 });

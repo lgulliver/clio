@@ -708,6 +708,7 @@ export function renderManifest(
   unknownReceipt: unknown,
   nginxImage: string,
   scenario?: unknown,
+  sandboxNamespace?: unknown,
 ): string {
   const receipt = parseReceipt(unknownReceipt);
   checkArtifact(bytes, receipt);
@@ -720,7 +721,15 @@ export function renderManifest(
     scenario !== 'recovery'
   )
     fail();
-  const namespace = scenario === undefined ? 'clio-evidence-demo' : 'clio-lifecycle-demo';
+  if (
+    sandboxNamespace !== undefined &&
+    (scenario === undefined ||
+      typeof sandboxNamespace !== 'string' ||
+      !/^clio-lifecycle-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(sandboxNamespace))
+  )
+    fail();
+  const namespace =
+    scenario === undefined ? 'clio-evidence-demo' : (sandboxNamespace ?? 'clio-lifecycle-demo');
   const healthName = `lifecycle-http-${scenario}-${receipt.artifact_digest.slice(7, 39)}`;
   return JSON.stringify(
     {

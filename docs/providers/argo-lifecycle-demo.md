@@ -1,6 +1,6 @@
 # Controlled Argo failure and recovery exercise
 
-This exercise extends the [artifact demo](argo-evidence-demo.md) with three real sandbox rollouts: healthy application, broken consumer behaviour, and an incident-driven corrective rollout. Use a separate `clio-lifecycle-demo` Application, namespace and Clio service. Keep the original guestbook and evidence demo unchanged. This is a controlled evaluation, not production traffic or proof of production coverage.
+This exercise extends the [artifact demo](argo-evidence-demo.md) with three real sandbox rollouts: healthy application, broken consumer behaviour, and an incident-driven corrective rollout. Use a separate Application, namespace and Clio service; the committed example uses `clio-lifecycle-verified`. Choose a fresh `clio-lifecycle-*` namespace for every new exercise. Keep the original guestbook and evidence demo unchanged. This is a controlled evaluation, not production traffic or proof of production coverage.
 
 ## What the scenario observes
 
@@ -18,16 +18,16 @@ For each stage, build its committed artifact and render the matching profile usi
 
 ```sh
 node infra/argocd/evidence-demo/cli.ts build "$CLIO_LIFECYCLE_GIT" "$CLIO_STAGE_SHA" local:clio-lifecycle-app "$CLIO_STAGE_ARTIFACT"
-node infra/argocd/evidence-demo/cli.ts render "$CLIO_STAGE_ARTIFACT" docker.io/library/nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14 "$CLIO_STAGE" > "$CLIO_STAGE_MANIFEST"
+node infra/argocd/evidence-demo/cli.ts render "$CLIO_STAGE_ARTIFACT" docker.io/library/nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14 "$CLIO_STAGE" "$CLIO_LIFECYCLE_NAMESPACE" > "$CLIO_STAGE_MANIFEST"
 ```
 
-`CLIO_STAGE` is exactly `healthy`, `broken` or `recovery`. Inspect generated resources, copy each to its matching public scenario directory, run repository checks and commit/push through the normal reviewed workflow. Pin the new Application to that full configuration commit. Change only its source path for the next stage; its repository, destination, project and UID must remain unchanged.
+The optional namespace argument must begin `clio-lifecycle-`; without it, render defaults to `clio-lifecycle-demo`. Set `CLIO_LIFECYCLE_NAMESPACE` explicitly for this command. Use the same value in Application `spec.destination.namespace`, grant `destinationNamespace`, bootstrap resource `metadata.namespace`, port-forward namespace and generated manifests. Substitute it in every hardcoded namespace from the original artifact walkthrough, including its Namespace resource; do not apply that bootstrap literally to the original demo. In the existing local setup, default `clio-lifecycle-demo` holds the preserved uncertain first attempt and must not be reused. `CLIO_STAGE` is exactly `healthy`, `broken` or `recovery`. Inspect generated resources, copy each to its matching public scenario directory, run repository checks and commit/push through the normal reviewed workflow. Pin the new Application to that full configuration commit. Change only its source path for the next stage; its repository, destination, project and UID must remain unchanged.
 
 Bootstrap only the new namespace with a different initial NGINX page, as in the artifact demo. Record namespace/Application creation and the bootstrap explicitly; bootstrap is not a qualifying production deployment. Run a loopback-only forward to this namespace's Service at a dedicated port, for example `8100:80`. A forward binds to a Pod and can stop when that Pod is replaced; restart the same scoped forward after each rollout. Endpoint continuity and absence of intervening changes remain explicit operator responsibilities. Without pruning, older immutable ConfigMaps remain and Argo may show OutOfSync after a successful, Healthy operation; this does not supply failure classification.
 
 ## Capture each rollout
 
-For each stage, generate one operation UUID, persist a genuine pre-rollout different-byte baseline, then synchronize the exact configuration SHA and stage path with that UUID and `clio.operation-kind=rollout`. Follow the artifact demo's direct sandbox operator procedure. Wait for that exact operation in the actual controller state, capture the Application JSON, and use `native` with the expected UUID. Never overwrite receipts or substitute the previous operation.
+For each stage, generate one operation UUID, persist a genuine pre-rollout different-byte baseline, then synchronize the exact configuration SHA and stage path with that UUID and `clio.operation-kind=rollout`. Follow the artifact demo's direct sandbox operator procedure. Argo start times have whole-second precision. After persisting the baseline, wait until a later whole UTC second before submitting the operation; verify the resulting start is strictly later than baseline. An ambiguous baseline produces no exposure assertion. Preserve that attempt and use a fresh isolated exercise rather than altering timestamps or deleting native history. Wait for that exact operation in the actual controller state, capture the Application JSON, and use `native` with the expected UUID. Never overwrite receipts or substitute the previous operation.
 
 Publish native and build evidence with their distinct credentials. Capture and publish exact-byte consumer exposure using the original operation-bound baseline. After exposure, record functional state in a fresh private file:
 

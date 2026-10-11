@@ -1,6 +1,6 @@
 # Controlled lifecycle profiles
 
-Argo synchronizes one stage directory at a time into the dedicated `clio-lifecycle-demo` namespace. The stage changes HTML bytes and functional `/healthz` behaviour; `/index.html` continues serving the exact artifact even during the deliberately broken stage. Successful Argo synchronization is therefore separate from functional failure.
+Argo synchronizes one stage directory at a time into the dedicated `clio-lifecycle-verified` namespace. The stage changes HTML bytes and functional `/healthz` behaviour; `/index.html` continues serving the exact artifact even during the deliberately broken stage. Successful Argo synchronization is therefore separate from functional failure.
 
 The embedded HTML artifacts came from three actual commits in a private local application Git repository named `local:clio-lifecycle-app`:
 
@@ -13,3 +13,5 @@ The embedded HTML artifacts came from three actual commits in a private local ap
 These are application commits, not public Clio commit IDs. Public resources retain their exact HTML bytes. Reproduction creates a new local application repository and genuine commits, builds each artifact, then regenerates these manifests through `cli.ts render ... healthy|broken|recovery`. Retain the application repository and receipts outside Git. Do not relabel an old receipt with a newly created commit.
 
 NGINX remains pinned to the image digest used by the original artifact demo. No Ingress, NodePort, automatic synchronization, pruning or production service is configured here. Follow the [lifecycle walkthrough](../../../../docs/providers/argo-lifecycle-demo.md).
+
+Render accepts an optional fresh `clio-lifecycle-*` namespace; these committed examples explicitly use `clio-lifecycle-verified`. Set the Argo Application destination and operator grants to that same namespace.

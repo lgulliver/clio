@@ -6,7 +6,7 @@
       "apiVersion": "v1",
       "kind": "Namespace",
       "metadata": {
-        "name": "clio-lifecycle-demo"
+        "name": "clio-lifecycle-verified"
       }
     },
     {
@@ -14,7 +14,7 @@
       "kind": "ConfigMap",
       "metadata": {
         "name": "artifact-98db8efd4d9bcfe0cbec4d4bdea5e2e826723c64c90e37e9ffd27f3936f9a089",
-        "namespace": "clio-lifecycle-demo"
+        "namespace": "clio-lifecycle-verified"
       },
       "immutable": true,
       "binaryData": {
@@ -26,7 +26,7 @@
       "kind": "ConfigMap",
       "metadata": {
         "name": "lifecycle-http-healthy-98db8efd4d9bcfe0cbec4d4bdea5e2e8",
-        "namespace": "clio-lifecycle-demo"
+        "namespace": "clio-lifecycle-verified"
       },
       "immutable": true,
       "data": {
@@ -38,7 +38,7 @@
       "kind": "Deployment",
       "metadata": {
         "name": "sandbox-consumer",
-        "namespace": "clio-lifecycle-demo"
+        "namespace": "clio-lifecycle-verified"
       },
       "spec": {
         "replicas": 1,
@@ -105,7 +105,7 @@
       "kind": "Service",
       "metadata": {
         "name": "sandbox-consumer",
-        "namespace": "clio-lifecycle-demo"
+        "namespace": "clio-lifecycle-verified"
       },
       "spec": {
         "type": "ClusterIP",
