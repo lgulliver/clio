@@ -29,6 +29,32 @@ export { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';
 export { verifyGitHubScope } from './github-scope.ts';
 export { createBoundedGitHubTransport } from './github-transport.ts';
 export type {
+  MeasurementAssessment,
+  MeasurementBlocker,
+  MeasurementEvidenceInput,
+  MeasurementEvidenceResult,
+  ReceivedMeasurementReport,
+} from './measurement-evidence.ts';
+export { deriveMeasurementEvidence } from './measurement-evidence.ts';
+export type {
+  MeasurementAuthorityScope,
+  MeasurementBasis,
+  MeasurementBasisContext,
+  MeasurementCapability,
+  MeasurementChange,
+  MeasurementChangeLinks,
+  MeasurementClassification,
+  MeasurementGap,
+  MeasurementGapResolution,
+  MeasurementInterval,
+  MeasurementNativeIdentity,
+  MeasurementNativeRecord,
+  MeasurementPopulation,
+  MeasurementRecovery,
+  MeasurementReport,
+} from './measurement-evidence-contract.ts';
+export { measurementLimits, parseMeasurementReport } from './measurement-evidence-contract.ts';
+export type {
   DeploymentEvidence,
   DeploymentSource,
   EnvironmentMapping,

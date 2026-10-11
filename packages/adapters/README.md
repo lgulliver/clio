@@ -232,3 +232,8 @@ ephemeral signing key; they do not prove live access or complete evidence covera
 
 
 Scope-verification token lifecycle: if verification fails after token issuance, the unread/unreturned token may remain valid at GitHub until its one-hour expiry. This bounded read-only token is never logged or persisted. Verification does not promise remote token revocation; retirement/key rotation follows the provider setup guide. Live orchestration owns active-scope and revision fencing independently of token lifetime.
+
+
+## Independent measurement evidence
+
+`parseMeasurementReport(unknown)` validates strict capability-scoped population, changes/history, classification and recovery reports. `deriveMeasurementEvidence(input)` joins authenticated internal reports to an immutable validated native basis and exact server-derived operation/gap manifests, validates a new cutoff snapshot and calculates all five metrics with pinned OEMS. Neither function authenticates transport or supplies current grant/storage authority. API callers must establish those boundaries. Native qualification remains immutable; missing evidence stays partial, and conflicting facts fail closed. Read the [report contract and integration limits](../../docs/providers/measurement-evidence.md).

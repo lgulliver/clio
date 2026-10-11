@@ -6,6 +6,10 @@ import {
   reconcileDeployments,
 } from '@clio/adapters';
 import { calculate, oemsContract } from '@clio/oems';
+import {
+  parseRetainedGapManifest,
+  type RetainedGapManifest,
+} from '../measurements/native-basis.ts';
 import type { ArchiveSummary } from './archive-summary.ts';
 import { assessArgoCoverage } from './coverage-assessment.ts';
 import { boundedJson } from './history.ts';
@@ -13,6 +17,7 @@ import { type ArgoConnection, instant, timestamp, type windowInput } from './inp
 import { parseResult } from './result.ts';
 
 export function captureArgo(input: {
+  nativeGapManifest?: RetainedGapManifest;
   archiveSummary?: ArchiveSummary;
   archiveLineages?: {
     receiptId: string;
@@ -164,9 +169,21 @@ export function captureArgo(input: {
     enrichmentScopes.set(key, scope);
     return receipt;
   });
+  const nativeGapManifest = input.nativeGapManifest
+    ? parseRetainedGapManifest(input.nativeGapManifest)
+    : undefined;
+  if (
+    nativeGapManifest?.gaps.some(
+      (gap) =>
+        gap.sourceId !== sourceId ||
+        (gap.bounds !== null && instant(gap.bounds.end) > instant(evidenceCutoff)),
+    )
+  )
+    throw new Error('Invalid captured gap scope');
   const capture = {
     evidence: {
       ...evidence,
+      ...(nativeGapManifest ? { nativeGapManifest } : {}),
       ...(input.archiveLineages ? { argoArchiveLineages: input.archiveLineages } : {}),
       argoEnrichments,
       argoEnrichmentScopes: [...enrichmentScopes]

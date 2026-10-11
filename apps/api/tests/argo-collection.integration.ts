@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { identity } from '@clio/adapters';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -9,6 +10,7 @@ import { instant } from '../src/features/argo-collection/input.ts';
 import { createArgoRepository } from '../src/features/argo-collection/repository.ts';
 import { createArgoWorker } from '../src/features/argo-collection/worker.ts';
 import { createIdentityRepository } from '../src/features/identity/repository.ts';
+import { readNativeMeasurementBasis } from '../src/features/measurements/native-basis.ts';
 import { grantFixture } from './argo-fixture.ts';
 
 if (!process.env.CLIO_TEST_DATABASE_URL) throw new Error('CLIO_TEST_DATABASE_URL required');
@@ -87,6 +89,34 @@ async function fixture() {
       window: { start: '2026-01-01T00:00:00Z', end: '2026-01-03T00:00:00Z' },
     });
   return { w: w.id, s: s.id, scope, config, repo, app, post, save, enqueue };
+}
+async function privateMeasurementBasis(f: Awaited<ReturnType<typeof fixture>>, runId: string) {
+  const saved = await pool.query<Record<string, unknown>>(
+    'SELECT * FROM argo_collection_snapshots WHERE run_id=$1 AND workspace_id=$2 AND service_id=$3',
+    [runId, f.w, f.s],
+  );
+  const row = saved.rows[0];
+  if (!row) throw new Error('Missing private snapshot');
+  return readNativeMeasurementBasis({
+    provider: 'argocd',
+    runId,
+    workspaceId: f.w,
+    serviceId: f.s,
+    sourceId: identity('argocd', f.scope.instance),
+    connectionRevision: 1,
+    productionPath: 'fixture-production-path',
+    argoScope: f.scope,
+    capture: {
+      connection: row.connection_input,
+      serviceName: row.service_name,
+      evidence: row.evidence,
+      snapshot: row.snapshot,
+      metrics: row.metrics,
+      oemsRevision: row.oems_revision,
+      result: row.public_result,
+      digest: row.digest,
+    },
+  });
 }
 function notification(f: Awaited<ReturnType<typeof fixture>>, id = randomUUID()) {
   const finished = new Date(Date.now() - 60000).toISOString(),
@@ -188,6 +218,20 @@ it('scope drift retains no foreign payload; unsupported observations save dedupl
       retainedEvidenceCount: 0,
     });
     expect(JSON.stringify(result)).not.toContain('PRIVATE-FOREIGN');
+    const basis = await privateMeasurementBasis(f, run.id);
+    expect(basis.gapManifestComplete).toBe(true);
+    expect(basis.gaps).toHaveLength(2);
+    expect(basis.gaps.find((gap) => gap.reason === 'unmarked_operation')).toMatchObject({
+      sourceId: identity('argocd', f.scope.instance),
+      reason: 'unmarked_operation',
+      bounds: null,
+    });
+    expect(JSON.stringify(result)).not.toContain('nativeGapManifest');
+    expect(JSON.stringify(result)).not.toContain(basis.gaps[0]?.gapId);
+    expect(
+      (await f.post({ ...gap, operation: { ...gap.operation, revision: 'later-gap' } })).statusCode,
+    ).toBe(202);
+    expect((await privateMeasurementBasis(f, run.id)).gaps).toEqual(basis.gaps);
   } finally {
     await f.app.close();
   }
@@ -215,6 +259,12 @@ it('atomic snapshots retain operation metadata, statuses and cutoff counts witho
         deploymentFrequency: { status: 'provisional', deploymentsPerDay: null },
       },
     });
+    const basis = await privateMeasurementBasis(f, run.id);
+    expect(basis.nativeIndex).toHaveLength(1);
+    expect(basis.gapManifestComplete).toBe(true);
+    expect(basis.gaps).toHaveLength(1);
+    expect(basis.gaps[0]).toMatchObject({ reason: 'transport_incomplete', bounds: null });
+    expect(basis.snapshot.data.collection_complete).toBe(false);
     expect((await f.post(notification(f))).statusCode).toBe(202);
     expect((await f.repo.getRun(member, f.w, f.s, run.id)).result).toEqual(saved.result);
     expect(await worker.complete(claim)).toBe(false);

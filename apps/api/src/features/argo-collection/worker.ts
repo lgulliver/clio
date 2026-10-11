@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { identity } from '@clio/adapters';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
 import { storedRevision } from '../github-collection/db-value.ts';
 import { snapshotDigest } from '../github-collection/digest.ts';
 import { name, uuid } from '../identity/input.ts';
+import type { RetainedMeasurementGap } from '../measurements/native-basis.ts';
 import { eligibleArchive } from './archive-grants.ts';
 import { archiveSummary } from './archive-summary.ts';
 import { captureArgo } from './capture.ts';
@@ -13,7 +15,7 @@ import { eligibleProducers } from './enrichment-grants.ts';
 import { parseEnrichmentReceipt } from './enrichment-ingress.ts';
 import { boundedJson, maxBytes, maxRows, mergeHistory, parseEvidence } from './history.ts';
 import { databaseTime } from './ingress.ts';
-import { count, parseConnection, timestamp } from './input.ts';
+import { count, parseConnection, text, timestamp } from './input.ts';
 import { ensureSource, latestConnection } from './repository.ts';
 import { gapReasons, storedWindow } from './result.ts';
 export const leaseSeconds = 120;
@@ -121,7 +123,7 @@ export function createArgoWorker(
             cutoff = timestamp(time.rows[0]?.observed);
           const scope = scopeFor(input.grant);
           const found = await client.query<Record<string, unknown>>(
-            `SELECT r.evidence,r.reason,r.scope,to_char(a.available AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS available FROM argo_receipts r JOIN LATERAL (SELECT observed_at AS available FROM argo_receipt_authorities WHERE receipt_id=r.id AND native_fingerprint=$4 AND observed_at<=$5 AND (kind='live' OR (archive_fingerprint=$6 AND journal_id=$7 AND producer_id=$8)) UNION ALL SELECT r.observed_at WHERE r.origin_transport='live' AND r.observed_at<=$5 ORDER BY available LIMIT 1) a ON true WHERE r.source_id=$1 AND r.workspace_id=$2 AND r.service_id=$3 AND r.grant_fingerprint=$4 ORDER BY a.available,r.id LIMIT 5001`,
+            `SELECT r.id,r.evidence,r.reason,r.scope,to_char(a.available AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS available FROM argo_receipts r JOIN LATERAL (SELECT observed_at AS available FROM argo_receipt_authorities WHERE receipt_id=r.id AND native_fingerprint=$4 AND observed_at<=$5 AND (kind='live' OR (archive_fingerprint=$6 AND journal_id=$7 AND producer_id=$8)) UNION ALL SELECT r.observed_at WHERE r.origin_transport='live' AND r.observed_at<=$5 ORDER BY available LIMIT 1) a ON true WHERE r.source_id=$1 AND r.workspace_id=$2 AND r.service_id=$3 AND r.grant_fingerprint=$4 ORDER BY a.available,r.id LIMIT 5001`,
             [
               input.grant.sourceId,
               input.connection.workspaceId,
@@ -137,6 +139,15 @@ export function createArgoWorker(
           const batches = [];
           const reasons: Record<string, number> = {};
           let retainedEvidenceCount = 0;
+          const nativeSourceId = identity('argocd', input.connection.instance);
+          const retainedGaps: RetainedMeasurementGap[] = [
+            {
+              gapId: identity('argo-transport', input.grant.sourceId, input.grant.fingerprint),
+              sourceId: nativeSourceId,
+              reason: 'transport_incomplete',
+              bounds: null,
+            },
+          ];
           for (const row of found.rows) {
             if (!isDeepStrictEqual(parseScope(row.scope), scope))
               throw new Error('Argo scope mismatch');
@@ -144,6 +155,12 @@ export function createArgoWorker(
               if (typeof row.reason !== 'string' || !gapReasons.some((r) => r === row.reason))
                 throw new Error('Invalid gap');
               reasons[row.reason] = (reasons[row.reason] ?? 0) + 1;
+              retainedGaps.push({
+                gapId: identity('argo-receipt', input.grant.sourceId, uuid(row.id)),
+                sourceId: nativeSourceId,
+                reason: row.reason,
+                bounds: null,
+              });
             } else {
               const batch = parseEvidence(row.evidence, scope);
               const observedAt = timestamp(row.available);
@@ -178,10 +195,23 @@ export function createArgoWorker(
             return producer ? [parseEnrichmentReceipt(row, producer, input.grant.fingerprint)] : [];
           });
           const boundaries = await client.query<Record<string, unknown>>(
-            'SELECT count(*)::int AS count FROM argo_interruptions WHERE source_id=$1 AND grant_fingerprint=$2 AND observed_at<=$3',
+            'SELECT connection_revision FROM argo_interruptions WHERE source_id=$1 AND grant_fingerprint=$2 AND observed_at<=$3 ORDER BY connection_revision LIMIT 5001',
             [input.grant.sourceId, input.grant.fingerprint, cutoff],
           );
-          const interruptions = count(boundaries.rows[0]?.count);
+          if (boundaries.rows.length > maxRows) throw new Error('Argo gap storage limit');
+          const interruptions = boundaries.rows.length;
+          for (const row of boundaries.rows)
+            retainedGaps.push({
+              gapId: identity(
+                'argo-interruption',
+                input.grant.sourceId,
+                input.grant.fingerprint,
+                storedRevision(row.connection_revision),
+              ),
+              sourceId: nativeSourceId,
+              reason: 'connection_interruption',
+              bounds: null,
+            });
           if (interruptions)
             reasons.connection_interruption =
               (reasons.connection_interruption ?? 0) + interruptions;
@@ -210,16 +240,51 @@ export function createArgoWorker(
             observedAt: timestamp(row.observed),
             capturedAt: timestamp(row.captured),
           }));
+          const retainedArchiveSummary = input.archive
+            ? await archiveSummary(client, input.archive, cutoff)
+            : undefined;
+          if (input.archive) {
+            const archiveGaps = await client.query<Record<string, unknown>>(
+              'SELECT id,gap_reason FROM argo_archive_records WHERE source_id=$1 AND journal_id=$2 AND received_at<=$3 AND gap_reason IS NOT NULL ORDER BY id LIMIT 5001',
+              [input.grant.sourceId, input.archive.journalId, cutoff],
+            );
+            if (archiveGaps.rows.length > maxRows) throw new Error('Archive gap storage limit');
+            for (const row of archiveGaps.rows)
+              retainedGaps.push({
+                gapId: identity('argo-archive-gap', input.grant.sourceId, uuid(row.id)),
+                sourceId: nativeSourceId,
+                reason: text(row.gap_reason),
+                bounds: null,
+              });
+            for (const interval of retainedArchiveSummary?.missingIntervals ?? [])
+              retainedGaps.push({
+                gapId: identity(
+                  'argo-capture-interval',
+                  input.archive.journalId,
+                  snapshotDigest(interval),
+                ),
+                sourceId: nativeSourceId,
+                reason: interval.reason,
+                bounds: { start: interval.start, end: interval.end },
+              });
+          }
+          const uniqueGaps = [...new Map(retainedGaps.map((gap) => [gap.gapId, gap])).values()];
+          const nativeGapManifest = {
+            version: 1 as const,
+            complete:
+              uniqueGaps.length <= maxRows &&
+              (retainedArchiveSummary?.omittedIntervalCount ?? 0) === 0,
+            gaps: uniqueGaps.sort((a, b) => a.gapId.localeCompare(b.gapId)).slice(0, maxRows),
+          };
           const capture = captureArgo({
             runId: claim.id,
             ...input,
+            nativeGapManifest,
             evidence: mergeHistory(batches),
             argoEnrichments,
             databaseObservedAt: cutoff,
             ...(archiveLineages ? { archiveLineages } : {}),
-            ...(input.archive
-              ? { archiveSummary: await archiveSummary(client, input.archive, cutoff) }
-              : {}),
+            ...(retainedArchiveSummary ? { archiveSummary: retainedArchiveSummary } : {}),
             stats: {
               retainedReceiptCount: found.rows.length,
               retainedEvidenceCount,
