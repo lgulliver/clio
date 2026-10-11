@@ -15,12 +15,14 @@ export function WorkspaceAccess({
   validSelection,
   onDenied,
   onInvitationCancelled,
+  onMemberRevoked,
 }: {
   workspaceId: string;
   userId: string;
   validSelection: () => boolean;
   onDenied: (error: unknown) => void;
-  onInvitationCancelled: (id: string | null) => void;
+  onInvitationCancelled: (id: string) => void;
+  onMemberRevoked: (email: string) => void;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -29,6 +31,11 @@ export function WorkspaceAccess({
   const pending = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const handledError = useRef<unknown>(null);
+  const [pageRevision, setPageRevision] = useState(0);
+  const [membersCursor, setMembersCursor] = useState<string | null>(null);
+  const [invitationsCursor, setInvitationsCursor] = useState<string | null>(null);
+  const [memberPage, setMemberPage] = useState(1);
+  const [invitationPage, setInvitationPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -45,28 +52,118 @@ export function WorkspaceAccess({
       client.removeQueries({ queryKey: key });
     };
   }, [client, key]);
-  const query = useQuery({
-    queryKey: key,
+  const membersKey = useMemo(
+    () => [...key, 'members', pageRevision, membersCursor],
+    [key, pageRevision, membersCursor],
+  );
+  const invitationsKey = useMemo(
+    () => [...key, 'invitations', pageRevision, invitationsCursor],
+    [key, pageRevision, invitationsCursor],
+  );
+  useEffect(
+    () => () => {
+      void client.cancelQueries({ queryKey: membersKey });
+      client.removeQueries({ queryKey: membersKey });
+    },
+    [client, membersKey],
+  );
+  useEffect(
+    () => () => {
+      void client.cancelQueries({ queryKey: invitationsKey });
+      client.removeQueries({ queryKey: invitationsKey });
+    },
+    [client, invitationsKey],
+  );
+  const membersQuery = useQuery({
+    queryKey: membersKey,
     queryFn: async ({ signal }) => {
-      const [members, invitations] = await Promise.all([
-        request(
-          `/api/workspaces/${workspaceId}/members`,
-          (value) => parseMembers(value, workspaceId),
-          { signal },
-        ),
-        request(
-          `/api/workspaces/${workspaceId}/invitations`,
-          (value) => parsePendingInvitations(value, workspaceId),
-          { signal },
-        ),
-      ]);
-      if (!valid()) throw new ApiError(0);
-      return { members, invitations };
+      const result = await request(
+        `/api/workspaces/${workspaceId}/members${membersCursor === null ? '' : `?cursor=${encodeURIComponent(membersCursor)}`}`,
+        (value) => parseMembers(value, workspaceId),
+        { signal },
+      );
+      if (signal.aborted || !valid()) throw new ApiError(0);
+      return result;
     },
     retry: false,
     refetchOnWindowFocus: false,
   });
+  const invitationsQuery = useQuery({
+    queryKey: invitationsKey,
+    queryFn: async ({ signal }) => {
+      const result = await request(
+        `/api/workspaces/${workspaceId}/invitations${invitationsCursor === null ? '' : `?cursor=${encodeURIComponent(invitationsCursor)}`}`,
+        (value) => parsePendingInvitations(value, workspaceId),
+        { signal },
+      );
+      if (signal.aborted || !valid()) throw new ApiError(0);
+      return result;
+    },
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const recoveringCursor = [
+    [membersCursor, membersQuery.error],
+    [invitationsCursor, invitationsQuery.error],
+  ].some(
+    ([cursor, failure]) => cursor !== null && failure instanceof ApiError && failure.status === 404,
+  );
+  const query = {
+    error:
+      [membersQuery.error, invitationsQuery.error].find(
+        (error) => error instanceof ApiError && [401, 403, 404].includes(error.status),
+      ) ??
+      membersQuery.error ??
+      invitationsQuery.error,
+    isPending: recoveringCursor || membersQuery.isPending || invitationsQuery.isPending,
+    isFetching: membersQuery.isFetching || invitationsQuery.isFetching,
+    isError: membersQuery.isError || invitationsQuery.isError,
+    data:
+      membersQuery.data && invitationsQuery.data
+        ? { members: membersQuery.data, invitations: invitationsQuery.data }
+        : undefined,
+    refetch: () => Promise.all([membersQuery.refetch(), invitationsQuery.refetch()]),
+  };
+  function page(kind: 'members' | 'invitations', cursor: string | null) {
+    if (pending.current || !valid()) return;
+    heading.current?.focus();
+    setError('');
+    setNotice('');
+    if (kind === 'members') {
+      setMembersCursor(cursor);
+      setMemberPage((previous) => (cursor === null ? 1 : previous + 1));
+    } else {
+      setInvitationsCursor(cursor);
+      setInvitationPage((previous) => (cursor === null ? 1 : previous + 1));
+    }
+  }
   useEffect(() => {
+    // A deleted or expired cursor does not establish loss of workspace access.
+    // Retry from current first-page storage, whose authorization still applies.
+    for (const [kind, cursor, failure] of [
+      ['members', membersCursor, membersQuery.error],
+      ['invitations', invitationsCursor, invitationsQuery.error],
+    ] as const) {
+      if (
+        cursor !== null &&
+        failure instanceof ApiError &&
+        failure.status === 404 &&
+        valid() &&
+        !pending.current
+      ) {
+        if (heading.current?.parentElement?.contains(document.activeElement))
+          heading.current.focus();
+        if (kind === 'members') {
+          setMembersCursor(null);
+          setMemberPage(1);
+        } else {
+          setInvitationsCursor(null);
+          setInvitationPage(1);
+        }
+        setNotice('Saved page position is no longer available. Returned to first page.');
+        return;
+      }
+    }
     if (!query.error) {
       handledError.current = null;
       return;
@@ -77,7 +174,7 @@ export function WorkspaceAccess({
     else if (query.error instanceof ApiError && [403, 404].includes(query.error.status))
       onDenied(query.error);
   });
-  async function remove(kind: 'members' | 'invitations', id: string, label: string) {
+  async function remove(kind: 'members' | 'invitations', id: string, label: string, email: string) {
     if (pending.current || !valid()) return;
     pending.current = true;
     heading.current?.focus();
@@ -94,9 +191,15 @@ export function WorkspaceAccess({
         { method: 'DELETE' },
       );
       if (!valid()) return;
-      onInvitationCancelled(kind === 'invitations' ? id : null);
+      if (kind === 'invitations') onInvitationCancelled(id);
+      else onMemberRevoked(email);
+      client.removeQueries({ queryKey: key });
+      setMembersCursor(null);
+      setInvitationsCursor(null);
+      setMemberPage(1);
+      setInvitationPage(1);
       setNotice(label);
-      await client.invalidateQueries({ queryKey: key });
+      setPageRevision((previous) => previous + 1);
     } catch (failure) {
       if (!valid()) return;
       if (failure instanceof ApiError && failure.status === 401) session.expire(revision);
@@ -149,9 +252,9 @@ export function WorkspaceAccess({
         query.data && (
           <>
             <h4 className="mt-4 font-semibold">Members</h4>
-            {query.data.members.hasMore && (
+            {query.data.members.hasMore && !query.data.members.nextCursor && (
               <p className="mt-2" role="status">
-                Showing first 100 members. More members exist; this list is incomplete.
+                Showing up to 100 members. More members exist; this list is incomplete.
               </p>
             )}
             {query.data.members.items.length === 0 ? (
@@ -174,6 +277,7 @@ export function WorkspaceAccess({
                             'members',
                             member.userId,
                             `Access revoked for ${member.name}.`,
+                            member.email,
                           )
                         }
                       >
@@ -185,9 +289,9 @@ export function WorkspaceAccess({
               </ul>
             )}
             <h4 className="mt-6 font-semibold">Pending invitations</h4>
-            {query.data.invitations.hasMore && (
+            {query.data.invitations.hasMore && !query.data.invitations.nextCursor && (
               <p className="mt-2" role="status">
-                Showing first 100 pending invitations. More invitations exist; this list is
+                Showing up to 100 pending invitations. More invitations exist; this list is
                 incomplete.
               </p>
             )}
@@ -210,6 +314,7 @@ export function WorkspaceAccess({
                           'invitations',
                           invitation.id,
                           `Invitation cancelled for ${invitation.email}.`,
+                          invitation.email,
                         )
                       }
                     >
@@ -222,6 +327,58 @@ export function WorkspaceAccess({
           </>
         )
       )}
+      <fieldset className="mt-3 flex flex-wrap gap-3" aria-label="Members page navigation">
+        <p>Members page {memberPage}</p>
+        <button
+          className="control"
+          type="button"
+          disabled={membersCursor === null || busy}
+          onClick={() => page('members', null)}
+        >
+          First members page
+        </button>
+        <button
+          className="control"
+          type="button"
+          disabled={!query.data?.members.nextCursor || busy || query.isFetching}
+          onClick={() => page('members', query.data?.members.nextCursor ?? null)}
+        >
+          Next members page
+        </button>
+      </fieldset>
+      <fieldset
+        className="mt-3 flex flex-wrap gap-3"
+        aria-label="Pending invitations page navigation"
+      >
+        <p>Invitations page {invitationPage}</p>
+        <button
+          className="control"
+          type="button"
+          disabled={invitationsCursor === null || busy}
+          onClick={() => page('invitations', null)}
+        >
+          First invitations page
+        </button>
+        <button
+          className="control"
+          type="button"
+          disabled={!query.data?.invitations.nextCursor || busy || query.isFetching}
+          onClick={() => page('invitations', query.data?.invitations.nextCursor ?? null)}
+        >
+          Next invitations page
+        </button>
+      </fieldset>
+      <button
+        className="control mt-3"
+        type="button"
+        disabled={busy || query.isFetching}
+        onClick={() => {
+          heading.current?.focus();
+          void query.refetch();
+        }}
+      >
+        Refresh workspace access
+      </button>
     </section>
   );
 }

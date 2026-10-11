@@ -398,8 +398,11 @@ function WorkspaceScope({
                       userId={userId}
                       validSelection={valid}
                       onInvitationCancelled={(id) =>
+                        setInvitation((current) => (current?.id === id ? null : current))
+                      }
+                      onMemberRevoked={(email) =>
                         setInvitation((current) =>
-                          id === null || current?.id === id ? null : current,
+                          current?.email.toLowerCase() === email.toLowerCase() ? null : current,
                         )
                       }
                       onDenied={(error) => {

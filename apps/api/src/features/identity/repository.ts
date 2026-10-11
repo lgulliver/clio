@@ -103,8 +103,16 @@ export function createIdentityRepository(pool: Pool) {
         createRepository(client).listServices(workspaceId),
       );
     },
-    async listMembers(actor: Actor, workspaceId: string) {
+    async listMembers(actor: Actor, workspaceId: string, suppliedCursor?: unknown) {
+      const cursor = suppliedCursor === undefined ? null : opaqueId(suppliedCursor);
       return scoped(actor, workspaceId, true, async (client) => {
+        if (cursor !== null) {
+          const found = await client.query(
+            'SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2',
+            [workspaceId, cursor],
+          );
+          if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        }
         const result = await client.query<{
           userId: string;
           name: string;
@@ -114,8 +122,9 @@ export function createIdentityRepository(pool: Pool) {
         }>(
           `SELECT m.user_id AS "userId", u.name, u.email, m.role, m.created_at AS "createdAt"
            FROM workspace_memberships m JOIN auth_users u ON u.id = m.user_id
-           WHERE m.workspace_id = $1 ORDER BY m.user_id LIMIT 101`,
-          [workspaceId],
+           WHERE m.workspace_id = $1 AND ($2::text IS NULL OR m.user_id > $2)
+           ORDER BY m.user_id LIMIT 101`,
+          [workspaceId, cursor],
         );
         return {
           workspaceId,
@@ -127,11 +136,21 @@ export function createIdentityRepository(pool: Pool) {
             createdAt: row.createdAt.toISOString(),
           })),
           hasMore: result.rows.length > 100,
+          nextCursor: result.rows.length > 100 ? (result.rows[99]?.userId ?? null) : null,
         };
       });
     },
-    async listInvitations(actor: Actor, workspaceId: string) {
+    async listInvitations(actor: Actor, workspaceId: string, suppliedCursor?: unknown) {
+      const cursor = suppliedCursor === undefined ? null : uuid(suppliedCursor);
       return scoped(actor, workspaceId, true, async (client) => {
+        if (cursor !== null) {
+          const found = await client.query(
+            `SELECT 1 FROM workspace_invitations WHERE workspace_id = $1 AND id = $2
+             AND consumed_at IS NULL AND cancelled_at IS NULL AND expires_at > clock_timestamp()`,
+            [workspaceId, cursor],
+          );
+          if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        }
         const result = await client.query<{
           id: string;
           email: string;
@@ -141,8 +160,8 @@ export function createIdentityRepository(pool: Pool) {
           `SELECT id, email, created_at AS "createdAt", expires_at AS "expiresAt"
            FROM workspace_invitations WHERE workspace_id = $1
            AND consumed_at IS NULL AND cancelled_at IS NULL AND expires_at > clock_timestamp()
-           ORDER BY id LIMIT 101`,
-          [workspaceId],
+           AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT 101`,
+          [workspaceId, cursor],
         );
         return {
           workspaceId,
@@ -154,6 +173,7 @@ export function createIdentityRepository(pool: Pool) {
             expiresAt: row.expiresAt.toISOString(),
           })),
           hasMore: result.rows.length > 100,
+          nextCursor: result.rows.length > 100 ? (result.rows[99]?.id ?? null) : null,
         };
       });
     },

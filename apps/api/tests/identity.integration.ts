@@ -639,6 +639,11 @@ it('lists safe owner-only access, filters invitations, scopes writes and preserv
     "UPDATE workspace_invitations SET created_at = now() - interval '8 days', expires_at = now() - interval '1 day' WHERE id = $1",
     [expired.id],
   );
+  for (const unavailable of [consumed, cancelled, expired]) {
+    await expect(repository.listInvitations(owner, id, unavailable.id)).rejects.toMatchObject({
+      status: 404,
+    });
+  }
   const pending = await invite(owner.cookie, id, 'pending-access@example.com');
   const cross = await invite(outsider.cookie, other, 'cross-access@example.com');
   for (const suffix of ['members', 'invitations']) {
@@ -651,7 +656,7 @@ it('lists safe owner-only access, filters invitations, scopes writes and preserv
       expect(
         (
           await server.inject({
-            url: `/api/workspaces/${workspaceId}/${suffix}`,
+            url: `/api/workspaces/${workspaceId}/${suffix}?cursor=${encodeURIComponent(suffix === 'members' ? member.userId : pending.id)}`,
             headers: headers(cookie),
           })
         ).statusCode,
@@ -691,6 +696,7 @@ it('lists safe owner-only access, filters invitations, scopes writes and preserv
       },
     ],
     hasMore: false,
+    nextCursor: null,
   });
   for (const response of [members, invitations]) {
     for (const privateField of ['token', 'hash', 'session', 'account', 'created_by'])
@@ -782,10 +788,10 @@ it('lists safe owner-only access, filters invitations, scopes writes and preserv
   await expect(repository.listInvitations(owner, id)).rejects.toMatchObject({ status: 401 });
 });
 
-it('bounds member and invitation reads and reports overflow honestly', async () => {
+it('traverses bounded access pages with immutable ordering and scoped cursor validation', async () => {
   const owner = await login('8101', 'bounded-access@example.com');
   const id = await workspace(owner.cookie, 'Bounded access');
-  for (let index = 0; index < 101; index += 1) {
+  for (let index = 0; index < 205; index += 1) {
     const userId = `bounded-${id}-${index}`;
     await pool.query(
       'INSERT INTO auth_users (id, name, email, email_verified) VALUES ($1, $2, $3, true)',
@@ -803,4 +809,103 @@ it('bounds member and invitation reads and reports overflow honestly', async () 
   expect(members.hasMore).toBe(true);
   expect(invitations.invitations).toHaveLength(100);
   expect(invitations.hasMore).toBe(true);
+  const memberIds = members.members.map((row) => row.userId);
+  let memberPage = members;
+  while (memberPage.nextCursor !== null) {
+    memberPage = await repository.listMembers(owner, id, memberPage.nextCursor);
+    expect(memberPage.members.length).toBeLessThanOrEqual(100);
+    memberIds.push(...memberPage.members.map((row) => row.userId));
+  }
+  const expectedMembers = await pool.query<{ user_id: string }>(
+    'SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 ORDER BY user_id',
+    [id],
+  );
+  expect(memberIds).toEqual(expectedMembers.rows.map((row) => row.user_id));
+  expect(new Set(memberIds).size).toBe(206);
+  const invitationIds = invitations.invitations.map((row) => row.id);
+  let invitationPage = invitations;
+  while (invitationPage.nextCursor !== null) {
+    invitationPage = await repository.listInvitations(owner, id, invitationPage.nextCursor);
+    expect(invitationPage.invitations.length).toBeLessThanOrEqual(100);
+    invitationIds.push(...invitationPage.invitations.map((row) => row.id));
+  }
+  const expectedInvitations = await pool.query<{ id: string }>(
+    'SELECT id FROM workspace_invitations WHERE workspace_id = $1 ORDER BY id',
+    [id],
+  );
+  expect(invitationIds).toEqual(expectedInvitations.rows.map((row) => row.id));
+  expect(new Set(invitationIds).size).toBe(205);
+  const outsider = await login('8102', 'cursor-outsider@example.com');
+  const other = await workspace(outsider.cookie, 'Cursor isolation');
+  const foreign = await repository.invite(outsider, other, 'foreign-cursor@example.com');
+  for (const [kind, cursor] of [
+    ['members', members.nextCursor],
+    ['invitations', invitations.nextCursor],
+  ]) {
+    expect(cursor).not.toBeNull();
+    const path = `/api/workspaces/${id}/${kind}`;
+    for (const query of [
+      '?unknown=x',
+      '?cursor=',
+      '?cursor=x&cursor=y',
+      '?cursor=%00',
+      `?cursor=${'x'.repeat(513)}`,
+    ]) {
+      expect(
+        (await server.inject({ url: path + query, headers: { cookie: owner.cookie } })).statusCode,
+      ).toBe(400);
+    }
+    const success = await server.inject({
+      url: `${path}?cursor=${encodeURIComponent(String(cursor))}`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(success.statusCode).toBe(200);
+    for (const field of ['token', 'tokenHash', 'token_hash', 'sessionId'])
+      expect(success.body).not.toContain(field);
+    expect(
+      (
+        await server.inject({
+          url: `${path}?cursor=${encodeURIComponent(String(cursor))}`,
+          headers: { cookie: outsider.cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (await server.inject({ url: `${path}?cursor=${encodeURIComponent(String(cursor))}` }))
+        .statusCode,
+    ).toBe(401);
+  }
+  await expect(repository.listMembers(owner, id, outsider.userId)).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repository.listMembers(owner, id, 'unknown-cursor')).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repository.listInvitations(owner, id, foreign.id)).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repository.listInvitations(owner, id, randomUUID())).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repository.listInvitations(owner, id, 'not-uuid')).rejects.toMatchObject({
+    status: 400,
+  });
+  const targetId = memberIds.find((userId) => userId !== owner.userId);
+  expect(targetId).toBeDefined();
+  await repository.revokeMember(owner, id, targetId);
+  expect(
+    (await repository.listMembers(owner, id)).members.some((row) => row.userId === targetId),
+  ).toBe(false);
+  if (invitations.nextCursor === null) throw new Error('Expected overflow cursor');
+  await repository.cancelInvitation(owner, id, invitations.nextCursor);
+  await expect(repository.listInvitations(owner, id, invitations.nextCursor)).rejects.toMatchObject(
+    { status: 404 },
+  );
+  await pool.query('DELETE FROM auth_sessions WHERE id = $1', [owner.sessionId]);
+  await expect(repository.listMembers(owner, id, members.nextCursor)).rejects.toMatchObject({
+    status: 401,
+  });
+  await expect(repository.listInvitations(owner, id, invitationIds[0])).rejects.toMatchObject({
+    status: 401,
+  });
 });

@@ -323,13 +323,15 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       const current = await actor(request, reply, false);
       const id = uuid(params(request, ['workspaceId']).workspaceId);
       if (!repository) throw new IdentityError(503, 'unavailable');
-      return repository.listMembers(current, id);
+      const query = object(request.query, ['cursor']);
+      return repository.listMembers(current, id, query.cursor);
     });
     routes.get('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
       const current = await actor(request, reply, false);
       const id = uuid(params(request, ['workspaceId']).workspaceId);
       if (!repository) throw new IdentityError(503, 'unavailable');
-      return repository.listInvitations(current, id);
+      const query = object(request.query, ['cursor']);
+      return repository.listInvitations(current, id, query.cursor);
     });
     routes.post('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
       const current = await actor(request, reply, true);

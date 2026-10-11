@@ -180,7 +180,7 @@ export type PendingInvitation = {
   createdAt: string;
   expiresAt: string;
 };
-export type AccessList<T> = { items: T[]; hasMore: boolean };
+export type AccessList<T> = { items: T[]; hasMore: boolean; nextCursor?: string | null };
 function timestamp(value: unknown): string {
   const result = string(value);
   if (!Number.isFinite(Date.parse(result))) throw new ApiError(0);
@@ -201,7 +201,27 @@ function accessList<T>(
     items.length > 100
   )
     throw new ApiError(0);
-  return { items: items.map(parse), hasMore: data.hasMore };
+  const parsed = items.map(parse);
+  if (data.nextCursor !== undefined && data.nextCursor !== null) {
+    const cursor = key === 'invitations' ? uuid(data.nextCursor) : string(data.nextCursor);
+    if (
+      cursor.length > 512 ||
+      Array.from(cursor).some(
+        (character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127,
+      ) ||
+      !data.hasMore ||
+      items.length !== 100 ||
+      record(items[99])[key === 'members' ? 'userId' : 'id'] !== cursor
+    )
+      throw new ApiError(0);
+  } else if (data.nextCursor === null && data.hasMore) throw new ApiError(0);
+  return {
+    items: parsed,
+    hasMore: data.hasMore,
+    ...(data.nextCursor === undefined
+      ? {}
+      : { nextCursor: data.nextCursor === null ? null : string(data.nextCursor) }),
+  };
 }
 export function parseMembers(value: unknown, workspaceId: string): AccessList<WorkspaceMember> {
   return accessList(value, workspaceId, 'members', (value) => {

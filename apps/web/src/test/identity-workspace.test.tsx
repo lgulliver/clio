@@ -36,8 +36,12 @@ type Handler = (path: string, options: RequestInit | undefined) => Response | Pr
 let handler: Handler;
 const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) =>
   handler(
-    new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
-      .pathname,
+    (() => {
+      const url = new URL(
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+      );
+      return url.pathname + url.search;
+    })(),
     options,
   ),
 );
@@ -664,43 +668,48 @@ describe('owner workspace access', () => {
       2,
     );
   });
-  it('clears a displayed invitation after revocation cancels pending invitations', async () => {
-    handler = accessHandler((path, options) => {
-      if (options?.method === 'POST' && path.endsWith('/invitations'))
-        return json(
-          {
-            invitation: {
-              id: serviceId,
-              workspaceId: first,
-              email: 'bob@example.test',
-              expiresAt: accessInvite.expiresAt,
-              token,
+  it.each(['bob@example.test', 'BOB@example.test', 'unrelated@example.test'])(
+    'clears only matching displayed invitation after revocation: %s',
+    async (email) => {
+      handler = accessHandler((path, options) => {
+        if (options?.method === 'POST' && path.endsWith('/invitations'))
+          return json(
+            {
+              invitation: {
+                id: serviceId,
+                workspaceId: first,
+                email,
+                expiresAt: accessInvite.expiresAt,
+                token,
+              },
             },
-          },
-          201,
-        );
-      if (options?.method === 'DELETE') return new Response(null, { status: 204 });
-      if (path.endsWith('/members'))
-        return json({ workspaceId: first, members: [accessMember], hasMore: false });
-      return json({ workspaceId: first, invitations: [], hasMore: false });
-    });
-    renderApp();
-    const user = userEvent.setup();
-    await openAccess(user);
-    await user.type(await screen.findByLabelText('Member email'), 'bob@example.test');
-    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
-    expect(await screen.findByLabelText('Invitation token — copy and share once')).toHaveValue(
-      token,
-    );
-    await user.click(
-      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByLabelText('Invitation token — copy and share once'),
-      ).not.toBeInTheDocument(),
-    );
-  });
+            201,
+          );
+        if (options?.method === 'DELETE') return new Response(null, { status: 204 });
+        if (path.endsWith('/members'))
+          return json({ workspaceId: first, members: [accessMember], hasMore: false });
+        return json({ workspaceId: first, invitations: [], hasMore: false });
+      });
+      renderApp();
+      const user = userEvent.setup();
+      await openAccess(user);
+      await user.type(await screen.findByLabelText('Member email'), email);
+      await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+      expect(await screen.findByLabelText('Invitation token — copy and share once')).toHaveValue(
+        token,
+      );
+      await user.click(
+        await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+      );
+      await screen.findByText('Access revoked for Bob.');
+      if (email.toLowerCase() === 'bob@example.test')
+        expect(
+          screen.queryByLabelText('Invitation token — copy and share once'),
+        ).not.toBeInTheDocument();
+      else
+        expect(screen.getByLabelText('Invitation token — copy and share once')).toHaveValue(token);
+    },
+  );
   it('shows loading, retryable error, empty lists and honest overflow', async () => {
     const late = deferred<Response>();
     let failed = true;
@@ -877,3 +886,255 @@ it('loads owner access during StrictMode effect replay', async () => {
     await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
   ).toBeVisible();
 });
+
+function pagedAccessHandler(overrides?: Handler): Handler {
+  const members = Array.from({ length: 100 }, (_, index) => ({
+    ...accessMember,
+    userId: `opaque/${index}`,
+    name: `Page member ${index}`,
+  }));
+  const invitations = Array.from({ length: 100 }, (_, index) => ({
+    ...accessInvite,
+    id: `33333333-3333-4333-8333-${String(index).padStart(12, '0')}`,
+    email: `page-invite-${index}@example.test`,
+  }));
+  return accessHandler((path, options) => {
+    if (path.includes('?cursor=') || options?.method === 'DELETE') {
+      if (overrides) return overrides(path, options);
+      return path.includes('/members')
+        ? json({ workspaceId: first, members: [accessMember], hasMore: false, nextCursor: null })
+        : json({
+            workspaceId: first,
+            invitations: [accessInvite],
+            hasMore: false,
+            nextCursor: null,
+          });
+    }
+    return path.endsWith('/members')
+      ? json({ workspaceId: first, members, hasMore: true, nextCursor: 'opaque/99' })
+      : json({ workspaceId: first, invitations, hasMore: true, nextCursor: invitations[99]?.id });
+  });
+}
+it('navigates independent bounded member/invitation pages, first pages and refresh with stable focus', async () => {
+  handler = pagedAccessHandler();
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  expect(
+    await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  ).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Next members page' })).toBeDisabled();
+  expect(screen.getByText(/page-invite-99@example.test/)).toBeVisible();
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/invitations'))).toHaveLength(
+    1,
+  );
+  await user.click(screen.getByRole('button', { name: 'Next invitations page' }));
+  expect(
+    await screen.findByRole('button', { name: /Cancel invitation for invited@example.test/ }),
+  ).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Refresh workspace access' }));
+  await screen.findByRole('button', { name: /Cancel invitation for invited@example.test/ });
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'First members page' }));
+  expect(await screen.findByText(/Page member 99/)).toBeVisible();
+  expect(screen.queryByText(/Page member 100/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'First invitations page' }));
+  expect(await screen.findByText(/page-invite-99@example.test/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'First members page' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'First invitations page' })).toBeDisabled();
+});
+it('cancels/removes abandoned pages and drops late data when returning to first page', async () => {
+  const late = deferred<Response>();
+  handler = pagedAccessHandler(() => late.promise);
+  const { client } = renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  expect(screen.getByText('Loading workspace access…')).toBeVisible();
+  const call = fetchMock.mock.calls.find(([url]) => String(url).includes('?cursor=opaque%2F99'));
+  await user.click(screen.getByRole('button', { name: 'First members page' }));
+  await screen.findByText(/Page member 99/);
+  expect(call?.[1]?.signal?.aborted).toBe(true);
+  await act(async () => {
+    late.resolve(
+      json({ workspaceId: first, members: [accessMember], hasMore: false, nextCursor: null }),
+    );
+    await late.promise;
+  });
+  expect(
+    screen.queryByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  ).not.toBeInTheDocument();
+  expect(
+    client
+      .getQueryCache()
+      .getAll()
+      .some((query) => query.queryKey.includes('opaque/99')),
+  ).toBe(false);
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+});
+it('retries page errors with focus and resets both cursors after successful revocation', async () => {
+  let fail = true;
+  handler = pagedAccessHandler((path, options) => {
+    if (options?.method === 'DELETE') return new Response(null, { status: 204 });
+    if (fail) return json({}, 503);
+    return path.includes('/members')
+      ? json({ workspaceId: first, members: [accessMember], hasMore: false, nextCursor: null })
+      : json({ workspaceId: first, invitations: [accessInvite], hasMore: false, nextCursor: null });
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  await screen.findByRole('button', { name: 'Retry workspace access' });
+  fail = false;
+  await user.click(screen.getByRole('button', { name: 'Retry workspace access' }));
+  await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' });
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Next invitations page' }));
+  await screen.findByRole('button', { name: /Cancel invitation for invited@example.test/ });
+  await user.click(
+    screen.getByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  );
+  await screen.findByText(/Page member 99/);
+  expect(screen.getByRole('button', { name: 'First members page' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'First invitations page' })).toBeDisabled();
+  expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+});
+
+it.each([401, 403])('hides protected pages after next-page status %s', async (status) => {
+  handler = pagedAccessHandler(() => json({}, status));
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  if (status === 401) await screen.findByRole('button', { name: 'Sign in with GitHub' });
+  else await screen.findByRole('button', { name: 'Refresh access' });
+  expect(screen.queryByRole('button', { name: 'Next members page' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Page member 99/)).not.toBeInTheDocument();
+});
+it.each(['members', 'invitations'])(
+  'recovers stale %s cursor without hiding workspace',
+  async (kind) => {
+    handler = pagedAccessHandler(() => json({}, 404));
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.click(await screen.findByRole('button', { name: `Next ${kind} page` }));
+    await screen.findByText('Saved page position is no longer available. Returned to first page.');
+    expect(
+      await screen.findByText(
+        kind === 'members' ? /Page member 99/ : /page-invite-99@example.test/,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Refresh access' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `First ${kind} page` })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  },
+);
+it('confirms first-page access after stale cursor and hides workspace if revoked', async () => {
+  let stale = false;
+  const original = pagedAccessHandler(() => {
+    stale = true;
+    return json({}, 404);
+  });
+  handler = (path, options) =>
+    stale && path === `/api/workspaces/${first}/members` ? json({}, 404) : original(path, options);
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  await screen.findByRole('button', { name: 'Refresh access' });
+  expect(screen.queryByRole('button', { name: 'Next members page' })).not.toBeInTheDocument();
+});
+it.each(['workspace', 'identity'])('drops next-page completion after %s changes', async (kind) => {
+  const late = deferred<Response>();
+  const original = pagedAccessHandler(() => late.promise);
+  let changed = false;
+  handler = (path, options) =>
+    path === '/api/me' && changed ? json(identity('bob')) : original(path, options);
+  const { client } = renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(await screen.findByRole('button', { name: 'Next members page' }));
+  const call = fetchMock.mock.calls.find(([url]) => String(url).includes('?cursor=opaque%2F99'));
+  if (kind === 'workspace') await choose(user, second);
+  else {
+    changed = true;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await screen.findByText('Signed in as Bob');
+  }
+  await waitFor(() => expect(call?.[1]?.signal?.aborted).toBe(true));
+  await act(async () => {
+    late.resolve(
+      json({ workspaceId: first, members: [accessMember], hasMore: false, nextCursor: null }),
+    );
+    await late.promise;
+  });
+  expect(
+    screen.queryByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  ).not.toBeInTheDocument();
+  expect(
+    client
+      .getQueryCache()
+      .getAll()
+      .some((query) => query.queryKey.includes('opaque/99')),
+  ).toBe(false);
+});
+it.each([true, false])(
+  'resets invitation paging and clears token only for matching ID: %s',
+  async (matching) => {
+    let cancelled = false;
+    handler = pagedAccessHandler((_path, options) => {
+      if (options?.method === 'DELETE') {
+        cancelled = true;
+        return new Response(null, { status: 204 });
+      }
+      return json({
+        workspaceId: first,
+        invitations: [accessInvite],
+        hasMore: false,
+        nextCursor: null,
+      });
+    });
+    const original = handler;
+    handler = (path, options) =>
+      options?.method === 'POST'
+        ? json(
+            {
+              invitation: {
+                id: matching ? serviceId : second,
+                workspaceId: first,
+                email: accessInvite.email,
+                expiresAt: accessInvite.expiresAt,
+                token,
+              },
+            },
+            201,
+          )
+        : original(path, options);
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(screen.getByLabelText('Member email'), accessInvite.email);
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    await screen.findByLabelText('Invitation token — copy and share once');
+    await user.click(screen.getByRole('button', { name: 'Next invitations page' }));
+    await user.click(
+      await screen.findByRole('button', { name: /Cancel invitation for invited@example.test/ }),
+    );
+    await screen.findByText(/page-invite-99@example.test/);
+    expect(cancelled).toBe(true);
+    expect(screen.getByRole('button', { name: 'First invitations page' })).toBeDisabled();
+    if (matching)
+      expect(
+        screen.queryByLabelText('Invitation token — copy and share once'),
+      ).not.toBeInTheDocument();
+    else expect(screen.getByLabelText('Invitation token — copy and share once')).toHaveValue(token);
+    expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+  },
+);

@@ -106,3 +106,42 @@ it('bounds access lists, checks workspace/role/status/date, strips private field
     ),
   ).toThrow();
 });
+
+it('validates page cursors against bounded last items while retaining legacy responses', () => {
+  const workspaceId = '11111111-1111-4111-8111-111111111111';
+  const members = Array.from({ length: 100 }, (_, index) => ({
+    userId: `opaque/${index}`,
+    name: 'Member',
+    email: 'member@example.test',
+    role: 'member',
+    createdAt: '2026-10-11T00:00:00Z',
+  }));
+  const payload = { workspaceId, members, hasMore: true, nextCursor: 'opaque/99' };
+  expect(parseMembers(payload, workspaceId).nextCursor).toBe('opaque/99');
+  for (const nextCursor of [null, 1, '', 'other', 'opaque/99 ', 'x'.repeat(513)])
+    expect(() => parseMembers({ ...payload, nextCursor }, workspaceId)).toThrow();
+  expect(() => parseMembers({ ...payload, hasMore: false }, workspaceId)).toThrow();
+  expect(() => parseMembers({ ...payload, members: members.slice(0, 99) }, workspaceId)).toThrow();
+  expect(
+    parseMembers({ workspaceId, members: [], hasMore: false, nextCursor: null }, workspaceId)
+      .nextCursor,
+  ).toBeNull();
+  const invitations = members.map((item, index) => ({
+    id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
+    email: item.email,
+    status: 'pending',
+    createdAt: item.createdAt,
+    expiresAt: item.createdAt,
+  }));
+  const nextCursor = invitations[99]?.id;
+  expect(
+    parsePendingInvitations({ workspaceId, invitations, hasMore: true, nextCursor }, workspaceId)
+      .nextCursor,
+  ).toBe(nextCursor);
+  expect(() =>
+    parsePendingInvitations(
+      { workspaceId, invitations, hasMore: true, nextCursor: 'bad' },
+      workspaceId,
+    ),
+  ).toThrow();
+});
