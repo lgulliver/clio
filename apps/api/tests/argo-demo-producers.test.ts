@@ -10,6 +10,7 @@ import {
   captureBaseline,
   nativeNotification,
   observeArtifact,
+  observeHealth,
   parseReceipt,
   provenanceEvent,
   publishEvidence,
@@ -574,5 +575,77 @@ describe('independent sandbox producers', () => {
       ]),
     });
     expect(() => renderManifest(bytes, receipt, 'nginx:latest')).toThrow();
+  });
+});
+
+describe('controlled lifecycle functional probes', () => {
+  it('records successful and failed functional responses without inventing exact onset', async () => {
+    for (const status of [200, 503]) {
+      const fetcher: typeof fetch = async (_input, options) => {
+        expect(options?.redirect).toBe('error');
+        expect(options?.signal).toBeInstanceOf(AbortSignal);
+        return new Response(status === 200 ? 'ok\n' : 'unavailable\n', {
+          status,
+          headers: { 'x-clio-artifact': receipt.artifact_digest },
+        });
+      };
+      const observation = await observeHealth(
+        'http://127.0.0.1:8100/healthz',
+        operationId,
+        receipt.artifact_digest,
+        fetcher,
+      );
+      expect(observation.http_status).toBe(status);
+      expect(observation.approximate_onset).toBe(true);
+      expect(observation.operation_id).toBe(operationId);
+      expect(Date.parse(observation.observed_at)).toBeLessThanOrEqual(Date.now());
+    }
+  });
+  it('rejects wrong endpoints, unrelated failures, changed bodies and compressed responses', async () => {
+    const ok: typeof fetch = async () => new Response('ok\n');
+    await expect(
+      observeHealth('https://example.com/healthz', operationId, receipt.artifact_digest, ok),
+    ).rejects.toThrow();
+    await expect(
+      observeHealth('http://127.0.0.1:8100/index.html', operationId, receipt.artifact_digest, ok),
+    ).rejects.toThrow();
+    for (const response of [
+      new Response('unavailable\n', {
+        status: 500,
+        headers: { 'x-clio-artifact': receipt.artifact_digest },
+      }),
+      new Response('ok\n', {
+        status: 503,
+        headers: { 'x-clio-artifact': receipt.artifact_digest },
+      }),
+      new Response('ok\n', {
+        headers: { 'content-encoding': 'gzip', 'x-clio-artifact': receipt.artifact_digest },
+      }),
+      new Response(`ok\n${'x'.repeat(65537)}`, {
+        headers: { 'x-clio-artifact': receipt.artifact_digest },
+      }),
+      new Response('ok\n', { headers: { 'x-clio-artifact': `sha256:${'b'.repeat(64)}` } }),
+    ]) {
+      const fetcher: typeof fetch = async () => response;
+      await expect(
+        observeHealth(
+          'http://127.0.0.1:8100/healthz',
+          operationId,
+          receipt.artifact_digest,
+          fetcher,
+        ),
+      ).rejects.toThrow();
+    }
+  });
+  it('isolates lifecycle resources and keeps failing health separate from artifact exposure', () => {
+    const image = `docker.io/library/nginx:1.29.3-alpine@sha256:${'a'.repeat(64)}`;
+    const broken = renderManifest(bytes, receipt, image, 'broken');
+    expect(broken).toContain('clio-lifecycle-demo');
+    expect(broken).not.toContain('clio-evidence-demo');
+    expect(broken).toContain('503');
+    expect(broken).toContain('try_files');
+    expect(broken).toContain(Buffer.from(bytes).toString('base64'));
+    expect(renderManifest(bytes, receipt, image, 'recovery')).not.toContain('503');
+    expect(() => renderManifest(bytes, receipt, image, 'production')).toThrow();
   });
 });

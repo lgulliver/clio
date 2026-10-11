@@ -150,3 +150,5 @@ Two owner-enqueued snapshots used `2026-10-09T00:00:00Z` to `2026-10-10T00:00:00
 Overview displayed the later saved result, its reporting window, cutoff, pinned OEMS revision `5908bb12cdf24e7528088237dff9dca4c10ff45f`, retained qualifying count one and provisional window count zero. Activation happened after that window ended. Collection, deployment-history and recovery coverage all remained false. This verifies the sandbox operator-producer path, not automatic controller notification delivery or production traffic.
 
 Argo tracks the dedicated namespace as well as the workload. This walkthrough enables neither automatic synchronization nor pruning. Repeated new artifacts leave old immutable ConfigMaps until an operator deliberately cleans up the disposable sandbox; cascade deletion or namespace pruning must be treated as deletion of the whole dedicated workload.
+
+For a separate controlled healthy/failure/recovery workload, follow the [lifecycle exercise](argo-lifecycle-demo.md). It adds independent functional probes and preserves approximate onset, closed-window and coverage limits.

@@ -11,6 +11,7 @@ import {
   renderManifest,
   saveBaseline,
   saveEvidence,
+  saveHealth,
   saveNativeNotification,
 } from './producers.ts';
 
@@ -26,6 +27,12 @@ export async function main(args: string[]): Promise<void> {
     const [endpoint, operationId, outputFile] = values;
     if (!endpoint || !operationId || !outputFile) throw new Error('invalid_arguments');
     await saveBaseline(endpoint, operationId, outputFile);
+    console.log(outputFile);
+  } else if (command === 'health' && values.length === 4) {
+    const [endpoint, operationId, artifactDigest, outputFile] = values;
+    if (!endpoint || !operationId || !artifactDigest || !outputFile)
+      throw new Error('invalid_arguments');
+    await saveHealth(endpoint, operationId, artifactDigest, outputFile);
     console.log(outputFile);
   } else if (command === 'native' && (values.length === 2 || values.length === 3)) {
     const [applicationFile, outputFile, expectedOperationId] = values;
@@ -88,14 +95,14 @@ export async function main(args: string[]): Promise<void> {
     const status = await publishEvidence({ event: await readJson(eventFile), baseUrl, tokenFile });
     console.log(`Receiver HTTP ${status}; retained event: ${eventFile}`);
     if (status < 200 || status >= 300) process.exitCode = 1;
-  } else if (command === 'render' && values.length === 2) {
-    const [artifactDirectory, nginxImage] = values;
+  } else if (command === 'render' && (values.length === 2 || values.length === 3)) {
+    const [artifactDirectory, nginxImage, scenario] = values;
     if (!artifactDirectory || !nginxImage) throw new Error('invalid_arguments');
     const { bytes, receipt } = await readArtifact(artifactDirectory);
-    console.log(renderManifest(bytes, receipt, nginxImage));
+    console.log(renderManifest(bytes, receipt, nginxImage, scenario));
   } else {
     throw new Error(
-      'usage: native-publish NOTIFICATION_JSON CLIO_HTTP_ORIGIN SOURCE_UUID TOKEN_FILE | baseline HTTP_INDEX_URL OPERATION_UUID OUTPUT_JSON | native APPLICATION_JSON OUTPUT_JSON [EXPECTED_OPERATION_UUID] | build GIT_DIR COMMIT_SHA REPOSITORY_ID OUTPUT_DIR | provenance ARTIFACT_DIR SOURCE_UUID PRODUCER_UUID OUTPUT_DIR | observe ARTIFACT_DIR NOTIFICATION_JSON BASELINE_JSON HTTP_INDEX_URL SOURCE_UUID PRODUCER_UUID OUTPUT_DIR | publish EVENT_JSON CLIO_HTTP_ORIGIN TOKEN_FILE | render ARTIFACT_DIR NGINX_IMAGE_AT_SHA256',
+      'usage: native-publish NOTIFICATION_JSON CLIO_HTTP_ORIGIN SOURCE_UUID TOKEN_FILE | baseline HTTP_INDEX_URL OPERATION_UUID OUTPUT_JSON | health HTTP_HEALTHZ_URL OPERATION_UUID ARTIFACT_DIGEST OUTPUT_JSON | native APPLICATION_JSON OUTPUT_JSON [EXPECTED_OPERATION_UUID] | build GIT_DIR COMMIT_SHA REPOSITORY_ID OUTPUT_DIR | provenance ARTIFACT_DIR SOURCE_UUID PRODUCER_UUID OUTPUT_DIR | observe ARTIFACT_DIR NOTIFICATION_JSON BASELINE_JSON HTTP_INDEX_URL SOURCE_UUID PRODUCER_UUID OUTPUT_DIR | publish EVENT_JSON CLIO_HTTP_ORIGIN TOKEN_FILE | render ARTIFACT_DIR NGINX_IMAGE_AT_SHA256 [healthy|broken|recovery]',
     );
   }
 }

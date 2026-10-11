@@ -383,6 +383,57 @@ function rejectProxyEnvironment(): void {
   )
     fail();
 }
+/** A bounded functional probe, not an exact failure-onset timestamp or production observer. */
+export async function observeHealth(
+  endpoint: string,
+  operationId: string,
+  expectedArtifactDigest: string,
+  fetcher: typeof fetch = fetch,
+) {
+  rejectProxyEnvironment();
+  const url = loopbackUrl(endpoint);
+  const id = uuid(operationId);
+  const expectedDigest = digest(expectedArtifactDigest);
+  if (url.pathname !== '/healthz') fail();
+  const response = await fetcher(url, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(5000),
+    headers: { 'Accept-Encoding': 'identity' },
+  });
+  if (
+    ![200, 503].includes(response.status) ||
+    response.headers.get('x-clio-artifact') !== expectedDigest ||
+    (response.headers.get('content-encoding') ?? 'identity') !== 'identity'
+  ) {
+    await response.body?.cancel();
+    fail();
+  }
+  const bytes = await boundedBody(response);
+  const expected = response.status === 200 ? 'ok\n' : 'unavailable\n';
+  if (Buffer.from(bytes).toString('utf8') !== expected) fail();
+  return {
+    contract: 'clio.sandbox.health-observation.v1',
+    operation_id: id,
+    endpoint: url.href,
+    observed_at: new Date().toISOString(),
+    http_status: response.status,
+    body_digest: artifactDigest(bytes),
+    artifact_digest: expectedDigest,
+    approximate_onset: true,
+  };
+}
+export async function saveHealth(
+  endpoint: string,
+  operationId: string,
+  expectedArtifactDigest: string,
+  outputFile: string,
+) {
+  const observation = await observeHealth(endpoint, operationId, expectedArtifactDigest);
+  await writeFile(outputFile, `${JSON.stringify(observation, null, 2)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
+}
 export function parseBaseline(value: unknown) {
   const data = row(value, [
     'contract',
@@ -656,12 +707,21 @@ export function renderManifest(
   bytes: Uint8Array,
   unknownReceipt: unknown,
   nginxImage: string,
+  scenario?: unknown,
 ): string {
   const receipt = parseReceipt(unknownReceipt);
   checkArtifact(bytes, receipt);
   if (!/^[a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/.test(nginxImage)) fail();
   const name = `artifact-${receipt.artifact_digest.slice(7)}`;
-  const namespace = 'clio-evidence-demo';
+  if (
+    scenario !== undefined &&
+    scenario !== 'healthy' &&
+    scenario !== 'broken' &&
+    scenario !== 'recovery'
+  )
+    fail();
+  const namespace = scenario === undefined ? 'clio-evidence-demo' : 'clio-lifecycle-demo';
+  const healthName = `lifecycle-http-${scenario}-${receipt.artifact_digest.slice(7, 39)}`;
   return JSON.stringify(
     {
       apiVersion: 'v1',
@@ -675,6 +735,19 @@ export function renderManifest(
           immutable: true,
           binaryData: { 'index.html': Buffer.from(bytes).toString('base64') },
         },
+        ...(scenario === undefined
+          ? []
+          : [
+              {
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: { name: healthName, namespace },
+                immutable: true,
+                data: {
+                  'default.conf': `server { listen 80; root /usr/share/nginx/html; location = /healthz { default_type text/plain; add_header X-Clio-Artifact "${receipt.artifact_digest}" always; return ${scenario === 'broken' ? '503 "unavailable\\n"' : '200 "ok\\n"'}; } location / { try_files $uri $uri/ =404; } }\n`,
+                },
+              },
+            ]),
         {
           apiVersion: 'apps/v1',
           kind: 'Deployment',
@@ -700,10 +773,25 @@ export function renderManifest(
                         subPath: 'index.html',
                         readOnly: true,
                       },
+                      ...(scenario === undefined
+                        ? []
+                        : [
+                            {
+                              name: 'health',
+                              mountPath: '/etc/nginx/conf.d/default.conf',
+                              subPath: 'default.conf',
+                              readOnly: true,
+                            },
+                          ]),
                     ],
                   },
                 ],
-                volumes: [{ name: 'artifact', configMap: { name } }],
+                volumes: [
+                  { name: 'artifact', configMap: { name } },
+                  ...(scenario === undefined
+                    ? []
+                    : [{ name: 'health', configMap: { name: healthName } }]),
+                ],
               },
             },
           },

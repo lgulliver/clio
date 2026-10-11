@@ -48,3 +48,5 @@ Network commands reject configured proxy environment variables so private creden
 Follow the [complete sandbox walkthrough](../../../docs/providers/argo-evidence-demo.md) for grants, bootstrap, synchronization and snapshot comparison. Output locations outside Git are an operator requirement; the CLI enforces this restriction for token files only.
 
 The sandbox trusts the operator to prevent intervening deployments, manual resource changes and endpoint replacement between baseline capture and the planned rollout. UUID binding does not prove that causal link. Capture immediately before the rollout and keep the dedicated workload under one operator during the exercise.
+
+The separate [controlled lifecycle exercise](../../../docs/providers/argo-lifecycle-demo.md) adds healthy/broken/recovery manifest profiles, artifact-bound functional probes, and `lifecycle-cli.ts` report generation. It defaults to partial coverage, preserves observed times, and keeps approximate recovery separate from exact recovery.

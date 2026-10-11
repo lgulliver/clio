@@ -1,0 +1,124 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "clio-lifecycle-demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "artifact-dccbb153616ec8cd80b726856a3b0ff0069ff360c8a513edc06b9f637f5da3b5",
+        "namespace": "clio-lifecycle-demo"
+      },
+      "immutable": true,
+      "binaryData": {
+        "index.html": "PCFkb2N0eXBlIGh0bWw+CjxodG1sIGxhbmc9ImVuIj48bWV0YSBjaGFyc2V0PSJ1dGYtOCI+PHRpdGxlPkNsaW8gbGlmZWN5Y2xlIHNhbmRib3g8L3RpdGxlPjxib2R5PjxoMT5DbGlvIGxpZmVjeWNsZTogYnJva2VuPC9oMT48cD5Db250cm9sbGVkIHNhbmRib3ggYXBwbGljYXRpb247IG5vdCBwcm9kdWN0aW9uIHRyYWZmaWMuIEZ1bmN0aW9uYWwgc3RhdHVzIGlzIGluZGVwZW5kZW50bHkgY2hlY2tlZCBhdCAvaGVhbHRoei48L3A+PC9ib2R5PjwvaHRtbD4K"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "lifecycle-http-broken-dccbb153616ec8cd80b726856a3b0ff0",
+        "namespace": "clio-lifecycle-demo"
+      },
+      "immutable": true,
+      "data": {
+        "default.conf": "server { listen 80; root /usr/share/nginx/html; location = /healthz { default_type text/plain; add_header X-Clio-Artifact \"sha256:dccbb153616ec8cd80b726856a3b0ff0069ff360c8a513edc06b9f637f5da3b5\" always; return 503 \"unavailable\\n\"; } location / { try_files $uri $uri/ =404; } }\n"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-lifecycle-demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "sandbox-consumer"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "sandbox-consumer"
+            },
+            "annotations": {
+              "clio.artifact-digest": "sha256:dccbb153616ec8cd80b726856a3b0ff0069ff360c8a513edc06b9f637f5da3b5"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "http",
+                "image": "docker.io/library/nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14",
+                "ports": [
+                  {
+                    "containerPort": 80
+                  }
+                ],
+                "volumeMounts": [
+                  {
+                    "name": "artifact",
+                    "mountPath": "/usr/share/nginx/html/index.html",
+                    "subPath": "index.html",
+                    "readOnly": true
+                  },
+                  {
+                    "name": "health",
+                    "mountPath": "/etc/nginx/conf.d/default.conf",
+                    "subPath": "default.conf",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "artifact",
+                "configMap": {
+                  "name": "artifact-dccbb153616ec8cd80b726856a3b0ff0069ff360c8a513edc06b9f637f5da3b5"
+                }
+              },
+              {
+                "name": "health",
+                "configMap": {
+                  "name": "lifecycle-http-broken-dccbb153616ec8cd80b726856a3b0ff0"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "sandbox-consumer",
+        "namespace": "clio-lifecycle-demo"
+      },
+      "spec": {
+        "type": "ClusterIP",
+        "selector": {
+          "app": "sandbox-consumer"
+        },
+        "ports": [
+          {
+            "port": 80,
+            "targetPort": 80
+          }
+        ]
+      }
+    }
+  ]
+}
