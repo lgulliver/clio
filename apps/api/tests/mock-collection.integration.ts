@@ -519,3 +519,91 @@ describe('durable mock collection', () => {
     );
   });
 });
+
+it('saved history finds success behind 30 failures and pages tied timestamps with scoped authorization', async () => {
+  await pool.query(
+    "INSERT INTO auth_sessions(id,user_id,token,expires_at) VALUES($1,$2,$1,clock_timestamp()+interval '1 day') ON CONFLICT(id) DO UPDATE SET expires_at=EXCLUDED.expires_at",
+    [outsider.sessionId, outsider.userId],
+  );
+  const f = await enqueue();
+  await finishAll();
+  const repo = runs;
+  const wid = workspaceId,
+    sid = serviceId;
+  const queued = f.run;
+  const saved = await repo.get(member, wid, sid, queued.id);
+  await pool.query(
+    `INSERT INTO mock_collection_runs(id,workspace_id,service_id,request_id,mapping_revision,mapping_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code)
+       SELECT gen_random_uuid(),workspace_id,service_id,gen_random_uuid(),mapping_revision,mapping_input,service_name,'failed',1,statement_timestamp(),statement_timestamp(),statement_timestamp(),'mock_processing_failed'
+       FROM mock_collection_runs CROSS JOIN generate_series(1,30) WHERE id=$1`,
+    [queued.id],
+  );
+  await runs.enqueue(owner, wid, sid, { revision: 1, requestId: randomUUID() });
+  expect((await repo.list(member, wid, sid)).every((run) => run.status !== 'succeeded')).toBe(true);
+  const success = await repo.listPage(member, wid, sid, { status: 'succeeded' });
+  expect(success).toEqual({ runs: [saved], nextCursor: null });
+  session(member);
+  const history = await server.inject(url('mock-collection-runs?status=succeeded'));
+  expect(history.statusCode).toBe(200);
+  expect(history.json()).toEqual(success);
+  expect(history.headers['cache-control']).toBe('no-store');
+  expect((await server.inject(url('mock-collection-runs?unknown=true'))).statusCode).toBe(400);
+  session();
+  const first = await repo.listPage(member, wid, sid);
+  expect(first.runs).toHaveLength(25);
+  expect(first.nextCursor).toBe(first.runs.at(-1)?.id);
+  const second = await repo.listPage(member, wid, sid, { cursor: first.nextCursor });
+  expect(second.runs).toHaveLength(7);
+  expect(second.nextCursor).toBeNull();
+  const all = [...first.runs, ...second.runs];
+  expect(new Set(all.map((run) => run.id)).size).toBe(32);
+  const storage = await pool.query<{ id: string }>(
+    `SELECT id FROM mock_collection_runs WHERE workspace_id=$1 AND service_id=$2 ORDER BY created_at DESC,id DESC`,
+    [wid, sid],
+  );
+  expect(all.map((run) => run.id)).toEqual(storage.rows.map((row) => row.id));
+  expect(second.runs.at(-1)).toEqual(saved);
+  for (const query of [{ cursor: randomUUID() }, { cursor: first.nextCursor, status: 'succeeded' }])
+    await expect(repo.listPage(member, wid, sid, query)).rejects.toMatchObject({ status: 404 });
+  for (const query of [
+    { cursor: 'invalid' },
+    { limit: 100 },
+    { status: 'failed' },
+    { cursor: [queued.id] },
+  ])
+    await expect(async () => repo.listPage(member, wid, sid, query)).rejects.toMatchObject({
+      status: 400,
+    });
+  const other = await createIdentityRepository(pool).createService(owner, wid, 'Other history');
+  await expect(repo.listPage(member, wid, other.id, { cursor: queued.id })).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repo.listPage(outsider, wid, sid)).rejects.toMatchObject({ status: 404 });
+  await mappings.save(owner, wid, sid, {
+    ...settings,
+    expectedRevision: 1,
+    primaryProvider: 'argocd',
+  });
+  expect(await repo.get(member, wid, sid, queued.id)).toEqual(saved);
+  await pool.query('DELETE FROM workspace_memberships WHERE workspace_id=$1 AND user_id=$2', [
+    wid,
+    member.userId,
+  ]);
+  await expect(repo.listPage(member, wid, sid, { status: 'succeeded' })).rejects.toMatchObject({
+    status: 404,
+  });
+  await pool.query(
+    "UPDATE auth_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+    [owner.sessionId],
+  );
+  try {
+    await expect(
+      repo.listPage(owner, wid, sid, { cursor: first.nextCursor }),
+    ).rejects.toMatchObject({ status: 401 });
+  } finally {
+    await pool.query(
+      "UPDATE auth_sessions SET expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
+      [owner.sessionId],
+    );
+  }
+});

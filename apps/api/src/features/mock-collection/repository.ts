@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { IdentityError, uuid } from '../identity/input.ts';
+import { IdentityError, object, uuid } from '../identity/input.ts';
 import { type Actor, authorizedWorkspaceTransaction } from '../identity/repository.ts';
 import { createRepository } from '../workspaces/repository.ts';
 import { columns, enqueueInput, parseMapping, run } from './model.ts';
@@ -70,6 +70,32 @@ export function createMockCollectionRepository(pool: Pool) {
         );
         if (!inserted.rows[0]) throw new Error('Missing inserted run');
         return run(inserted.rows[0]);
+      });
+    },
+    /** Cursor is the last run ID in this exact workspace/service/provider history.
+     * status=succeeded discovers saved results independently of recent failed requests.
+     * Every page revalidates current session and membership; current grants are irrelevant.
+     */
+    listPage(actor: Actor, workspaceId: string, serviceId: string, input: unknown = {}) {
+      const query = object(input, ['cursor', 'status']);
+      const cursor = query.cursor === undefined ? null : uuid(query.cursor);
+      if (query.status !== undefined && query.status !== 'succeeded')
+        throw new IdentityError(400, 'invalid_request');
+      const succeeded = query.status === 'succeeded';
+      return scoped(actor, workspaceId, serviceId, false, async (client) => {
+        if (cursor) {
+          const found = await client.query(
+            `SELECT id FROM mock_collection_runs WHERE workspace_id=$1 AND service_id=$2 AND id=$3 AND ($4::boolean=false OR status='succeeded')`,
+            [workspaceId, serviceId, cursor, succeeded],
+          );
+          if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        }
+        const rows = await client.query<Record<string, unknown>>(
+          `SELECT ${columns} FROM mock_collection_runs WHERE workspace_id=$1 AND service_id=$2 AND ($4::boolean=false OR status='succeeded') AND ($3::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM mock_collection_runs WHERE workspace_id=$1 AND service_id=$2 AND id=$3)) ORDER BY created_at DESC,id DESC LIMIT 26`,
+          [workspaceId, serviceId, cursor, succeeded],
+        );
+        const runs = rows.rows.slice(0, 25).map(run);
+        return { runs, nextCursor: rows.rows.length > 25 ? (runs.at(-1)?.id ?? null) : null };
       });
     },
     list(actor: Actor, workspaceId: string, serviceId: string) {

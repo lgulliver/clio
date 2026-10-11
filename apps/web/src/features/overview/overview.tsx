@@ -1,56 +1,19 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { type Run as ArgoRun, parseRuns as parseArgoRuns } from '../argo-collection/api';
+import { useState } from 'react';
+import { type Run as ArgoRun, parseHistoryPage as parseArgoPage } from '../argo-collection/api';
 import { ArchiveHistory } from '../argo-collection/archive-history';
 import { CoverageAssessment } from '../argo-collection/coverage-assessment';
-import { type Run as GitHubRun, parseRuns as parseGitHubRuns } from '../github-collection/api';
-import { ApiError, errorMessage, parseServices, parseWorkspaces, request } from '../identity/api';
+import {
+  type Run as GitHubRun,
+  parseHistoryPage as parseGitHubPage,
+} from '../github-collection/api';
+import { errorMessage, parseServices, parseWorkspaces } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MetricResults } from '../measurements/metric-results';
-import { type Run as MockRun, parseRuns as parseMockRuns } from '../mock-collection/api';
+import { type Run as MockRun, parseHistoryPage as parseMockPage } from '../mock-collection/api';
+import { HistoryBrowser, useStoredRead } from '../result-history/history-browser';
 
 type StoredRun = GitHubRun | ArgoRun | MockRun;
-
-// Each mounted scope owns its cache. Abandoned selection results must never return.
-function useStoredRead<T>(
-  scope: string,
-  path: string,
-  parse: (value: unknown) => T,
-  enabled = true,
-) {
-  const session = useSession();
-  const client = useQueryClient();
-  const mounted = useRef(true);
-  const revision = session.revision;
-  const key = useMemo(
-    () => ['identity', session.user?.id, revision, 'overview', scope],
-    [session.user?.id, revision, scope],
-  );
-  const query = useQuery({
-    queryKey: key,
-    enabled,
-    queryFn: async ({ signal }) => {
-      const value = await request(path, parse, { signal });
-      if (signal.aborted || !mounted.current || !session.current(revision)) throw new ApiError(0);
-      return value;
-    },
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      void client.cancelQueries({ queryKey: key });
-      client.removeQueries({ queryKey: key });
-    };
-  }, [client, key]);
-  useEffect(() => {
-    if (query.error instanceof ApiError && query.error.status === 401) session.expire(revision);
-  }, [query.error, session.expire, revision]);
-  return query;
-}
 
 export function Overview() {
   const session = useSession();
@@ -167,50 +130,10 @@ function ReadError({ error, retry, label }: { error: unknown; retry: () => void;
 }
 
 function StoredResults({ workspaceId, serviceId }: { workspaceId: string; serviceId: string }) {
-  const client = useQueryClient();
-  const session = useSession();
   const [blocked, setBlocked] = useState(false);
   const scope = { workspaceId, serviceId };
   const path = `/api/workspaces/${workspaceId}/services/${serviceId}`;
-  const github = useStoredRead(
-    `${path}/github`,
-    `${path}/github-collection-runs`,
-    (value) => parseGitHubRuns(value, scope),
-    !blocked,
-  );
-  const argo = useStoredRead(
-    `${path}/argo`,
-    `${path}/argo-collection-runs`,
-    (value) => parseArgoRuns(value, scope),
-    !blocked,
-  );
-  const mock = useStoredRead(
-    `${path}/mock`,
-    `${path}/mock-collection-runs`,
-    (value) => parseMockRuns(value, scope),
-    !blocked,
-  );
-  const errors = [github.error, argo.error, mock.error];
-  const accessLost = errors.some(
-    (error) => error instanceof ApiError && [401, 403, 404].includes(error.status),
-  );
-  useEffect(() => {
-    if (!accessLost) return;
-    setBlocked(true);
-    for (const provider of ['github', 'argo', 'mock']) {
-      void client.cancelQueries({
-        queryKey: [
-          'identity',
-          session.user?.id,
-          session.revision,
-          'overview',
-          `${path}/${provider}`,
-        ],
-      });
-    }
-  }, [accessLost, client, path, session.user?.id, session.revision]);
-  // A scoped permission failure hides every source, including previous successes.
-  if (accessLost || blocked)
+  if (blocked)
     return (
       <div className="panel" role="alert">
         Stored results are no longer accessible. Select another service or refresh your workspace
@@ -220,44 +143,35 @@ function StoredResults({ workspaceId, serviceId }: { workspaceId: string; servic
   return (
     <div className="mt-8">
       <p className="text-slate-600">
-        Each source shows up to 25 newest collection requests. Saved results belong to their
-        original window and connection or mapping revision; they may differ from current settings.
-        Counts across sources must not be added together.
+        Each source shows up to 25 requests per page and independently finds its newest saved
+        result. Saved results belong to their original window and connection or mapping revision;
+        they may differ from current settings. Counts across sources must not be added together.
       </p>
       {[
-        { title: 'Live GitHub', query: github },
-        { title: 'Live Argo CD', query: argo },
-        { title: 'Mock — fictional evidence', query: mock },
-      ].map(({ title, query }) => (
-        <section key={title} aria-label={`${title} stored results`} className="panel">
-          <h2 className="text-xl font-semibold">{title}</h2>
-          {query.isPending ? (
-            <p role="status" className="mt-3">
-              Loading stored requests…
-            </p>
-          ) : query.isError ? (
-            <ReadError error={query.error} retry={() => void query.refetch()} label={title} />
-          ) : (
-            <ResultHistory runs={query.data} />
-          )}
-          <button
-            className="control mt-4"
-            type="button"
-            disabled={query.isFetching}
-            onClick={() => void query.refetch()}
-          >
-            Refresh {title} history
-          </button>
-        </section>
+        { title: 'Live GitHub', provider: 'github', parse: parseGitHubPage },
+        { title: 'Live Argo CD', provider: 'argo', parse: parseArgoPage },
+        { title: 'Mock — fictional evidence', provider: 'mock', parse: parseMockPage },
+      ].map(({ title, provider, parse }) => (
+        <HistoryBrowser<StoredRun>
+          key={title}
+          title={title}
+          path={`${path}/${provider}-collection-runs`}
+          parse={(value, options) => parse(value, scope, options)}
+          onAccessLost={() => setBlocked(true)}
+          renderResult={(newest, success) => <ResultHistory newest={newest} success={success} />}
+        />
       ))}
     </div>
   );
 }
 
-function ResultHistory({ runs }: { runs: StoredRun[] }) {
-  const newest = runs[0];
-  // Stored history is ordered by created_at DESC, id DESC in each server repository.
-  const success = runs.find((run) => run.status === 'succeeded' && run.result !== null);
+function ResultHistory({
+  newest,
+  success,
+}: {
+  newest: StoredRun | undefined;
+  success: StoredRun | undefined;
+}) {
   const result = success?.result;
   return (
     <div className="mt-3 space-y-3">
@@ -275,7 +189,7 @@ function ResultHistory({ runs }: { runs: StoredRun[] }) {
       )}
       {success && result ? (
         <>
-          <h3 className="font-semibold">Newest successful stored result in this history</h3>
+          <h3 className="font-semibold">Selected saved result</h3>
           {success.id !== newest?.id && (
             <p>This older saved result does not describe the newest request.</p>
           )}
@@ -365,10 +279,7 @@ function ResultHistory({ runs }: { runs: StoredRun[] }) {
           )}
         </>
       ) : (
-        <p>
-          No successful saved result in this recent history. Older results may exist beyond these 25
-          requests.
-        </p>
+        <p>No successful saved result found.</p>
       )}
     </div>
   );

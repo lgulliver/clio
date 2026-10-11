@@ -107,7 +107,7 @@ pnpm worker:mock
 pnpm worker:mock --once
 ```
 
-Owners enqueue saved mock revisions with an idempotent request UUID. Members read the latest 25 scoped runs and individual saved results. New requests require the latest saved mapping; replay returns the original run. Only one pending/running run per service is allowed. Later mapping edits do not rewrite queued inputs or stored snapshots. The fixed sample reporting window and incomplete coverage remain fictional.
+Owners enqueue saved mock revisions with an idempotent request UUID. Members read bounded scoped run pages and individual saved results. New requests require the latest saved mapping; replay returns the original run. Only one pending/running run per service is allowed. Later mapping edits do not rewrite queued inputs or stored snapshots. The fixed sample reporting window and incomplete coverage remain fictional.
 
 The worker checks readiness, claims jobs with database-clock leases and fencing tokens, computes outside database transactions, and commits immutable snapshot plus successful state atomically. Retries and expired lease recovery are bounded to three attempts. Raw evidence, all calculated metric records and snapshot digests remain server-side; public responses expose the safe preview shape only. No live GitHub/Argo requests, automatic migrations or implicit worker start occurs. Stop workers with SIGINT/SIGTERM; pending jobs remain in PostgreSQL. Retention/account erasure and hosted supervision remain undecided.
 
@@ -136,3 +136,10 @@ Apply migration `0009_argo_enrichment.sql` and optionally configure private `ARG
 New successful GitHub and Argo snapshots include optional `metricResult`: the exact five-metric result calculated by the pinned OEMS package for the saved service, reporting window and evidence cutoff. The HTTP boundary validates the pinned metric-result schema and its agreement with the safe result context. No private dataset, extensions, source references or provider payloads are exposed. Legacy saved results without this field retain their original summaries and remain readable without recomputation.
 
 Settings and Overview show every available metric status, quality reason, evidence count, ratio bounds and population scope, lead-time observations and recovery details. Missing evidence remains unavailable; approximate recovery is distinct from an exact median. Native results continue to declare incomplete collection, deployment history and recovery coverage. Full metric presentation does not certify source coverage. The [local feature-completion plan](../../docs/agents/feature-completion.md) defines the separate evidence-backed measurement boundary under implementation.
+
+
+## Saved collection history
+
+GitHub, Argo and mock run-list endpoints return `{runs,nextCursor}` with at most 25 safe runs. Optional `cursor` is the last run UUID of the previous page; optional `status=succeeded` independently discovers successful results, including when more than 25 later requests failed. Unknown query keys, invalid status or malformed cursor return 400. A cursor outside the same workspace/service/provider/filter returns scoped 404. SQL uses immutable `(created_at,id)` descending tuples, including exact microseconds, and fetches at most 26 rows. Session and membership checks remain in the storage transaction. Reading old completed results does not require current source credentials or start collection.
+
+Overview reads recent and successful histories separately, lets users select original saved windows and explicitly navigate older successful pages. Refresh remains bounded. Source cards remain separate; access loss hides all selected service evidence and abandoned page/identity responses cannot return to the UI. Legacy `{runs}` responses remain readable with pagination unavailable.

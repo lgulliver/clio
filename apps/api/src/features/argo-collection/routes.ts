@@ -48,7 +48,7 @@ export function registerArgoRoutes(
   });
   routes.get(`${base}/argo-collection-runs`, async (request, reply) => {
     const s = await scope(request, reply, false);
-    return { runs: await repository.list(s.actor, s.workspaceId, s.serviceId) };
+    return repository.listPage(s.actor, s.workspaceId, s.serviceId, request.query);
   });
   routes.get(`${base}/argo-collection-runs/:runId`, async (request, reply) => {
     const s = await scope(request, reply, false);

@@ -38,3 +38,8 @@ Migration 0005 allocated to live GitHub tables only. Existing migrations never e
 ## Resumable acquisition
 
 Migration `0008_github_checkpoints.sql` stores revision-scoped bounded traversal cursors, with App/installation/repository/grant identity and committing run/lease provenance. Preflight reads strictly parsed retained context. Completion commits cursor, retained evidence, immutable snapshot and terminal result atomically. Expired leases, revoked grants, conflicts and failed retention checks cannot advance progress. Cursors are private server state; public HTTP shapes are unchanged. See [checkpoint behavior and limitations](github-checkpoints.md).
+
+
+### Bounded history and saved-success discovery
+
+The existing run-list endpoint returns `{runs,nextCursor}`. Query `status=succeeded` discovers saved successes independently of recent failures; `cursor=<last-run-UUID>` reads the next page in immutable `(created_at,id)` descending order. Responses contain at most 25 safe runs and a nullable next cursor. Cursor lookup rechecks exact workspace/service/provider and filter under current session/membership authorization. Invalid queries fail 400, foreign/nonexistent cursors scoped 404. Reads neither start collection nor require the source grant to remain active for an already completed result. Overview selects saved windows and navigates successful pages explicitly; older native results retain their original cutoff and summaries without recomputation.

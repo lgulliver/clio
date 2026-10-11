@@ -153,3 +153,43 @@ export function newestFirst(left: Run, right: Run): number {
   const difference = instant(right.createdAt) - instant(left.createdAt);
   return difference > 0n ? 1 : difference < 0n ? -1 : right.id.localeCompare(left.id);
 }
+
+/** Legacy {runs} remains readable. Missing nextCursor means pagination unavailable.
+ * Filter and cursor are request scope, never claims supplied by response data.
+ */
+export type HistoryPage = { runs: Run[]; nextCursor: string | null };
+export function parseHistoryPage(
+  value: unknown,
+  scope: Scope,
+  options: { cursor?: string; succeeded?: boolean } = {},
+): HistoryPage {
+  const row = record(value);
+  if (Object.keys(row).some((key) => key !== 'runs' && key !== 'nextCursor')) return fail();
+  const runs = parseRuns(value, scope);
+  const nextCursor =
+    row.nextCursor === undefined || row.nextCursor === null ? null : uuid(row.nextCursor);
+  if (options.cursor !== undefined) uuid(options.cursor);
+  if (
+    (nextCursor !== null &&
+      (runs.length !== 25 || nextCursor.toLowerCase() !== runs.at(-1)?.id.toLowerCase())) ||
+    runs.some(
+      (run) =>
+        run.id.toLowerCase() === options.cursor?.toLowerCase() ||
+        (options.succeeded && run.status !== 'succeeded'),
+    )
+  )
+    return fail();
+  for (let index = 1; index < runs.length; index++) {
+    const prior = runs[index - 1],
+      current = runs[index];
+    if (
+      !prior ||
+      !current ||
+      instant(prior.createdAt) < instant(current.createdAt) ||
+      (instant(prior.createdAt) === instant(current.createdAt) &&
+        prior.id.toLowerCase() <= current.id.toLowerCase())
+    )
+      return fail();
+  }
+  return { runs, nextCursor };
+}

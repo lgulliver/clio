@@ -105,7 +105,7 @@ For API clients, the run base is `/api/workspaces/:workspaceId/services/:service
 | Request | Behavior |
 | --- | --- |
 | POST with exactly `{revision, requestId}` | Owner, authenticated session and exact `APP_ORIGIN`; positive safe integer revision and UUID request ID; returns 202 `{run}` |
-| GET base | Members/owners; returns `{runs}` with latest 25, newest first |
+| GET base | Members/owners; returns `{runs,nextCursor}` with up to 25, newest first; optional `cursor` and `status=succeeded` |
 | GET base + `/:runId` | Members/owners; returns scoped `{run}` |
 
 Use the current saved revision for a new request. Stale revision or another active run returns 409; unset mapping returns 404. Reusing the same request ID in the same workspace/service with the same revision returns the original run, even after settings change. Reusing it with a different revision returns 409. A deliberate new run needs a new request ID. Responses are no-store; missing/nonmember/wrong scopes return 404. Use the authenticated browser workflow without copying session cookies into examples.
@@ -139,7 +139,7 @@ For a reproducible independent Argo evidence path, use the [local artifact demo]
 
 After a worker succeeds, open **Overview**, select a workspace, then select a service. Workspace and service selections remain in memory and reset on navigation, identity changes or session rechecks, including when the browser tab is hidden. Owners and members can read authorized stored results; this page never starts collection.
 
-**Live GitHub**, **Live Argo CD** and **Mock — fictional evidence** have separate histories. Each card considers up to the 25 newest collection requests, shows the newest request's status, and displays the newest successful stored result within that history. A newer pending, running or failed request does not replace an older saved result. No success in this bounded history does not prove that older results are absent. Use each card's **Refresh history** control to check progress; Overview does not poll automatically.
+**Live GitHub**, **Live Argo CD** and **Mock — fictional evidence** have separate histories. Each card reads a bounded recent-request page and independently finds successful saved results. Newer pending, running or failed requests cannot hide an older success. Choose a saved window, use **Older saved results** to fetch the next successful page, and use **Newest saved result** to return to the first page. Each page replaces the previous page; requests stay bounded and evidence is not accumulated indefinitely. Use each card's **Refresh history** control to check progress; Overview does not poll automatically.
 
 Saved results retain their original UTC window (end exclusive), evidence cutoff, completion time, connection or mapping revision, and OEMS revision. These can differ from current settings. Provider labels identify GitHub or Argo CD; historical repository/Application names are not included in the safe result contract. Do not add counts across sources: evidence may overlap.
 

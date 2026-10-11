@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../identity/api';
-import { parseRun, parseRuns } from './api';
+import { parseHistoryPage, parseRun, parseRuns } from './api';
 import { completed, preview, queued, scope } from './fixtures.test-support';
 
 describe('stored mock run parsing', () => {
@@ -72,5 +72,45 @@ describe('stored mock run parsing', () => {
     expect(parseRuns({ runs: [newer, completed] }, scope)).toHaveLength(2);
     expect(() => parseRuns({ runs: [completed, newer] }, scope)).toThrow(ApiError);
     expect(() => parseRuns({ runs: [null] }, scope)).toThrow(ApiError);
+  });
+});
+
+describe('saved history pages', () => {
+  it('keeps legacy runs readable and validates cursors, status, ties and safe scope', () => {
+    const runs = Array.from({ length: 25 }, (_, index) => ({
+      ...completed,
+      id: `${String(100 - index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+    }));
+    const nextCursor = runs.at(-1)?.id;
+    expect(parseRuns({ runs, nextCursor }, scope)).toHaveLength(25);
+    expect(parseHistoryPage({ runs: [completed] }, scope)).toEqual({
+      runs: [completed],
+      nextCursor: null,
+    });
+    expect(parseHistoryPage({ runs, nextCursor }, scope, { succeeded: true }).nextCursor).toBe(
+      nextCursor,
+    );
+    for (const response of [
+      { runs, nextCursor: 'bad' },
+      { runs, nextCursor: completed.id },
+      { runs: [completed], nextCursor: completed.id },
+      { runs: [...runs].reverse(), nextCursor: null },
+      { runs: [completed], privateEvidence: {} },
+      { runs: [{ ...completed, serviceId: scope.workspaceId }] },
+      { runs: [{ ...completed, leaseToken: 'private' }] },
+    ])
+      expect(() => parseHistoryPage(response, scope)).toThrow();
+    expect(() =>
+      parseHistoryPage({ runs: [completed] }, scope, { cursor: completed.id }),
+    ).toThrow();
+    expect(() => parseHistoryPage({ runs: [] }, scope, { cursor: 'bad' })).toThrow();
+    const pending = {
+      ...completed,
+      status: 'pending',
+      result: null,
+      completedAt: null,
+      failureCode: null,
+    };
+    expect(() => parseHistoryPage({ runs: [pending] }, scope, { succeeded: true })).toThrow();
   });
 });

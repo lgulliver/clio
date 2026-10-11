@@ -286,7 +286,12 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       const current = await actor(request, reply, false);
       const values = params(request, ['workspaceId', 'serviceId']);
       if (!runs) throw new IdentityError(503, 'unavailable');
-      return { runs: await runs.list(current, uuid(values.workspaceId), uuid(values.serviceId)) };
+      return runs.listPage(
+        current,
+        uuid(values.workspaceId),
+        uuid(values.serviceId),
+        request.query,
+      );
     });
     routes.get(`${runsBase}/:runId`, async (request, reply) => {
       const current = await actor(request, reply, false);

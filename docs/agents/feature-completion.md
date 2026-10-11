@@ -31,8 +31,8 @@ The census proves collection scope only when independently exhaustive across act
 ## Delivery order and status
 
 1. Five-metric presentation and workspace access management: delivered in `c18da86`, with full checks, PostgreSQL verification and opposite-engine review.
-2. Strict common evidence contracts, private native basis binding and pinned reconciliation: implemented under integration/review; new Argo snapshots retain exact private gap manifests.
+2. Strict common evidence contracts, private native basis binding and pinned reconciliation: delivered in `7b7289e`; new Argo snapshots retain exact private gap manifests and explicit unbounded transport uncertainty.
 3. Durable private evidence ingress, measurement jobs/results and accessible application workflow.
-4. Saved-result discovery/history: implementation in isolated worktree; real-source/operator guides and complete local acceptance verification remain required.
+4. Saved-result discovery/history: delivered with independent successful-result lookup and bounded cursor navigation; real-source/operator guides and complete local acceptance verification remain required.
 
 Each slice receives opposite-engine review and required checks before its Conventional Commit. Feature completion is established by verified acceptance, not by this plan or by source credentials being available.

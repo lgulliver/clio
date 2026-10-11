@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   closedWindow,
   parseConnection,
+  parseHistoryPage,
   parseRun,
   parseRuns,
   parseSavedConnection,
@@ -131,5 +132,45 @@ describe('live GitHub boundary', () => {
     expect(positiveId('00123')).toBe(123);
     for (const id of ['0', '-1', '1.2', '1e3', '9007199254740992', ' 12', ''])
       expect(() => positiveId(id)).toThrow();
+  });
+});
+
+describe('saved history pages', () => {
+  it('keeps legacy runs readable and validates cursors, status, ties and safe scope', () => {
+    const runs = Array.from({ length: 25 }, (_, index) => ({
+      ...completed,
+      id: `${String(100 - index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+    }));
+    const nextCursor = runs.at(-1)?.id;
+    expect(parseRuns({ runs, nextCursor }, scope)).toHaveLength(25);
+    expect(parseHistoryPage({ runs: [completed] }, scope)).toEqual({
+      runs: [completed],
+      nextCursor: null,
+    });
+    expect(parseHistoryPage({ runs, nextCursor }, scope, { succeeded: true }).nextCursor).toBe(
+      nextCursor,
+    );
+    for (const response of [
+      { runs, nextCursor: 'bad' },
+      { runs, nextCursor: completed.id },
+      { runs: [completed], nextCursor: completed.id },
+      { runs: [...runs].reverse(), nextCursor: null },
+      { runs: [completed], privateEvidence: {} },
+      { runs: [{ ...completed, serviceId: scope.workspaceId }] },
+      { runs: [{ ...completed, leaseToken: 'private' }] },
+    ])
+      expect(() => parseHistoryPage(response, scope)).toThrow();
+    expect(() =>
+      parseHistoryPage({ runs: [completed] }, scope, { cursor: completed.id }),
+    ).toThrow();
+    expect(() => parseHistoryPage({ runs: [] }, scope, { cursor: 'bad' })).toThrow();
+    const pending = {
+      ...completed,
+      status: 'pending',
+      result: null,
+      completedAt: null,
+      failureCode: null,
+    };
+    expect(() => parseHistoryPage({ runs: [pending] }, scope, { succeeded: true })).toThrow();
   });
 });

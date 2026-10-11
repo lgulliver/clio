@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type ReactNode, StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
@@ -111,9 +111,9 @@ beforeEach(() => {
 describe('stored results overview', () => {
   it('shows all five actual calculations for each live provider', async () => {
     fetchMock.mockImplementation(async (input) =>
-      String(input).endsWith('/github-collection-runs')
+      String(input).split('?')[0]?.endsWith('/github-collection-runs')
         ? json({ runs: [{ ...completed, result: withMetric(githubResult) }] })
-        : String(input).endsWith('/argo-collection-runs')
+        : String(input).split('?')[0]?.endsWith('/argo-collection-runs')
           ? json({ runs: [{ ...argoCompleted, result: withMetric(argoResult) }] })
           : defaultRead(input),
     );
@@ -152,9 +152,7 @@ describe('stored results overview', () => {
     expect(screen.queryByLabelText('Service')).not.toBeInTheDocument();
     await select();
     const region = await screen.findByRole('region', { name: 'Live GitHub stored results' });
-    expect(
-      await within(region).findByText(/No successful saved result in this recent history/),
-    ).toBeVisible();
+    expect(await within(region).findByText(/No successful saved result found/)).toBeVisible();
     expect(screen.getAllByText('No collection requests in this recent history.')).toHaveLength(3);
     expect(fetchMock.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => /connection|sources/.test(String(input)))).toBe(
@@ -200,8 +198,10 @@ describe('stored results overview', () => {
         result: null,
       };
       fetchMock.mockImplementation(async (input) =>
-        String(input).endsWith('/github-collection-runs')
-          ? json({ runs: [newer, completed] })
+        String(input).split('?')[0]?.endsWith('/github-collection-runs')
+          ? json({
+              runs: String(input).includes('status=succeeded') ? [completed] : [newer, completed],
+            })
           : defaultRead(input),
       );
       mount();
@@ -216,7 +216,9 @@ describe('stored results overview', () => {
       );
       expect(within(card).getByText(/Unknown qualification: 2/)).toBeVisible();
       expect(within(card).getByText('2026-01-04T00:01:00.000001Z')).toBeVisible();
-      expect(within(card).getByText(/2026-01-01T00:00:00Z to 2026-01-03T00:00:00Z/)).toBeVisible();
+      expect(
+        within(card).getByText(/2026-01-01T00:00:00Z to 2026-01-03T00:00:00Z/, { selector: 'dd' }),
+      ).toBeVisible();
       expect(within(card).getByText(/Coverage incomplete/)).toBeVisible();
       expect(within(card).getByText(/All five metric details unavailable/)).toHaveTextContent(
         'unavailable',
@@ -227,9 +229,12 @@ describe('stored results overview', () => {
   it('separates live GitHub, live Argo and fictional mock results with their own windows', async () => {
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
-      if (path.endsWith('/github-collection-runs')) return json({ runs: [completed] });
-      if (path.endsWith('/argo-collection-runs')) return json({ runs: [argoCompleted] });
-      if (path.endsWith('/mock-collection-runs')) return json({ runs: [mockCompleted] });
+      if (path.split('?')[0]?.endsWith('/github-collection-runs'))
+        return json({ runs: [completed] });
+      if (path.split('?')[0]?.endsWith('/argo-collection-runs'))
+        return json({ runs: [argoCompleted] });
+      if (path.split('?')[0]?.endsWith('/mock-collection-runs'))
+        return json({ runs: [mockCompleted] });
       return defaultRead(input);
     });
     mount(true);
@@ -259,7 +264,7 @@ describe('stored results overview', () => {
       result: { ...argoCompleted.result, archiveSummary, coverageAssessment },
     };
     fetchMock.mockImplementation(async (input) =>
-      String(input).endsWith('/argo-collection-runs')
+      String(input).split('?')[0]?.endsWith('/argo-collection-runs')
         ? json({ runs: [saved] })
         : defaultRead(input),
     );
@@ -286,7 +291,7 @@ describe('stored results overview', () => {
         },
       };
       fetchMock.mockImplementation(async (input) =>
-        String(input).endsWith('/argo-collection-runs')
+        String(input).split('?')[0]?.endsWith('/argo-collection-runs')
           ? json({ runs: [saved] })
           : defaultRead(input),
       );
@@ -340,9 +345,10 @@ describe('stored results overview', () => {
 
   it('rejects invalid source responses while preserving independently readable sources', async () => {
     fetchMock.mockImplementation(async (input) => {
-      if (String(input).endsWith('/github-collection-runs'))
+      if (String(input).split('?')[0]?.endsWith('/github-collection-runs'))
         return json({ runs: [{ ...completed, serviceId: otherService }] });
-      if (String(input).endsWith('/argo-collection-runs')) return json({ runs: [argoCompleted] });
+      if (String(input).split('?')[0]?.endsWith('/argo-collection-runs'))
+        return json({ runs: [argoCompleted] });
       return defaultRead(input);
     });
     mount();
@@ -366,8 +372,9 @@ describe('stored results overview', () => {
     async (status) => {
       const late = deferred();
       fetchMock.mockImplementation(async (input) => {
-        if (String(input).endsWith('/github-collection-runs')) return json({ runs: [completed] });
-        if (String(input).endsWith('/argo-collection-runs')) return late.promise;
+        if (String(input).split('?')[0]?.endsWith('/github-collection-runs'))
+          return json({ runs: [completed] });
+        if (String(input).split('?')[0]?.endsWith('/argo-collection-runs')) return late.promise;
         return defaultRead(input);
       });
       mount();
@@ -388,9 +395,9 @@ describe('stored results overview', () => {
     let siblingSignal: AbortSignal | null | undefined;
     fetchMock.mockImplementation(async (input, options) => {
       const path = String(input);
-      if (path.endsWith('/github-collection-runs'))
+      if (path.split('?')[0]?.endsWith('/github-collection-runs'))
         return revoked ? json({}, 403) : json({ runs: [completed] });
-      if (path.endsWith('/argo-collection-runs')) {
+      if (path.split('?')[0]?.endsWith('/argo-collection-runs')) {
         siblingSignal = options?.signal;
         return late.promise;
       }
@@ -410,7 +417,9 @@ describe('stored results overview', () => {
 
   it('expires session on protected 401', async () => {
     fetchMock.mockImplementation(async (input) =>
-      String(input).endsWith('/github-collection-runs') ? json({}, 401) : defaultRead(input),
+      String(input).split('?')[0]?.endsWith('/github-collection-runs')
+        ? json({}, 401)
+        : defaultRead(input),
     );
     mount();
     await select();
@@ -427,7 +436,7 @@ describe('stored results overview', () => {
       fetchMock.mockImplementation(async (input, options) => {
         if (
           String(input).includes(scope.serviceId) &&
-          String(input).endsWith('/github-collection-runs')
+          String(input).split('?')[0]?.endsWith('/github-collection-runs')
         ) {
           oldSignal = options?.signal;
           return late.promise;
@@ -457,4 +466,209 @@ describe('stored results overview', () => {
       ).toBe(false);
     },
   );
+});
+
+const savedPage = Array.from({ length: 25 }, (_, index) => ({
+  ...completed,
+  id: `${String(100 - index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+}));
+const savedCursor = savedPage.at(-1)?.id;
+const olderSaved = {
+  ...completed,
+  id: '00000001-1111-4111-8111-111111111111',
+  createdAt: '2026-01-04T00:00:00Z',
+  result: {
+    ...githubResult,
+    window: { ...githubResult.window, start: '2025-12-01T00:00:00Z', end: '2025-12-03T00:00:00Z' },
+  },
+};
+function historyRead(input: string | URL | Request) {
+  const path = String(input);
+  if (!path.includes('/github-collection-runs')) return defaultRead(input);
+  if (path.includes('cursor=')) return json({ runs: [olderSaved], nextCursor: null });
+  if (path.includes('status=succeeded')) return json({ runs: savedPage, nextCursor: savedCursor });
+  return json({
+    runs: Array.from({ length: 25 }, (_, index) => ({
+      ...completed,
+      id: `${String(200 - index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+      status: 'failed',
+      result: null,
+      failureCode: 'github_processing_failed',
+      createdAt: '2026-01-05T00:00:00Z',
+      updatedAt: '2026-01-05T00:01:00Z',
+      completedAt: '2026-01-05T00:01:00Z',
+    })),
+    nextCursor: '00000176-1111-4111-8111-111111111111',
+  });
+}
+
+describe('saved result navigation', () => {
+  it('finds success beyond 25 failures, selects older window and refreshes bounded reads without duplicates', async () => {
+    fetchMock.mockImplementation(async (input) => historyRead(input));
+    mount();
+    await select();
+    const card = screen.getByRole('region', { name: 'Live GitHub stored results' });
+    await within(card).findByText(/Provisional deployment frequency count/);
+    expect(within(card).getByText(/Newest request in this history/)).toHaveTextContent('failed');
+    const selector = within(card).getByRole('combobox', {
+      name: 'Live GitHub saved reporting window',
+    });
+    expect(within(selector).getAllByRole('option')).toHaveLength(25);
+    fireEvent.change(selector, { target: { value: savedPage[1]?.id } });
+    expect(selector).toHaveValue(savedPage[1]?.id);
+    fireEvent.click(within(card).getByRole('button', { name: 'Older Live GitHub saved results' }));
+    expect(
+      await within(card).findByText('2025-12-01T00:00:00Z to 2025-12-03T00:00:00Z', {
+        selector: 'dd',
+      }),
+    ).toBeVisible();
+    expect(within(card).getByText(/All five metric details unavailable/)).toBeVisible();
+    expect(
+      within(card).getByRole('button', { name: 'Older Live GitHub saved results' }),
+    ).toHaveAttribute('aria-disabled', 'true');
+    const before = fetchMock.mock.calls.length;
+    fireEvent.click(within(card).getByRole('button', { name: 'Refresh Live GitHub history' }));
+    await waitFor(() =>
+      expect(
+        within(card).getByRole('button', { name: 'Refresh Live GitHub history' }),
+      ).toHaveAttribute('aria-disabled', 'false'),
+    );
+    expect(fetchMock.mock.calls.length - before).toBe(3);
+    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    fireEvent.click(within(card).getByRole('button', { name: 'Newest Live GitHub saved result' }));
+    expect(
+      await within(card).findByText('2026-01-01T00:00:00Z to 2026-01-03T00:00:00Z', {
+        selector: 'dd',
+      }),
+    ).toBeVisible();
+    expect(fetchMock.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+  });
+
+  it.each(['empty', 'error'] as const)(
+    'shows %s older page with explicit return to newest',
+    async (kind) => {
+      fetchMock.mockImplementation(async (input) =>
+        String(input).includes('cursor=')
+          ? kind === 'empty'
+            ? json({ runs: [], nextCursor: null })
+            : json({}, 503)
+          : historyRead(input),
+      );
+      mount();
+      await select();
+      const card = screen.getByRole('region', { name: 'Live GitHub stored results' });
+      await within(card).findByText(/Provisional deployment frequency count/);
+      fireEvent.click(
+        within(card).getByRole('button', { name: 'Older Live GitHub saved results' }),
+      );
+      if (kind === 'empty')
+        expect(await within(card).findByText('No saved results on this older page.')).toBeVisible();
+      else expect(await within(card).findByRole('alert')).toHaveTextContent('Clio is unavailable');
+      expect(
+        within(card).queryByText(/Provisional deployment frequency count/),
+      ).not.toBeInTheDocument();
+      fireEvent.click(
+        within(card).getByRole('button', { name: 'Newest Live GitHub saved result' }),
+      );
+      expect(await within(card).findByText(/Provisional deployment frequency count/)).toBeVisible();
+    },
+  );
+
+  it.each(['service', 'workspace', 'session'] as const)(
+    'fences in-flight older page after %s switch',
+    async (change) => {
+      const late = deferred();
+      let signal: AbortSignal | null | undefined;
+      fetchMock.mockImplementation(async (input, options) => {
+        if (String(input).includes('cursor=')) {
+          signal = options?.signal;
+          return late.promise;
+        }
+        return String(input).includes(scope.serviceId) ? historyRead(input) : defaultRead(input);
+      });
+      const view = mount();
+      await select();
+      await screen.findByText(/Provisional deployment frequency count/);
+      fireEvent.click(screen.getByRole('button', { name: 'Older Live GitHub saved results' }));
+      expect(screen.getByRole('status')).toHaveTextContent('Loading stored requests');
+      if (change === 'service')
+        fireEvent.change(screen.getByLabelText('Service'), { target: { value: otherService } });
+      else if (change === 'workspace')
+        fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: otherWorkspace } });
+      else {
+        identity.revision++;
+        view.refreshSession();
+      }
+      await act(async () => late.resolve(json({ runs: [olderSaved], nextCursor: null })));
+      expect(signal?.aborted).toBe(true);
+      expect(screen.queryByText(/Provisional deployment frequency count/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('2025-12-01T00:00:00Z to 2025-12-03T00:00:00Z', { selector: 'dd' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([401, 403, 404])(
+    'scoped %s on older page hides every source and fences pending newest lookup',
+    async (status) => {
+      const late = deferred();
+      let signal: AbortSignal | null | undefined;
+      fetchMock.mockImplementation(async (input, options) => {
+        if (String(input).includes('argo-collection-runs?status=')) {
+          signal = options?.signal;
+          return late.promise;
+        }
+        if (String(input).includes('cursor=')) return json({}, status);
+        return historyRead(input);
+      });
+      mount();
+      await select();
+      await screen.findByText(/Provisional deployment frequency count/);
+      fireEvent.click(screen.getByRole('button', { name: 'Older Live GitHub saved results' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('no longer accessible');
+      expect(signal?.aborted).toBe(true);
+      await act(async () => late.resolve(json({ runs: [argoCompleted] })));
+      expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    },
+  );
+});
+
+it('returning to newest cancels pending older page without losing control focus', async () => {
+  const late = deferred();
+  let signal: AbortSignal | null | undefined;
+  fetchMock.mockImplementation(async (input, options) => {
+    if (String(input).includes('cursor=')) {
+      signal = options?.signal;
+      return late.promise;
+    }
+    return historyRead(input);
+  });
+  mount();
+  await select();
+  await screen.findByText(/Provisional deployment frequency count/);
+  const older = screen.getByRole('button', { name: 'Older Live GitHub saved results' });
+  older.focus();
+  fireEvent.click(older);
+  expect(older).not.toBeDisabled();
+  expect(older).toHaveAttribute('aria-disabled', 'true');
+  expect(older).toHaveFocus();
+  const pageRequests = fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes('cursor='),
+  ).length;
+  fireEvent.click(older);
+  expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('cursor=')).length).toBe(
+    pageRequests,
+  );
+  const newest = screen.getByRole('button', { name: 'Newest Live GitHub saved result' });
+  newest.focus();
+  fireEvent.click(newest);
+  expect(newest).not.toBeDisabled();
+  expect(newest).toHaveAttribute('aria-disabled', 'true');
+  expect(newest).toHaveFocus();
+  await screen.findByText(/Provisional deployment frequency count/);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => late.resolve(json({ runs: [olderSaved], nextCursor: null })));
+  expect(
+    screen.queryByText('2025-12-01T00:00:00Z to 2025-12-03T00:00:00Z', { selector: 'dd' }),
+  ).not.toBeInTheDocument();
 });

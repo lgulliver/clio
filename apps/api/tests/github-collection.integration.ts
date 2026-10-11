@@ -1274,6 +1274,24 @@ describe('live GitHub PostgreSQL boundaries', () => {
       ])
         expect(queued.body).not.toContain(secret);
       current = member;
+      const history = await server.inject(`${base}/github-collection-runs`);
+      expect(history.statusCode).toBe(200);
+      expect(history.json()).toMatchObject({ runs: [{ status: 'pending' }], nextCursor: null });
+      expect(
+        (await server.inject(`${base}/github-collection-runs?status=succeeded`)).json(),
+      ).toEqual({ runs: [], nextCursor: null });
+      for (const query of [
+        'cursor=bad',
+        'status=failed',
+        'limit=100',
+        'status=succeeded&status=succeeded',
+      ])
+        expect((await server.inject(`${base}/github-collection-runs?${query}`)).statusCode).toBe(
+          400,
+        );
+      expect(
+        (await server.inject(`${base}/github-collection-runs?cursor=${randomUUID()}`)).statusCode,
+      ).toBe(404);
       expect(
         (
           await server.inject({
@@ -1306,4 +1324,106 @@ describe('live GitHub PostgreSQL boundaries', () => {
       await server.close();
     }
   });
+});
+
+it('saved history finds success behind 30 failures and pages tied timestamps with scoped authorization', async () => {
+  const f = await fixture();
+  const queued = await f.enqueue();
+  await processOne(pool, f.config, { provider: f.provider });
+  const repo = createGitHubRepository(pool, null);
+  const wid = f.workspaceId,
+    sid = f.serviceId;
+  const saved = await repo.getRun(member, wid, sid, queued.id);
+  await pool.query(
+    `INSERT INTO github_collection_runs(id,workspace_id,service_id,request_id,connection_revision,connection_input,grant_fingerprint,window_input,service_name,status,attempts,created_at,updated_at,completed_at,failure_code)
+       SELECT gen_random_uuid(),workspace_id,service_id,gen_random_uuid(),connection_revision,connection_input,grant_fingerprint,window_input,service_name,'failed',1,statement_timestamp(),statement_timestamp(),statement_timestamp(),'github_processing_failed'
+       FROM github_collection_runs CROSS JOIN generate_series(1,30) WHERE id=$1`,
+    [queued.id],
+  );
+  await f.enqueue();
+  expect((await repo.list(member, wid, sid)).every((run) => run.status !== 'succeeded')).toBe(true);
+  const success = await repo.listPage(member, wid, sid, { status: 'succeeded' });
+  expect(success).toEqual({ runs: [saved], nextCursor: null });
+  const first = await repo.listPage(member, wid, sid);
+  expect(first.runs).toHaveLength(25);
+  expect(first.nextCursor).toBe(first.runs.at(-1)?.id);
+  const second = await repo.listPage(member, wid, sid, { cursor: first.nextCursor });
+  expect(second.runs).toHaveLength(7);
+  expect(second.nextCursor).toBeNull();
+  const all = [...first.runs, ...second.runs];
+  expect(new Set(all.map((run) => run.id)).size).toBe(32);
+  const storage = await pool.query<{ id: string }>(
+    `SELECT id FROM github_collection_runs WHERE workspace_id=$1 AND service_id=$2 ORDER BY created_at DESC,id DESC`,
+    [wid, sid],
+  );
+  expect(all.map((run) => run.id)).toEqual(storage.rows.map((row) => row.id));
+  expect(second.runs.at(-1)).toEqual(saved);
+  for (const query of [{ cursor: randomUUID() }, { cursor: first.nextCursor, status: 'succeeded' }])
+    await expect(repo.listPage(member, wid, sid, query)).rejects.toMatchObject({ status: 404 });
+  for (const query of [
+    { cursor: 'invalid' },
+    { limit: 100 },
+    { status: 'failed' },
+    { cursor: [queued.id] },
+  ])
+    await expect(async () => repo.listPage(member, wid, sid, query)).rejects.toMatchObject({
+      status: 400,
+    });
+  const other = await createIdentityRepository(pool).createService(owner, wid, 'Other history');
+  await expect(repo.listPage(member, wid, other.id, { cursor: queued.id })).rejects.toMatchObject({
+    status: 404,
+  });
+  await expect(repo.listPage(outsider, wid, sid)).rejects.toMatchObject({ status: 404 });
+  await f.repository.disconnect(owner, wid, sid, { expectedRevision: 1 });
+  expect(await repo.getRun(member, wid, sid, queued.id)).toEqual(saved);
+  await pool.query('DELETE FROM workspace_memberships WHERE workspace_id=$1 AND user_id=$2', [
+    wid,
+    member.userId,
+  ]);
+  await expect(repo.listPage(member, wid, sid, { status: 'succeeded' })).rejects.toMatchObject({
+    status: 404,
+  });
+  await pool.query(
+    "UPDATE auth_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+    [owner.sessionId],
+  );
+  try {
+    await expect(
+      repo.listPage(owner, wid, sid, { cursor: first.nextCursor }),
+    ).rejects.toMatchObject({ status: 401 });
+  } finally {
+    await pool.query(
+      "UPDATE auth_sessions SET expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
+      [owner.sessionId],
+    );
+  }
+});
+
+it('pages successful saved windows without skips and keeps each original result', async () => {
+  const f = await fixture();
+  const saved = [];
+  for (let index = 0; index < 27; index++) {
+    const w =
+      index % 2 === 0
+        ? window
+        : { start: '2026-01-02T00:00:00.000Z', end: '2026-01-04T00:00:00.000Z' };
+    const queued = await f.enqueue(randomUUID(), 1, w);
+    await processOne(pool, f.config, { provider: f.provider });
+    saved.unshift(await f.repository.getRun(member, f.workspaceId, f.serviceId, queued.id));
+  }
+  const first = await f.repository.listPage(member, f.workspaceId, f.serviceId, {
+    status: 'succeeded',
+  });
+  expect(first.runs).toEqual(saved.slice(0, 25));
+  const second = await f.repository.listPage(member, f.workspaceId, f.serviceId, {
+    status: 'succeeded',
+    cursor: first.nextCursor,
+  });
+  expect(second).toEqual({ runs: saved.slice(25), nextCursor: null });
+  await f.repository.disconnect(owner, f.workspaceId, f.serviceId, { expectedRevision: 1 });
+  expect(
+    await createGitHubRepository(pool, null).listPage(member, f.workspaceId, f.serviceId, {
+      status: 'succeeded',
+    }),
+  ).toEqual(first);
 });
