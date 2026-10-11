@@ -16,6 +16,7 @@ import {
   type Window,
 } from './api';
 import { ArchiveHistory } from './archive-history';
+import { CoverageAssessment } from './coverage-assessment';
 
 type Props = {
   workspace: Workspace;
@@ -1033,6 +1034,7 @@ function StoredRun({ run }: { run: Run }) {
             is not a complete deployment measurement.
           </p>
           <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
+          <CoverageAssessment assessment={result.coverageAssessment} />
           <p>Quality reasons: {result.deploymentFrequency.qualityReasons.join(', ')}.</p>
           <p>Deployments per day, change failure rate and recovery time are unavailable.</p>
         </>

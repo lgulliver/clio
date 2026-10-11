@@ -6,6 +6,7 @@ import { createQueryClient } from '../../lib/query-client';
 import {
   archiveSummary,
   completed as argoCompleted,
+  coverageAssessment,
 } from '../argo-collection/fixtures.test-support';
 import { completed, json, scope } from '../github-collection/fixtures.test-support';
 import { completed as mockCompleted } from '../mock-collection/fixtures.test-support';
@@ -217,12 +218,18 @@ describe('stored results overview', () => {
     const argo = screen.getByRole('region', { name: 'Live Argo CD stored results' });
     expect(await within(github).findByText(/GitHub history retrieval complete/)).toBeVisible();
     expect(await within(argo).findByText('Source transport coverage is incomplete.')).toBeVisible();
+    expect(
+      within(argo).getByText(/This older result has no saved coverage assessment/),
+    ).toBeVisible();
     expect(within(github).queryByText(/Fictional/)).not.toBeInTheDocument();
     expect(within(argo).queryByText(/Fictional/)).not.toBeInTheDocument();
   });
 
   it('separates archived capture bounds from reporting window and receiver cutoff', async () => {
-    const saved = { ...argoCompleted, result: { ...argoCompleted.result, archiveSummary } };
+    const saved = {
+      ...argoCompleted,
+      result: { ...argoCompleted.result, archiveSummary, coverageAssessment },
+    };
     fetchMock.mockImplementation(async (input) =>
       String(input).endsWith('/argo-collection-runs')
         ? json({ runs: [saved] })
@@ -236,6 +243,9 @@ describe('stored results overview', () => {
     ).toBeVisible();
     expect(within(card).getByText(/Coverage remains incomplete/)).toBeVisible();
     expect(within(card).getByText(/Archive gaps: 1/)).toBeVisible();
+    expect(
+      within(card).getByRole('region', { name: 'Coverage evidence needed' }),
+    ).toHaveTextContent('Unknown qualification across retained history: 2');
   });
   it.each([null, '2026-01-02T00:00:00Z'])(
     'shows Argo observation limits and gaps with observation start %s',

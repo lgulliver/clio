@@ -10,6 +10,7 @@ import {
   archiveSummary,
   completed,
   connection,
+  coverageAssessment,
   json,
   queued,
   scope,
@@ -90,7 +91,10 @@ beforeEach(() => {
 
 describe('live Argo workflow', () => {
   it('member reads sealed capture bounds and missing intervals without archive write controls', async () => {
-    const captured = { ...completed, result: { ...completed.result, archiveSummary } };
+    const captured = {
+      ...completed,
+      result: { ...completed.result, archiveSummary, coverageAssessment },
+    };
     fetchMock.mockImplementation(async (input) =>
       String(input).endsWith('/argo-collection-runs')
         ? json({ runs: [captured] })
@@ -108,6 +112,12 @@ describe('live Argo workflow', () => {
     expect(within(detail).getByText(/Metric evidence uses current grants/)).toBeVisible();
     expect(within(detail).getByText(/Coverage remains incomplete/)).toBeVisible();
     expect(screen.queryByLabelText('Source history archive')).not.toBeInTheDocument();
+    expect(
+      within(detail).getByRole('region', { name: 'Coverage evidence needed' }),
+    ).toHaveTextContent('Unknown qualification across retained history: 2');
+    expect(
+      within(detail).getByText(/authoritative census covering every production deployment path/),
+    ).toBeVisible();
     expect(posts()).toHaveLength(0);
   });
   it('owner selects only granted archive and save acknowledgement preserves exact selection', async () => {
@@ -156,6 +166,9 @@ describe('live Argo workflow', () => {
       'does not establish complete metric coverage',
     );
     expect(within(detail).getByText(/Unknown qualification: 2/)).toBeVisible();
+    expect(
+      within(detail).getByText(/This older result has no saved coverage assessment/),
+    ).toBeVisible();
     expect(
       within(detail).getByText(/Retained receipts across all dates at cutoff: 4/),
     ).toBeVisible();

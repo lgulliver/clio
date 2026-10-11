@@ -48,6 +48,18 @@ export type Source = {
   archiveProducers?: ArchiveProducer[];
 };
 export type Window = { start: string; end: string };
+export type CoverageAssessment = {
+  version: 1;
+  populationEvidence: 'not_supplied';
+  firstDeploymentHistory: 'not_supplied';
+  recoveryEvidence: 'not_supplied';
+  unresolvedQualificationCount: number;
+  historyQualifyingCount: number;
+  incompleteChangeLinkCount: number;
+  windowPopulationCount: number;
+  unknownFailureCount: number;
+  unknownReworkCount: number;
+};
 export type Result = Scope & {
   provider: 'argocd';
   mode: 'live';
@@ -56,6 +68,7 @@ export type Result = Scope & {
   window: Window & { timezone: 'UTC'; calendarDays: number };
   evidenceCutoff: string;
   transportComplete: false;
+  coverageAssessment?: CoverageAssessment;
   archiveSummary?: ArchiveSummary;
   enrichmentSummary?: {
     retainedReceiptCount: number;
@@ -444,9 +457,66 @@ export function parseSavedConnection(
     return fail();
   return parsed;
 }
+function coverageAssessment(
+  value: unknown,
+  totals: {
+    unknownCount: number;
+    qualifyingCount: number;
+    frequencyCount: number;
+  },
+) {
+  const row = exact(value, [
+    'version',
+    'populationEvidence',
+    'firstDeploymentHistory',
+    'recoveryEvidence',
+    'unresolvedQualificationCount',
+    'historyQualifyingCount',
+    'incompleteChangeLinkCount',
+    'windowPopulationCount',
+    'unknownFailureCount',
+    'unknownReworkCount',
+  ]);
+  const unresolvedQualificationCount = integer(row.unresolvedQualificationCount),
+    historyQualifyingCount = integer(row.historyQualifyingCount),
+    incompleteChangeLinkCount = integer(row.incompleteChangeLinkCount),
+    windowPopulationCount = integer(row.windowPopulationCount),
+    unknownFailureCount = integer(row.unknownFailureCount),
+    unknownReworkCount = integer(row.unknownReworkCount);
+  if (
+    row.version !== 1 ||
+    row.populationEvidence !== 'not_supplied' ||
+    row.firstDeploymentHistory !== 'not_supplied' ||
+    row.recoveryEvidence !== 'not_supplied' ||
+    unresolvedQualificationCount !== totals.unknownCount ||
+    historyQualifyingCount > totals.qualifyingCount ||
+    windowPopulationCount !== totals.frequencyCount ||
+    windowPopulationCount > historyQualifyingCount ||
+    // Version 1 pins current adapter behavior: no complete links or known failure/rework.
+    // Adding that evidence requires a new assessment version in both parsers, preserving old reads.
+    incompleteChangeLinkCount !== historyQualifyingCount ||
+    unknownFailureCount !== windowPopulationCount ||
+    unknownReworkCount !== windowPopulationCount
+  )
+    return fail();
+  return {
+    version: 1 as const,
+    populationEvidence: 'not_supplied' as const,
+    firstDeploymentHistory: 'not_supplied' as const,
+    recoveryEvidence: 'not_supplied' as const,
+    unresolvedQualificationCount,
+    historyQualifyingCount,
+    incompleteChangeLinkCount,
+    windowPopulationCount,
+    unknownFailureCount,
+    unknownReworkCount,
+  };
+}
+
 function result(value: unknown, scope: Scope, revision: number): Result {
   const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'coverageAssessment') ? ['coverageAssessment'] : []),
     ...(Object.hasOwn(raw, 'enrichmentSummary') ? ['enrichmentSummary'] : []),
     ...(Object.hasOwn(raw, 'archiveSummary') ? ['archiveSummary'] : []),
     'mode',
@@ -591,6 +661,15 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     },
     changeFailureRate: null,
     failedDeploymentRecoveryTime: null,
+    ...(Object.hasOwn(item, 'coverageAssessment')
+      ? {
+          coverageAssessment: coverageAssessment(item.coverageAssessment, {
+            unknownCount,
+            qualifyingCount,
+            frequencyCount: count,
+          }),
+        }
+      : {}),
     ...(Object.hasOwn(item, 'enrichmentSummary')
       ? { enrichmentSummary: enrichmentSummary(item.enrichmentSummary) }
       : {}),

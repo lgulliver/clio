@@ -6,6 +6,7 @@ import {
 } from '@clio/adapters';
 import { expect, it } from 'vitest';
 import { captureArgo } from '../src/features/argo-collection/capture.ts';
+import { assessArgoCoverage } from '../src/features/argo-collection/coverage-assessment.ts';
 import { enrichmentCaptureReserve } from '../src/features/argo-collection/enrichment-budget.ts';
 import { boundedJson, maxBytes } from '../src/features/argo-collection/history.ts';
 import { type ArgoConnection, windowInput } from '../src/features/argo-collection/input.ts';
@@ -374,4 +375,100 @@ it('captures byte-budgeted assertions with unique maximum-length evidence and po
   expect(capture.evidence.argoEnrichments).toHaveLength(pairs * 2);
   expect(capture.result.qualifyingCount).toBe(1);
   expect(Buffer.byteLength(boundedJson(capture))).toBeLessThanOrEqual(maxBytes);
+});
+
+it('saved coverage assessment changes with eligible exposure, never substitutes provenance or zero gaps for census', () => {
+  const f = fixture();
+  const before = captureArgo({ ...f.input, argoEnrichments: [f.build] }).result;
+  const after = captureArgo({ ...f.input, argoEnrichments: [f.build, f.exposure] }).result;
+  expect(before.coverageAssessment).toMatchObject({
+    populationEvidence: 'not_supplied',
+    unresolvedQualificationCount: 1,
+    windowPopulationCount: 0,
+  });
+  expect(after.coverageAssessment).toMatchObject({
+    populationEvidence: 'not_supplied',
+    firstDeploymentHistory: 'not_supplied',
+    recoveryEvidence: 'not_supplied',
+    unresolvedQualificationCount: 0,
+    windowPopulationCount: 1,
+    historyQualifyingCount: 1,
+    incompleteChangeLinkCount: 1,
+    unknownFailureCount: 1,
+    unknownReworkCount: 1,
+  });
+  expect(after.coverage).toEqual(before.coverage);
+  expect(before.coverageAssessment?.windowPopulationCount).toBe(0);
+});
+it('assesses half-open reporting population separately from pre-window first-deployment history and all retained unknowns', () => {
+  const f = fixture();
+  const snapshot = captureArgo({ ...f.input, argoEnrichments: [f.exposure] }).snapshot;
+  const first = snapshot.deployments[0];
+  if (!first) throw new Error('Missing fictional deployment');
+  const dates = [
+    '2025-12-31T23:59:59.999999Z',
+    snapshot.window.start,
+    '2026-01-02T23:59:59.999999Z',
+    snapshot.window.end,
+  ];
+  const data = {
+    ...snapshot,
+    deployments: [
+      ...dates.map((effective_at, index) => ({ ...first, id: `fixture-${index}`, effective_at })),
+      { ...first, id: 'unknown', qualification: 'unknown' as const, effective_at: null },
+    ],
+  };
+  expect(assessArgoCoverage(data)).toMatchObject({
+    unresolvedQualificationCount: 1,
+    historyQualifyingCount: 3,
+    incompleteChangeLinkCount: 3,
+    windowPopulationCount: 2,
+    unknownFailureCount: 2,
+    unknownReworkCount: 2,
+  });
+});
+it('reads old results without inventing assessments and rejects private or contradictory assessment fields', () => {
+  const f = fixture();
+  const result = captureArgo({ ...f.input, argoEnrichments: [f.exposure] }).result;
+  const { coverageAssessment: assessment, ...old } = result;
+  expect(parseResult(old, f.input.connection, f.input.window)).not.toHaveProperty(
+    'coverageAssessment',
+  );
+  for (const value of [
+    null,
+    { ...assessment, token: 'private' },
+    { ...assessment, populationEvidence: 'complete' },
+    { ...assessment, windowPopulationCount: 0 },
+    { ...assessment, historyQualifyingCount: 0 },
+    { ...assessment, unresolvedQualificationCount: 1 },
+    { ...assessment, incompleteChangeLinkCount: 0 },
+    { ...assessment, unknownFailureCount: 0 },
+    { ...assessment, unknownReworkCount: -1 },
+  ]) {
+    expect(() =>
+      parseResult({ ...result, coverageAssessment: value }, f.input.connection, f.input.window),
+    ).toThrow();
+  }
+});
+
+it('empty evidence and zero gaps remain an unassessed population, never a complete zero measurement', () => {
+  const f = fixture();
+  const captured = captureArgo({
+    ...f.input,
+    evidence: { deployments: [], statuses: [] },
+    stats: { ...f.input.stats, retainedReceiptCount: 0, retainedEvidenceCount: 0 },
+  });
+  expect(captured.result.coverageAssessment).toMatchObject({
+    populationEvidence: 'not_supplied',
+    windowPopulationCount: 0,
+    unresolvedQualificationCount: 0,
+  });
+  expect(captured.result.deploymentFrequency).toMatchObject({
+    count: 0,
+    deploymentsPerDay: null,
+    status: 'provisional',
+  });
+  expect(captured.snapshot.collection_complete).toBe(false);
+  expect(captured.snapshot.deployment_history_complete).toBe(false);
+  expect(captured.snapshot.recovery_evidence_complete).toBe(false);
 });

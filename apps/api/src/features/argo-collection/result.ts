@@ -2,6 +2,7 @@ import { oemsContract } from '@clio/oems';
 import { storedRevision } from '../github-collection/db-value.ts';
 import { object, uuid } from '../identity/input.ts';
 import { parseArchiveSummary } from './archive-summary.ts';
+import { parseCoverageAssessment } from './coverage-assessment.ts';
 import {
   type ArgoConnection,
   count,
@@ -61,6 +62,7 @@ export function parseResult(
   pinnedWindow: ReturnType<typeof windowInput>,
 ) {
   const row = object(value, [
+    'coverageAssessment',
     'archiveSummary',
     'enrichmentSummary',
     'mode',
@@ -159,6 +161,15 @@ export function parseResult(
     throw new Error('Invalid archive result');
   return {
     ...(archiveSummary ? { archiveSummary } : {}),
+    ...(Object.hasOwn(row, 'coverageAssessment')
+      ? {
+          coverageAssessment: parseCoverageAssessment(row.coverageAssessment, {
+            unknownCount,
+            qualifyingCount,
+            frequencyCount,
+          }),
+        }
+      : {}),
     ...(Object.hasOwn(row, 'enrichmentSummary')
       ? { enrichmentSummary: parseSummary(row.enrichmentSummary, connection) }
       : {}),

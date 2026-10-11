@@ -7,6 +7,7 @@ import {
 } from '@clio/adapters';
 import { calculate, oemsContract } from '@clio/oems';
 import type { ArchiveSummary } from './archive-summary.ts';
+import { assessArgoCoverage } from './coverage-assessment.ts';
 import { boundedJson } from './history.ts';
 import { type ArgoConnection, instant, timestamp, type windowInput } from './input.ts';
 import { parseResult } from './result.ts';
@@ -121,6 +122,7 @@ export function captureArgo(input: {
       provider: 'argocd',
       transportComplete: false,
       ...input.stats,
+      coverageAssessment: assessArgoCoverage(snapshot),
       enrichmentSummary: {
         retainedReceiptCount: input.argoEnrichments?.length ?? 0,
         consumerExposureCount:

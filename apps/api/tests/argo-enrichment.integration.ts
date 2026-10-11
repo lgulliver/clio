@@ -718,12 +718,27 @@ it('concurrent exposure arriving during cutoff capture waits; next result alone 
     expect(original).toMatchObject({
       qualifyingCount: 0,
       enrichmentSummary: { consumerExposureCount: 0 },
+      coverageAssessment: {
+        populationEvidence: 'not_supplied',
+        unresolvedQualificationCount: 1,
+        windowPopulationCount: 0,
+      },
     });
+    // Fixture exposes now, after the closed January window: lifetime qualification
+    // changes, but reporting-window/history cohorts correctly remain empty.
     const next = await f.enqueue();
     await createArgoWorker(pool, f.config).runOnce();
     expect((await f.repo.getRun(member, f.w, f.s, next.id)).result).toMatchObject({
       qualifyingCount: 1,
       enrichmentSummary: { consumerExposureCount: 1 },
+      coverageAssessment: {
+        populationEvidence: 'not_supplied',
+        unresolvedQualificationCount: 0,
+        historyQualifyingCount: 0,
+        windowPopulationCount: 0,
+        incompleteChangeLinkCount: 0,
+        unknownFailureCount: 0,
+      },
     });
     expect((await f.repo.getRun(member, f.w, f.s, run.id)).result).toEqual(original);
   } finally {

@@ -5,6 +5,7 @@ import {
   archiveSummary,
   completed,
   connection,
+  coverageAssessment,
   result,
   scope,
   source,
@@ -319,4 +320,28 @@ describe('live Argo boundary', () => {
         closedWindow(start ?? '', end ?? '', Date.parse('2026-04-01T12:00:00Z')),
       ).toThrow();
   });
+});
+
+it('parses saved assessment and leaves older assessments unknown; rejects hidden or contradictory claims', () => {
+  const saved = { ...result, coverageAssessment };
+  expect(parseRun({ run: { ...completed, result: saved } }, scope).result).toEqual(saved);
+  expect(parseRun({ run: completed }, scope).result).not.toHaveProperty('coverageAssessment');
+  for (const assessment of [
+    null,
+    { ...coverageAssessment, token: 'private' },
+    { ...coverageAssessment, populationEvidence: 'complete' },
+    { ...coverageAssessment, version: 2 },
+    { ...coverageAssessment, unresolvedQualificationCount: 0 },
+    { ...coverageAssessment, historyQualifyingCount: 1 },
+    { ...coverageAssessment, windowPopulationCount: 1 },
+    { ...coverageAssessment, unknownFailureCount: 1 },
+    { ...coverageAssessment, incompleteChangeLinkCount: -1 },
+  ]) {
+    expect(() =>
+      parseRun(
+        { run: { ...completed, result: { ...result, coverageAssessment: assessment } } },
+        scope,
+      ),
+    ).toThrow();
+  }
 });

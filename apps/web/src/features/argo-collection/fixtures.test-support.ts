@@ -1,5 +1,5 @@
 import { oemsContract } from '@clio/oems/contract';
-import type { Connection, Result, Run } from './api';
+import type { Connection, CoverageAssessment, Result, Run } from './api';
 // Fictional evidence for browser boundary tests; no provider calls.
 export const scope = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
@@ -110,3 +110,16 @@ export function json(value: unknown, status = 200) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+export const coverageAssessment: CoverageAssessment = {
+  version: 1,
+  populationEvidence: 'not_supplied',
+  firstDeploymentHistory: 'not_supplied',
+  recoveryEvidence: 'not_supplied',
+  unresolvedQualificationCount: 2,
+  historyQualifyingCount: 0,
+  incompleteChangeLinkCount: 0,
+  windowPopulationCount: 0,
+  unknownFailureCount: 0,
+  unknownReworkCount: 0,
+};
