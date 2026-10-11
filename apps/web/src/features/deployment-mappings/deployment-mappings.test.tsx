@@ -1,11 +1,14 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
 import { createAppRouter } from '../../router';
+import { SessionProvider, useSession } from '../identity/session';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
+import { DeploymentMappings } from './deployment-mappings';
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const otherWorkspace = '22222222-2222-4222-8222-222222222222';
@@ -634,5 +637,89 @@ describe('mock deployment settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Mock deployment settings for Billing' }),
     ).toBeVisible();
+  });
+});
+
+function SetupMapping({ setup }: { setup: SourceSetupPresentation }) {
+  const session = useSession();
+  return session.status === 'ready' ? (
+    <DeploymentMappings
+      workspace={{ id: workspaceId, name: 'First', role }}
+      serviceId={serviceId}
+      serviceName="Delivery"
+      userId="alice"
+      validSelection={() => true}
+      setup={setup}
+    />
+  ) : null;
+}
+describe('mock setup presentation', () => {
+  it('keeps editor and history mounted, fences dirty drafts, and restores readiness after reverting', async () => {
+    const client = createQueryClient(),
+      onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    const content = (step: SourceSetupPresentation['step']) => (
+      <QueryClientProvider client={client}>
+        <SessionProvider>
+          <SetupMapping setup={{ step, onStatus: (status) => onStatus(status), onAccessLost }} />
+        </SessionProvider>
+      </QueryClientProvider>
+    );
+    const view = render(content('configure'));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    const field = screen.getByLabelText('Production environment (mock)');
+    const queue = screen.getByRole('button', { name: 'Queue mock collection', hidden: true });
+    expect(queue).not.toBeVisible();
+    fireEvent.change(field, { target: { value: 'other' } });
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(false));
+    view.rerender(content('collect'));
+    expect(field).not.toBeVisible();
+    expect(queue).toBeVisible();
+    view.rerender(content('configure'));
+    expect(screen.getByLabelText('Production environment (mock)')).toBe(field);
+    expect(field).toHaveValue('other');
+    fireEvent.change(field, { target: { value: 'production' } });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    view.unmount();
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: false });
+  });
+  it('cannot advance until mock settings are saved and propagates denied configuration reads', async () => {
+    mappingHandler = () => json({ mapping: null });
+    const client = createQueryClient(),
+      onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <SessionProvider>
+          <SetupMapping setup={{ step: 'configure', onStatus, onAccessLost }} />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText('No mock settings saved for this service.');
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: false,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    mappingHandler = () => json({}, 403);
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['identity'] });
+    });
+    await waitFor(() => expect(onAccessLost).toHaveBeenCalled());
+    expect(onStatus.mock.lastCall?.[0].ready).toBe(false);
   });
 });

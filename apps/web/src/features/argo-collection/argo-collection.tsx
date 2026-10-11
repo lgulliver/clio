@@ -3,6 +3,7 @@ import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MetricResults } from '../measurements/metric-results';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import {
   type Connection,
   closedWindow,
@@ -20,6 +21,7 @@ import { ArchiveHistory } from './archive-history';
 import { CoverageAssessment } from './coverage-assessment';
 
 type Props = {
+  setup?: SourceSetupPresentation;
   workspace: Workspace;
   serviceId: string;
   serviceName: string;
@@ -35,7 +37,7 @@ export function ArgoCollection(props: Props) {
     />
   );
 }
-function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }: Props) {
+function LiveScope({ workspace, serviceId, serviceName, userId, validSelection, setup }: Props) {
   const session = useSession(),
     client = useQueryClient(),
     revision = session.revision;
@@ -67,6 +69,13 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [conflict, setConflict] = useState(false);
+  const setupRef = useRef(setup);
+  const lastStatus = useRef('');
+  setupRef.current = setup;
+  const [dirty, setDirty] = useState(true);
+  const [confirmation, setConfirmation] = useState(false);
+  const [detailState, setDetailState] = useState({ busy: false, failed: false });
+  const [writeDenied, setWriteDenied] = useState(false);
   const [selected, setSelected] = useState('');
   const selection = useRef('');
   const valid = useCallback(
@@ -112,6 +121,8 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
     mounted.current = true;
     return () => {
       mounted.current = false;
+      lastStatus.current = '';
+      setupRef.current?.onStatus({ ready: false, busy: false, hasSavedResult: false });
       controller.current?.abort();
       void client.cancelQueries({ queryKey: key });
       client.removeQueries({ queryKey: key });
@@ -123,11 +134,13 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
       if (failure.status === 401) session.expire(revision);
       if (failure.status === 404 || (!write && failure.status === 403)) {
         setUnavailable(true);
+        setupRef.current?.onAccessLost();
         controller.current?.abort();
         void client.cancelQueries({ queryKey: key });
         client.removeQueries({ queryKey: key });
       }
       if (write && failure.status === 403) {
+        setWriteDenied(true);
         void client.invalidateQueries({ queryKey: ['identity', userId, revision, 'workspaces'] });
       }
     },
@@ -261,6 +274,45 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
             grant.policyReference === saved.archiveProducer.policyReference,
         )));
 
+  const setupReady =
+    valid() &&
+    editable &&
+    configured &&
+    saved?.active === true &&
+    !unavailable &&
+    !conflict &&
+    !writeDenied &&
+    !detailState.failed &&
+    !dirty &&
+    !connectionQuery.isError &&
+    !connectionQuery.isPending &&
+    !runs.isError &&
+    !runs.isPending &&
+    !staleConnection;
+  const setupBusy = busy || confirmation;
+  const hasSavedResult =
+    valid() &&
+    !unavailable &&
+    !runs.isError &&
+    (runs.data?.some(
+      (run) =>
+        run.status === 'succeeded' &&
+        run.result !== null &&
+        run.connectionRevision === saved?.revision,
+    ) ??
+      false);
+  useEffect(() => {
+    const signature = JSON.stringify([
+      setupReady,
+      setupBusy,
+      hasSavedResult,
+      saved?.revision,
+      !!setupRef.current,
+    ]);
+    if (lastStatus.current === signature) return;
+    lastStatus.current = signature;
+    setupRef.current?.onStatus({ ready: setupReady, busy: setupBusy, hasSavedResult });
+  });
   return (
     <section
       className="mt-8 border-t border-slate-200 pt-6"
@@ -287,158 +339,165 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                   workspace before connecting or collecting.
                 </p>
               )}
-              <p className="mt-3">
-                {saved
-                  ? `${saved.active ? 'Connected' : 'Disconnected'}: ${saved.applicationName} · ${saved.productionEnvironment} · Saved revision ${saved.revision}`
-                  : 'No live Argo connection saved.'}
-              </p>
-              {saved && (
-                <>
-                  <p>
-                    Application namespace: {saved.applicationNamespace}. Instance: {saved.instance}.
-                    Saved at {saved.observedAt}.
-                  </p>
-                  <p>
-                    {(saved.enrichmentProducers ?? []).length === 0
-                      ? 'No independent evidence producers selected; native Argo status leaves production exposure unknown.'
-                      : `Independent evidence producers selected: ${saved.enrichmentProducers?.length}.`}
-                  </p>
-                  {saved.exposurePolicyReference && (
-                    <p>
-                      Legacy native policy reference: {saved.exposurePolicyReference}. Native status
-                      alone does not confirm exposure.
-                    </p>
-                  )}
-                  {(saved.enrichmentProducers ?? []).map((producer) => (
-                    <p key={producer.producerId}>
-                      {producer.capability === 'consumer_exposure'
-                        ? 'Consumer exposure'
-                        : 'Build provenance'}
-                      : {producer.policyReference}.
-                    </p>
-                  ))}
-                  <p>
-                    {saved.archiveProducer
-                      ? `Source history archive selected: ${saved.archiveProducer.policyReference}.`
-                      : 'No source history archive selected.'}
-                  </p>
-                </>
-              )}
-              {connectionQuery.data.archiveStatus && (
-                <ArchiveHistory summary={connectionQuery.data.archiveStatus} />
-              )}
-              {editable && configured && (
-                <ConnectionForm
-                  key={`connection:${saved?.revision ?? 0}:${JSON.stringify(connectionQuery.data.sources)}`}
-                  connection={saved}
-                  sources={connectionQuery.data.sources}
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  save={async (draft) => {
-                    const expectedRevision = saved?.revision ?? null;
-                    const granted = connectionQuery.data?.sources.find(
-                      (source) => source.sourceId === draft.sourceId,
-                    );
-                    if (!granted) return;
-
-                    await write(
-                      'argo-connection',
-                      { ...draft, expectedRevision },
-                      (value) =>
-                        parseSavedConnection(value, scope, expectedRevision, true, {
-                          sourceId: granted.sourceId,
-                          applicationName: granted.applicationName,
-                          applicationNamespace: granted.applicationNamespace,
-                          instance: granted.instance,
-                          productionEnvironment: granted.environment,
-                          exposurePolicyReference: draft.exposurePolicyReference,
-                          enrichmentProducers: (granted.enrichmentProducers ?? []).filter((entry) =>
-                            draft.enrichmentProducerIds.includes(entry.producerId),
-                          ),
-                          archiveProducer:
-                            granted.archiveProducers?.find(
-                              (entry) => entry.producerId === draft.archiveProducerId,
-                            ) ?? null,
-                        }),
-                      (connection) => {
-                        client.setQueryData(connectionKey, {
-                          connection,
-                          configured,
-                          sources: connectionQuery.data?.sources ?? [],
-                        });
-                        setNotice('Argo connection saved.');
-                      },
-                    );
-                  }}
-                />
-              )}
-              {editable && saved?.active && (
-                <button
-                  className="control mt-3"
-                  type="button"
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  onClick={() =>
-                    void write(
-                      'argo-connection/disconnect',
-                      { expectedRevision: saved.revision },
-                      (value) => parseSavedConnection(value, scope, saved.revision, false, saved),
-                      (connection) => {
-                        client.setQueryData(connectionKey, {
-                          connection,
-                          configured,
-                          sources: connectionQuery.data?.sources ?? [],
-                        });
-                        setNotice(
-                          'Disconnected from Clio ingestion. Retained history remains available.',
-                        );
-                        void runs.refetch();
-                      },
-                    )
-                  }
-                >
-                  Disconnect Argo
-                </button>
-              )}
-              {!editable && (
+              <div hidden={setup?.step === 'collect'}>
                 <p className="mt-3">
-                  Only workspace owners can save, disconnect or collect. Members can read
-                  connections and history.
+                  {saved
+                    ? `${saved.active ? 'Connected' : 'Disconnected'}: ${saved.applicationName} · ${saved.productionEnvironment} · Saved revision ${saved.revision}`
+                    : 'No live Argo connection saved.'}
                 </p>
-              )}
+                {saved && (
+                  <>
+                    <p>
+                      Application namespace: {saved.applicationNamespace}. Instance:{' '}
+                      {saved.instance}. Saved at {saved.observedAt}.
+                    </p>
+                    <p>
+                      {(saved.enrichmentProducers ?? []).length === 0
+                        ? 'No independent evidence producers selected; native Argo status leaves production exposure unknown.'
+                        : `Independent evidence producers selected: ${saved.enrichmentProducers?.length}.`}
+                    </p>
+                    {saved.exposurePolicyReference && (
+                      <p>
+                        Legacy native policy reference: {saved.exposurePolicyReference}. Native
+                        status alone does not confirm exposure.
+                      </p>
+                    )}
+                    {(saved.enrichmentProducers ?? []).map((producer) => (
+                      <p key={producer.producerId}>
+                        {producer.capability === 'consumer_exposure'
+                          ? 'Consumer exposure'
+                          : 'Build provenance'}
+                        : {producer.policyReference}.
+                      </p>
+                    ))}
+                    <p>
+                      {saved.archiveProducer
+                        ? `Source history archive selected: ${saved.archiveProducer.policyReference}.`
+                        : 'No source history archive selected.'}
+                    </p>
+                  </>
+                )}
+                {connectionQuery.data.archiveStatus && (
+                  <ArchiveHistory summary={connectionQuery.data.archiveStatus} />
+                )}
+                {editable && configured && (
+                  <ConnectionForm
+                    key={`connection:${saved?.revision ?? 0}:${JSON.stringify(connectionQuery.data.sources)}`}
+                    connection={saved}
+                    sources={connectionQuery.data.sources}
+                    onDirty={setDirty}
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    save={async (draft) => {
+                      const expectedRevision = saved?.revision ?? null;
+                      const granted = connectionQuery.data?.sources.find(
+                        (source) => source.sourceId === draft.sourceId,
+                      );
+                      if (!granted) return;
+
+                      await write(
+                        'argo-connection',
+                        { ...draft, expectedRevision },
+                        (value) =>
+                          parseSavedConnection(value, scope, expectedRevision, true, {
+                            sourceId: granted.sourceId,
+                            applicationName: granted.applicationName,
+                            applicationNamespace: granted.applicationNamespace,
+                            instance: granted.instance,
+                            productionEnvironment: granted.environment,
+                            exposurePolicyReference: draft.exposurePolicyReference,
+                            enrichmentProducers: (granted.enrichmentProducers ?? []).filter(
+                              (entry) => draft.enrichmentProducerIds.includes(entry.producerId),
+                            ),
+                            archiveProducer:
+                              granted.archiveProducers?.find(
+                                (entry) => entry.producerId === draft.archiveProducerId,
+                              ) ?? null,
+                          }),
+                        (connection) => {
+                          client.setQueryData(connectionKey, {
+                            connection,
+                            configured,
+                            sources: connectionQuery.data?.sources ?? [],
+                          });
+                          setWriteDenied(false);
+                          setNotice('Argo connection saved.');
+                        },
+                      );
+                    }}
+                  />
+                )}
+                {editable && saved?.active && (
+                  <button
+                    className="control mt-3"
+                    type="button"
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    onClick={() =>
+                      void write(
+                        'argo-connection/disconnect',
+                        { expectedRevision: saved.revision },
+                        (value) => parseSavedConnection(value, scope, saved.revision, false, saved),
+                        (connection) => {
+                          client.setQueryData(connectionKey, {
+                            connection,
+                            configured,
+                            sources: connectionQuery.data?.sources ?? [],
+                          });
+                          setNotice(
+                            'Disconnected from Clio ingestion. Retained history remains available.',
+                          );
+                          void runs.refetch();
+                        },
+                      )
+                    }
+                  >
+                    Disconnect Argo
+                  </button>
+                )}
+                {!editable && (
+                  <p className="mt-3">
+                    Only workspace owners can save, disconnect or collect. Members can read
+                    connections and history.
+                  </p>
+                )}
+              </div>
               {staleConnection && (
                 <p role="status">
                   Granted source changed. An owner must review the grant and save the connection
                   again before collecting. Retained history remains available.
                 </p>
               )}
-              {saved?.active && editable && configured && !staleConnection && (
-                <CollectionForm
-                  key={`collection:${saved.revision}`}
-                  connection={saved}
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  active={active}
-                  reviewHistory={refreshHistory}
-                  collect={async (body) =>
-                    write(
-                      'argo-collection-runs',
-                      body,
-                      (value) => parseRun(value, scope, saved.revision, undefined, body.window),
-                      (run) => {
-                        setNotice(
-                          `Collection confirmed for saved revision ${run.connectionRevision}.`,
-                        );
-                        polls.current = 0;
-                        setPollLimit(false);
-                        client.setQueryData<Run[]>(runsKey, (previous) =>
-                          [run, ...(previous ?? []).filter((item) => item.id !== run.id)]
-                            .sort(newestFirst)
-                            .slice(0, 25),
-                        );
-                        void runs.refetch();
-                      },
-                    )
-                  }
-                />
-              )}
+              <div hidden={setup?.step === 'configure'}>
+                {saved?.active && editable && configured && !staleConnection && (
+                  <CollectionForm
+                    key={`collection:${saved.revision}`}
+                    connection={saved}
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    active={active}
+                    onConfirmation={setConfirmation}
+                    reviewHistory={refreshHistory}
+                    collect={async (body) =>
+                      write(
+                        'argo-collection-runs',
+                        body,
+                        (value) => parseRun(value, scope, saved.revision, undefined, body.window),
+                        (run) => {
+                          setNotice(
+                            `Collection confirmed for saved revision ${run.connectionRevision}.`,
+                          );
+                          polls.current = 0;
+                          setPollLimit(false);
+                          client.setQueryData<Run[]>(runsKey, (previous) =>
+                            [run, ...(previous ?? []).filter((item) => item.id !== run.id)]
+                              .sort(newestFirst)
+                              .slice(0, 25),
+                          );
+                          void runs.refetch();
+                        },
+                      )
+                    }
+                  />
+                )}
+              </div>
             </>
           )}
           <button
@@ -452,38 +511,44 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
           {busy && <p role="status">Confirming request…</p>}
           {notice && <p role="status">{notice}</p>}
           {error && <p role="alert">{error}</p>}
-          <h4 className="mt-6 text-lg font-semibold">Live Argo history</h4>
-          {runs.isPending ? (
-            <p role="status">Loading live Argo history…</p>
-          ) : runs.isError ? (
+          {setup?.step === 'configure' && runs.isError && (
             <p role="alert">{errorMessage(runs.error)}</p>
-          ) : runs.data.length === 0 ? (
-            <p>No live Argo runs yet.</p>
-          ) : (
-            <ol aria-label="Latest 25 live Argo runs" className="mt-3 space-y-3">
-              {runs.data.map((run) => (
-                <li key={run.id} className="rounded border border-slate-200 p-4">
-                  <p>
-                    Saved connection revision {run.connectionRevision} · {run.status}
-                  </p>
-                  <p>
-                    Queued {run.createdAt}. Updated {run.updatedAt}. Attempts: {run.attempts} of 3.
-                  </p>
-                  <button
-                    className="control mt-2"
-                    type="button"
-                    aria-pressed={selected === run.id}
-                    onClick={() => {
-                      selection.current = run.id;
-                      setSelected(run.id);
-                    }}
-                  >
-                    View run {run.createdAt}
-                  </button>
-                </li>
-              ))}
-            </ol>
           )}
+          <div hidden={setup?.step === 'configure'}>
+            <h4 className="mt-6 text-lg font-semibold">Live Argo history</h4>
+            {runs.isPending ? (
+              <p role="status">Loading live Argo history…</p>
+            ) : runs.isError ? (
+              <p role="alert">{errorMessage(runs.error)}</p>
+            ) : runs.data.length === 0 ? (
+              <p>No live Argo runs yet.</p>
+            ) : (
+              <ol aria-label="Latest 25 live Argo runs" className="mt-3 space-y-3">
+                {runs.data.map((run) => (
+                  <li key={run.id} className="rounded border border-slate-200 p-4">
+                    <p>
+                      Saved connection revision {run.connectionRevision} · {run.status}
+                    </p>
+                    <p>
+                      Queued {run.createdAt}. Updated {run.updatedAt}. Attempts: {run.attempts} of
+                      3.
+                    </p>
+                    <button
+                      className="control mt-2"
+                      type="button"
+                      aria-pressed={selected === run.id}
+                      onClick={() => {
+                        selection.current = run.id;
+                        setSelected(run.id);
+                      }}
+                    >
+                      View run {run.createdAt}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
           {active && (
             <p role="status">
               Collection pending or running. History refreshes while processing continues.
@@ -494,18 +559,21 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
               Automatic refresh paused. Refresh connection and runs to check progress.
             </p>
           )}
-          {selected && (
-            <RunDetail
-              key={selected}
-              id={selected}
-              scope={scope}
-              path={path}
-              queryKey={detailKey}
-              valid={detailValid}
-              failure={handleFailure}
-              tick={runs.dataUpdatedAt}
-            />
-          )}
+          <div hidden={setup?.step === 'configure'}>
+            {selected && (
+              <RunDetail
+                key={selected}
+                id={selected}
+                scope={scope}
+                path={path}
+                queryKey={detailKey}
+                valid={detailValid}
+                failure={handleFailure}
+                tick={runs.dataUpdatedAt}
+                onState={setDetailState}
+              />
+            )}
+          </div>
         </>
       )}
     </section>
@@ -524,9 +592,11 @@ function ConnectionForm({
   sources,
   disabled,
   save,
+  onDirty,
 }: {
   connection: Connection | null;
   sources: Source[];
+  onDirty?: (dirty: boolean) => void;
   disabled: boolean;
   save: (draft: ConnectionDraft) => Promise<void>;
 }) {
@@ -556,6 +626,17 @@ function ConnectionForm({
     ),
     [assigned, setAssigned] = useState(false),
     [error, setError] = useState('');
+  const dirty =
+    connection === null ||
+    sourceId !== connection.sourceId ||
+    archiveProducerId !== (connection.archiveProducer?.producerId ?? '') ||
+    JSON.stringify([...producerIds].sort()) !==
+      JSON.stringify(
+        (connection.enrichmentProducers ?? []).map((entry) => entry.producerId).sort(),
+      );
+  useEffect(() => {
+    onDirty?.(dirty);
+  }, [dirty, onDirty]);
   const selected = sources.find((source) => source.sourceId === sourceId);
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -686,7 +767,9 @@ function CollectionForm({
   active,
   reviewHistory,
   collect,
+  onConfirmation,
 }: {
+  onConfirmation?: (pending: boolean) => void;
   connection: Connection;
   disabled: boolean;
   active: boolean;
@@ -713,6 +796,10 @@ function CollectionForm({
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    onConfirmation?.(retry || reviewing);
+    return () => onConfirmation?.(false);
+  }, [retry, reviewing, onConfirmation]);
   const replay = useRef<{ connectionRevision: number; requestId: string; window: Window } | null>(
     null,
   );
@@ -870,6 +957,7 @@ function RunDetail({
   valid,
   failure,
   tick,
+  onState,
 }: {
   id: string;
   scope: Scope;
@@ -878,6 +966,7 @@ function RunDetail({
   valid: () => boolean;
   failure: (error: unknown) => void;
   tick: number;
+  onState?: (state: { busy: boolean; failed: boolean }) => void;
 }) {
   const client = useQueryClient();
   const query = useQuery({
@@ -894,6 +983,10 @@ function RunDetail({
     retry: false,
     refetchOnWindowFocus: false,
   });
+  useEffect(() => {
+    onState?.({ busy: query.isFetching, failed: query.isError });
+  }, [onState, query.isFetching, query.isError]);
+  useEffect(() => () => onState?.({ busy: false, failed: false }), [onState]);
   useEffect(() => {
     failure(query.error);
   }, [failure, query.error]);

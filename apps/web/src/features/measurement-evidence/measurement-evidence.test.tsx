@@ -34,7 +34,7 @@ function defaultRead(input: string | URL | Request, options?: RequestInit): Resp
   if (path.includes('measurement-authorities')) return json({ authorities });
   return json({ run: queued });
 }
-function mount(strict = false) {
+function mount(strict = false, basisProvider?: 'github' | 'argocd') {
   const client = createQueryClient();
   let serviceId = scope.serviceId;
   const content = () => (
@@ -46,6 +46,7 @@ function mount(strict = false) {
             serviceId={serviceId}
             serviceName="Delivery"
             onAccessLost={lost}
+            {...(basisProvider ? { basisProvider } : {})}
           />
         </StrictMode>
       ) : (
@@ -54,6 +55,7 @@ function mount(strict = false) {
           serviceId={serviceId}
           serviceName="Delivery"
           onAccessLost={lost}
+          {...(basisProvider ? { basisProvider } : {})}
         />
       )}
     </QueryClientProvider>
@@ -96,6 +98,18 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 describe('owner independent measurement workflow', () => {
+  it('pins wizard evidence to Argo without reading GitHub basis history', async () => {
+    mount(false, 'argocd');
+    await screen.findByRole('button', { name: 'Use selected saved collection' });
+    expect(screen.getByLabelText('Basis provider')).toHaveValue('argocd');
+    expect(screen.getByLabelText('Basis provider')).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('argo-collection-runs')),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('github-collection-runs')),
+    ).toBe(false);
+  });
   it('selects one received authority per capability and queues only exact allowed fields', async () => {
     mount(true);
     await chooseBasis();

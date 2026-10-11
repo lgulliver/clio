@@ -3,6 +3,7 @@ import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MetricResults } from '../measurements/metric-results';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import {
   type Connection,
   closedWindow,
@@ -18,6 +19,7 @@ import {
 } from './api';
 
 type Props = {
+  setup?: SourceSetupPresentation;
   workspace: Workspace;
   serviceId: string;
   serviceName: string;
@@ -33,7 +35,7 @@ export function GitHubCollection(props: Props) {
     />
   );
 }
-function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }: Props) {
+function LiveScope({ workspace, serviceId, serviceName, userId, validSelection, setup }: Props) {
   const session = useSession(),
     client = useQueryClient(),
     revision = session.revision;
@@ -65,6 +67,13 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [conflict, setConflict] = useState(false);
+  const setupRef = useRef(setup);
+  const lastStatus = useRef('');
+  setupRef.current = setup;
+  const [dirty, setDirty] = useState(true);
+  const [confirmation, setConfirmation] = useState(false);
+  const [detailState, setDetailState] = useState({ busy: false, failed: false });
+  const [writeDenied, setWriteDenied] = useState(false);
   const [selected, setSelected] = useState('');
   const selection = useRef('');
   const valid = useCallback(
@@ -110,6 +119,8 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
     mounted.current = true;
     return () => {
       mounted.current = false;
+      lastStatus.current = '';
+      setupRef.current?.onStatus({ ready: false, busy: false, hasSavedResult: false });
       controller.current?.abort();
       void client.cancelQueries({ queryKey: key });
       client.removeQueries({ queryKey: key });
@@ -121,11 +132,13 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
       if (failure.status === 401) session.expire(revision);
       if (failure.status === 404 || (!write && failure.status === 403)) {
         setUnavailable(true);
+        setupRef.current?.onAccessLost();
         controller.current?.abort();
         void client.cancelQueries({ queryKey: key });
         client.removeQueries({ queryKey: key });
       }
       if (write && failure.status === 403) {
+        setWriteDenied(true);
         void client.invalidateQueries({ queryKey: ['identity', userId, revision, 'workspaces'] });
       }
     },
@@ -231,6 +244,44 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
   const saved = connectionQuery.data?.connection ?? null;
   const editable = workspace.role === 'owner';
   const configured = connectionQuery.data?.configured === true;
+  const setupReady =
+    valid() &&
+    editable &&
+    configured &&
+    saved?.active === true &&
+    !unavailable &&
+    !conflict &&
+    !writeDenied &&
+    !detailState.failed &&
+    !dirty &&
+    !connectionQuery.isError &&
+    !connectionQuery.isPending &&
+    !runs.isError &&
+    !runs.isPending;
+  const setupBusy = busy || confirmation;
+  const hasSavedResult =
+    valid() &&
+    !unavailable &&
+    !runs.isError &&
+    (runs.data?.some(
+      (run) =>
+        run.status === 'succeeded' &&
+        run.result !== null &&
+        run.connectionRevision === saved?.revision,
+    ) ??
+      false);
+  useEffect(() => {
+    const signature = JSON.stringify([
+      setupReady,
+      setupBusy,
+      hasSavedResult,
+      saved?.revision,
+      !!setupRef.current,
+    ]);
+    if (lastStatus.current === signature) return;
+    lastStatus.current = signature;
+    setupRef.current?.onStatus({ ready: setupReady, busy: setupBusy, hasSavedResult });
+  });
   return (
     <section
       className="mt-8 border-t border-slate-200 pt-6"
@@ -257,101 +308,108 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
                   workspace before connecting or collecting.
                 </p>
               )}
-              <p className="mt-3">
-                {saved
-                  ? `${saved.active ? 'Connected' : 'Disconnected'}: ${saved.repositoryName} · ${saved.productionEnvironment} · Saved revision ${saved.revision}`
-                  : 'No live GitHub connection saved.'}
-              </p>
-              {saved && (
-                <>
-                  <p>
-                    Account: {saved.accountLogin}. Verified at {saved.verifiedAt}. Saved at{' '}
-                    {saved.observedAt}.
-                  </p>
-                  <p>
-                    Exposure policy:{' '}
-                    {saved.exposurePolicyReference ??
-                      'Not supplied; production exposure remains unknown.'}
-                  </p>
-                </>
-              )}
-              {editable && configured && (
-                <ConnectionForm
-                  key={`connection:${saved?.revision ?? 0}`}
-                  connection={saved}
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  save={async (draft) => {
-                    const expectedRevision = saved?.revision ?? null;
-                    await write(
-                      'github-connection',
-                      { ...draft, expectedRevision },
-                      (value) => parseSavedConnection(value, scope, expectedRevision, true),
-                      (connection) => {
-                        client.setQueryData(connectionKey, { connection, configured });
-                        setNotice('GitHub connection saved.');
-                      },
-                    );
-                  }}
-                />
-              )}
-              {editable && saved?.active && (
-                <button
-                  className="control mt-3"
-                  type="button"
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  onClick={() =>
-                    void write(
-                      'github-connection/disconnect',
-                      { expectedRevision: saved.revision },
-                      (value) => parseSavedConnection(value, scope, saved.revision, false),
-                      (connection) => {
-                        client.setQueryData(connectionKey, { connection, configured });
-                        setNotice(
-                          'Disconnected from Clio collection. GitHub installation remains unchanged.',
-                        );
-                        void runs.refetch();
-                      },
-                    )
-                  }
-                >
-                  Disconnect GitHub
-                </button>
-              )}
-              {!editable && (
+              <div hidden={setup?.step === 'collect'}>
                 <p className="mt-3">
-                  Only workspace owners can save, disconnect or collect. Members can read
-                  connections and history.
+                  {saved
+                    ? `${saved.active ? 'Connected' : 'Disconnected'}: ${saved.repositoryName} · ${saved.productionEnvironment} · Saved revision ${saved.revision}`
+                    : 'No live GitHub connection saved.'}
                 </p>
-              )}
-              {saved?.active && editable && configured && (
-                <CollectionForm
-                  key={`collection:${saved.revision}`}
-                  connection={saved}
-                  disabled={busy || conflict || connectionQuery.isFetching}
-                  active={active}
-                  reviewHistory={refreshHistory}
-                  collect={async (body) =>
-                    write(
-                      'github-collection-runs',
-                      body,
-                      (value) => parseRun(value, scope, saved.revision, undefined, body.window),
-                      (run) => {
-                        setNotice(
-                          `Collection confirmed for saved revision ${run.connectionRevision}.`,
-                        );
-                        polls.current = 0;
-                        setPollLimit(false);
-                        client.setQueryData<Run[]>(runsKey, (previous) =>
-                          [run, ...(previous ?? []).filter((item) => item.id !== run.id)]
-                            .sort(newestFirst)
-                            .slice(0, 25),
-                        );
-                        void runs.refetch();
-                      },
-                    )
-                  }
-                />
-              )}
+                {saved && (
+                  <>
+                    <p>
+                      Account: {saved.accountLogin}. Verified at {saved.verifiedAt}. Saved at{' '}
+                      {saved.observedAt}.
+                    </p>
+                    <p>
+                      Exposure policy:{' '}
+                      {saved.exposurePolicyReference ??
+                        'Not supplied; production exposure remains unknown.'}
+                    </p>
+                  </>
+                )}
+                {editable && configured && (
+                  <ConnectionForm
+                    key={`connection:${saved?.revision ?? 0}`}
+                    connection={saved}
+                    onDirty={setDirty}
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    save={async (draft) => {
+                      const expectedRevision = saved?.revision ?? null;
+                      await write(
+                        'github-connection',
+                        { ...draft, expectedRevision },
+                        (value) => parseSavedConnection(value, scope, expectedRevision, true),
+                        (connection) => {
+                          client.setQueryData(connectionKey, { connection, configured });
+                          setWriteDenied(false);
+                          setNotice('GitHub connection saved.');
+                        },
+                      );
+                    }}
+                  />
+                )}
+                {editable && saved?.active && (
+                  <button
+                    className="control mt-3"
+                    type="button"
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    onClick={() =>
+                      void write(
+                        'github-connection/disconnect',
+                        { expectedRevision: saved.revision },
+                        (value) => parseSavedConnection(value, scope, saved.revision, false),
+                        (connection) => {
+                          client.setQueryData(connectionKey, { connection, configured });
+                          setNotice(
+                            'Disconnected from Clio collection. GitHub installation remains unchanged.',
+                          );
+                          void runs.refetch();
+                        },
+                      )
+                    }
+                  >
+                    Disconnect GitHub
+                  </button>
+                )}
+                {!editable && (
+                  <p className="mt-3">
+                    Only workspace owners can save, disconnect or collect. Members can read
+                    connections and history.
+                  </p>
+                )}
+              </div>
+              <div hidden={setup?.step === 'configure'}>
+                {saved?.active && editable && configured && (
+                  <CollectionForm
+                    key={`collection:${saved.revision}`}
+                    connection={saved}
+                    disabled={busy || conflict || connectionQuery.isFetching}
+                    active={active}
+                    onConfirmation={setConfirmation}
+                    reviewHistory={refreshHistory}
+                    collect={async (body) =>
+                      write(
+                        'github-collection-runs',
+                        body,
+                        (value) => parseRun(value, scope, saved.revision, undefined, body.window),
+                        (run) => {
+                          setNotice(
+                            `Collection confirmed for saved revision ${run.connectionRevision}.`,
+                          );
+                          polls.current = 0;
+                          setPollLimit(false);
+                          client.setQueryData<Run[]>(runsKey, (previous) =>
+                            [run, ...(previous ?? []).filter((item) => item.id !== run.id)]
+                              .sort(newestFirst)
+                              .slice(0, 25),
+                          );
+                          void runs.refetch();
+                        },
+                      )
+                    }
+                  />
+                )}
+              </div>
             </>
           )}
           <button
@@ -365,38 +423,44 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
           {busy && <p role="status">Confirming request…</p>}
           {notice && <p role="status">{notice}</p>}
           {error && <p role="alert">{error}</p>}
-          <h4 className="mt-6 text-lg font-semibold">Live GitHub history</h4>
-          {runs.isPending ? (
-            <p role="status">Loading live GitHub history…</p>
-          ) : runs.isError ? (
+          {setup?.step === 'configure' && runs.isError && (
             <p role="alert">{errorMessage(runs.error)}</p>
-          ) : runs.data.length === 0 ? (
-            <p>No live GitHub runs yet.</p>
-          ) : (
-            <ol aria-label="Latest 25 live GitHub runs" className="mt-3 space-y-3">
-              {runs.data.map((run) => (
-                <li key={run.id} className="rounded border border-slate-200 p-4">
-                  <p>
-                    Saved connection revision {run.connectionRevision} · {run.status}
-                  </p>
-                  <p>
-                    Queued {run.createdAt}. Updated {run.updatedAt}. Attempts: {run.attempts} of 3.
-                  </p>
-                  <button
-                    className="control mt-2"
-                    type="button"
-                    aria-pressed={selected === run.id}
-                    onClick={() => {
-                      selection.current = run.id;
-                      setSelected(run.id);
-                    }}
-                  >
-                    View run {run.createdAt}
-                  </button>
-                </li>
-              ))}
-            </ol>
           )}
+          <div hidden={setup?.step === 'configure'}>
+            <h4 className="mt-6 text-lg font-semibold">Live GitHub history</h4>
+            {runs.isPending ? (
+              <p role="status">Loading live GitHub history…</p>
+            ) : runs.isError ? (
+              <p role="alert">{errorMessage(runs.error)}</p>
+            ) : runs.data.length === 0 ? (
+              <p>No live GitHub runs yet.</p>
+            ) : (
+              <ol aria-label="Latest 25 live GitHub runs" className="mt-3 space-y-3">
+                {runs.data.map((run) => (
+                  <li key={run.id} className="rounded border border-slate-200 p-4">
+                    <p>
+                      Saved connection revision {run.connectionRevision} · {run.status}
+                    </p>
+                    <p>
+                      Queued {run.createdAt}. Updated {run.updatedAt}. Attempts: {run.attempts} of
+                      3.
+                    </p>
+                    <button
+                      className="control mt-2"
+                      type="button"
+                      aria-pressed={selected === run.id}
+                      onClick={() => {
+                        selection.current = run.id;
+                        setSelected(run.id);
+                      }}
+                    >
+                      View run {run.createdAt}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
           {active && (
             <p role="status">
               Collection pending or running. History refreshes while processing continues.
@@ -407,18 +471,21 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection }
               Automatic refresh paused. Refresh connection and runs to check progress.
             </p>
           )}
-          {selected && (
-            <RunDetail
-              key={selected}
-              id={selected}
-              scope={scope}
-              path={path}
-              queryKey={detailKey}
-              valid={detailValid}
-              failure={handleFailure}
-              tick={runs.dataUpdatedAt}
-            />
-          )}
+          <div hidden={setup?.step === 'configure'}>
+            {selected && (
+              <RunDetail
+                key={selected}
+                id={selected}
+                scope={scope}
+                path={path}
+                queryKey={detailKey}
+                valid={detailValid}
+                failure={handleFailure}
+                tick={runs.dataUpdatedAt}
+                onState={setDetailState}
+              />
+            )}
+          </div>
         </>
       )}
     </section>
@@ -436,8 +503,10 @@ function ConnectionForm({
   connection,
   disabled,
   save,
+  onDirty,
 }: {
   connection: Connection | null;
+  onDirty?: (dirty: boolean) => void;
   disabled: boolean;
   save: (draft: ConnectionDraft) => Promise<void>;
 }) {
@@ -448,6 +517,15 @@ function ConnectionForm({
     [policy, setPolicy] = useState(connection?.exposurePolicyReference ?? ''),
     [assigned, setAssigned] = useState(false),
     [error, setError] = useState('');
+  const dirty =
+    connection === null ||
+    installation !== String(connection.installationId) ||
+    repository !== String(connection.repositoryId) ||
+    environment !== connection.productionEnvironment ||
+    policy !== (connection.exposurePolicyReference ?? '');
+  useEffect(() => {
+    onDirty?.(dirty);
+  }, [dirty, onDirty]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (disabled) return;
@@ -544,7 +622,9 @@ function CollectionForm({
   active,
   reviewHistory,
   collect,
+  onConfirmation,
 }: {
+  onConfirmation?: (pending: boolean) => void;
   connection: Connection;
   disabled: boolean;
   active: boolean;
@@ -571,6 +651,10 @@ function CollectionForm({
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    onConfirmation?.(retry || reviewing);
+    return () => onConfirmation?.(false);
+  }, [retry, reviewing, onConfirmation]);
   const replay = useRef<{ connectionRevision: number; requestId: string; window: Window } | null>(
     null,
   );
@@ -728,6 +812,7 @@ function RunDetail({
   valid,
   failure,
   tick,
+  onState,
 }: {
   id: string;
   scope: Scope;
@@ -736,6 +821,7 @@ function RunDetail({
   valid: () => boolean;
   failure: (error: unknown) => void;
   tick: number;
+  onState?: (state: { busy: boolean; failed: boolean }) => void;
 }) {
   const client = useQueryClient();
   const query = useQuery({
@@ -752,6 +838,10 @@ function RunDetail({
     retry: false,
     refetchOnWindowFocus: false,
   });
+  useEffect(() => {
+    onState?.({ busy: query.isFetching, failed: query.isError });
+  }, [onState, query.isFetching, query.isError]);
+  useEffect(() => () => onState?.({ busy: false, failed: false }), [onState]);
   useEffect(() => {
     failure(query.error);
   }, [failure, query.error]);

@@ -22,19 +22,23 @@ import {
 } from './api';
 import { MeasurementDetails } from './measurement-history';
 
-export type MeasurementEvidenceProps = Scope & { serviceName: string; onAccessLost?: () => void };
+export type MeasurementEvidenceProps = Scope & {
+  serviceName: string;
+  onAccessLost?: () => void;
+  basisProvider?: Provider;
+};
 export function MeasurementEvidence(props: MeasurementEvidenceProps) {
   const session = useSession();
   if (session.status !== 'ready' || !session.user) return null;
   return (
     <OwnerScope
-      key={`${session.user.id}:${session.revision}:${props.workspaceId}:${props.serviceId}`}
+      key={`${session.user.id}:${session.revision}:${props.workspaceId}:${props.serviceId}:${props.basisProvider ?? 'choose'}`}
       {...props}
     />
   );
 }
 function OwnerScope(props: MeasurementEvidenceProps) {
-  const [provider, setProvider] = useState<Provider>('github');
+  const [provider, setProvider] = useState<Provider>(props.basisProvider ?? 'github');
   const [blocked, setBlocked] = useState(false);
   const accessLost = useCallback(() => {
     setBlocked(true);
@@ -61,6 +65,7 @@ function OwnerScope(props: MeasurementEvidenceProps) {
             id={id}
             className="field"
             value={provider}
+            disabled={props.basisProvider !== undefined}
             onChange={(event) => setProvider(event.target.value === 'argocd' ? 'argocd' : 'github')}
           >
             <option value="github">GitHub</option>

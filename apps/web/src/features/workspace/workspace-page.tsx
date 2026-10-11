@@ -19,6 +19,7 @@ import {
 } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MeasurementEvidence } from '../measurement-evidence/measurement-evidence';
+import { SourceSetupWizard } from '../source-setup/source-setup-wizard';
 import { WorkspaceAccess } from './workspace-access';
 
 export function WorkspacePage({ authError }: { authError: boolean }) {
@@ -174,6 +175,16 @@ function WorkspaceScope({
   }
   const [denied, setDenied] = useState('');
   const [showAccess, setShowAccess] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  const setupTrigger = useRef<HTMLButtonElement>(null);
+  const deniedAlert = useRef<HTMLParagraphElement>(null);
+  const setupOpen = showSetup && workspace?.role === 'owner';
+  useEffect(() => {
+    if (workspace?.role !== 'owner') setShowSetup(false);
+  }, [workspace?.role]);
+  useEffect(() => {
+    if (denied) deniedAlert.current?.focus();
+  }, [denied]);
   const [selectedService, setSelectedService] = useState('');
   const [sourceMode, setSourceMode] = useState<'mock' | 'live' | 'argo'>('mock');
   const serviceSelection = useRef('');
@@ -344,7 +355,9 @@ function WorkspaceScope({
           <p className="mt-2">Your role: {workspace.role}</p>
           {denied ? (
             <div className="mt-4">
-              <p role="alert">{denied}</p>
+              <p role="alert" tabIndex={-1} ref={deniedAlert}>
+                {denied}
+              </p>
               <button className="control mt-3" type="button" onClick={session.refresh}>
                 Refresh access
               </button>
@@ -367,93 +380,144 @@ function WorkspaceScope({
           ) : (
             <>
               <h3 className="mt-6 font-semibold">Services</h3>
-              {services.data?.length ? (
-                <ul className="mt-3 list-inside list-disc">
-                  {services.data.map((item) => (
-                    <li key={item.id}>
-                      {item.name}{' '}
-                      <button
-                        type="button"
-                        className="control ml-2"
-                        aria-label={`Mock settings for ${item.name}`}
-                        aria-pressed={selectedService === item.id && sourceMode === 'mock'}
-                        onClick={() => {
-                          serviceSelection.current = `mock:${item.id}`;
-                          setSourceMode('mock');
-                          setSelectedService(item.id);
-                        }}
-                      >
-                        Mock settings
-                      </button>
-                      <button
-                        type="button"
-                        className="control ml-2"
-                        aria-label={`Live GitHub for ${item.name}`}
-                        aria-pressed={selectedService === item.id && sourceMode === 'live'}
-                        onClick={() => {
-                          serviceSelection.current = `live:${item.id}`;
-                          setSourceMode('live');
-                          setSelectedService(item.id);
-                        }}
-                      >
-                        Live GitHub
-                      </button>
-                      <button
-                        type="button"
-                        className="control ml-2"
-                        aria-label={`Live Argo for ${item.name}`}
-                        aria-pressed={selectedService === item.id && sourceMode === 'argo'}
-                        onClick={() => {
-                          serviceSelection.current = `argo:${item.id}`;
-                          setSourceMode('argo');
-                          setSelectedService(item.id);
-                        }}
-                      >
-                        Live Argo
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-3">No services yet.</p>
+              {workspace.role === 'owner' && (
+                <>
+                  <button
+                    ref={setupTrigger}
+                    className="control mt-3"
+                    type="button"
+                    aria-expanded={setupOpen}
+                    aria-disabled={setupOpen}
+                    onClick={() => {
+                      if (setupOpen) return;
+                      serviceSelection.current = '';
+                      setSelectedService('');
+                      setShowSetup(true);
+                    }}
+                  >
+                    Set up a data source
+                  </button>
+                  {setupOpen && (
+                    <SourceSetupWizard
+                      workspace={workspace}
+                      services={services.data ?? []}
+                      userId={userId}
+                      validSelection={valid}
+                      onAccessLost={measurementAccessLost}
+                      onClose={() => {
+                        setShowSetup(false);
+                        setupTrigger.current?.focus();
+                      }}
+                      createServiceForm={
+                        <ActionForm
+                          label="New service name"
+                          action="Create service for setup"
+                          valid={valid}
+                          submit={(name) =>
+                            mutate(
+                              `/api/workspaces/${workspace.id}/services`,
+                              { name },
+                              (value) => parseService(value, workspace.id),
+                              () => {
+                                void client.invalidateQueries({ queryKey: servicesKey });
+                              },
+                            )
+                          }
+                        />
+                      }
+                    />
+                  )}
+                </>
               )}
-              {activeService && sourceMode === 'mock' && (
-                <DeploymentMappings
-                  key={selectedService}
-                  workspace={workspace}
-                  serviceId={selectedService}
-                  serviceName={activeService.name}
-                  userId={userId}
-                  validSelection={() =>
-                    valid() && serviceSelection.current === `mock:${selectedService}`
-                  }
-                />
-              )}
-              {activeService && sourceMode === 'live' && (
-                <GitHubCollection
-                  workspace={workspace}
-                  serviceId={selectedService}
-                  serviceName={activeService.name}
-                  userId={userId}
-                  validSelection={() =>
-                    valid() && serviceSelection.current === `live:${selectedService}`
-                  }
-                />
-              )}
-              {activeService && sourceMode === 'argo' && (
-                <ArgoCollection
-                  workspace={workspace}
-                  serviceId={selectedService}
-                  serviceName={activeService.name}
-                  userId={userId}
-                  validSelection={() =>
-                    valid() && serviceSelection.current === `argo:${selectedService}`
-                  }
-                />
-              )}
+              <div hidden={setupOpen}>
+                {services.data?.length ? (
+                  <ul className="mt-3 list-inside list-disc">
+                    {services.data.map((item) => (
+                      <li key={item.id}>
+                        {item.name}{' '}
+                        <button
+                          type="button"
+                          className="control ml-2"
+                          aria-label={`Mock settings for ${item.name}`}
+                          aria-pressed={selectedService === item.id && sourceMode === 'mock'}
+                          onClick={() => {
+                            serviceSelection.current = `mock:${item.id}`;
+                            setSourceMode('mock');
+                            setSelectedService(item.id);
+                          }}
+                        >
+                          Mock settings
+                        </button>
+                        <button
+                          type="button"
+                          className="control ml-2"
+                          aria-label={`Live GitHub for ${item.name}`}
+                          aria-pressed={selectedService === item.id && sourceMode === 'live'}
+                          onClick={() => {
+                            serviceSelection.current = `live:${item.id}`;
+                            setSourceMode('live');
+                            setSelectedService(item.id);
+                          }}
+                        >
+                          Live GitHub
+                        </button>
+                        <button
+                          type="button"
+                          className="control ml-2"
+                          aria-label={`Live Argo for ${item.name}`}
+                          aria-pressed={selectedService === item.id && sourceMode === 'argo'}
+                          onClick={() => {
+                            serviceSelection.current = `argo:${item.id}`;
+                            setSourceMode('argo');
+                            setSelectedService(item.id);
+                          }}
+                        >
+                          Live Argo
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-3">No services yet.</p>
+                )}
+                {activeService && sourceMode === 'mock' && (
+                  <DeploymentMappings
+                    key={selectedService}
+                    workspace={workspace}
+                    serviceId={selectedService}
+                    serviceName={activeService.name}
+                    userId={userId}
+                    validSelection={() =>
+                      valid() && serviceSelection.current === `mock:${selectedService}`
+                    }
+                  />
+                )}
+                {activeService && sourceMode === 'live' && (
+                  <GitHubCollection
+                    workspace={workspace}
+                    serviceId={selectedService}
+                    serviceName={activeService.name}
+                    userId={userId}
+                    validSelection={() =>
+                      valid() && serviceSelection.current === `live:${selectedService}`
+                    }
+                  />
+                )}
+                {activeService && sourceMode === 'argo' && (
+                  <ArgoCollection
+                    workspace={workspace}
+                    serviceId={selectedService}
+                    serviceName={activeService.name}
+                    userId={userId}
+                    validSelection={() =>
+                      valid() && serviceSelection.current === `argo:${selectedService}`
+                    }
+                  />
+                )}
+              </div>
               {workspace.role === 'owner' ? (
                 <>
-                  {activeService && (
+                  {!setupOpen && activeService && (
                     <MeasurementEvidence
                       workspaceId={workspace.id}
                       serviceId={activeService.id}
@@ -461,149 +525,154 @@ function WorkspaceScope({
                       onAccessLost={measurementAccessLost}
                     />
                   )}
-                  <ActionForm
-                    label="Service name"
-                    action="Create service"
-                    valid={valid}
-                    submit={(name) =>
-                      mutate(
-                        `/api/workspaces/${workspace.id}/services`,
-                        { name },
-                        (value) => parseService(value, workspace.id),
-                        () => {
-                          void client.invalidateQueries({ queryKey: servicesKey });
-                        },
-                      )
-                    }
-                  />
-                  <button
-                    className="control mt-6"
-                    type="button"
-                    aria-expanded={showAccess}
-                    onClick={() => setShowAccess((previous) => !previous)}
-                  >
-                    {showAccess ? 'Hide access management' : 'Manage workspace access'}
-                  </button>
-                  {showAccess && (
-                    <WorkspaceAccess
-                      workspaceId={workspace.id}
-                      userId={userId}
-                      validSelection={valid}
-                      onInvitationCancelled={(id) =>
-                        cancelledInvitations([id.toLowerCase()], false)
+                  {!setupOpen && (
+                    <ActionForm
+                      label="Service name"
+                      action="Create service"
+                      valid={valid}
+                      submit={(name) =>
+                        mutate(
+                          `/api/workspaces/${workspace.id}/services`,
+                          { name },
+                          (value) => parseService(value, workspace.id),
+                          () => {
+                            void client.invalidateQueries({ queryKey: servicesKey });
+                          },
+                        )
                       }
-                      onCancellationUncertain={() => cancelledInvitations([], true)}
-                      onMemberRevoked={(result) =>
-                        cancelledInvitations(result.cancelledInvitationIds, result.hasMore)
-                      }
-                      onDenied={(error) => {
-                        mutationEpoch.current += 1;
-                        storeInvitation(null);
-                        setDenied(errorMessage(error));
-                        void client.invalidateQueries({ queryKey: workspacesKey });
-                      }}
                     />
                   )}
-                  <h3
-                    ref={invitationHeading}
-                    tabIndex={-1}
-                    className="mt-8 font-semibold focus-visible:outline focus-visible:outline-2"
-                  >
-                    Invite a member
-                  </h3>
-                  <p className="mt-2 text-slate-600">
-                    Share the token manually. Acceptance requires the member’s matching verified
-                    email. Invitations expire after seven days.
-                  </p>
-                  <ActionForm
-                    label="Member email"
-                    action="Create invitation"
-                    type="email"
-                    valid={valid}
-                    submit={(email) => {
-                      storeInvitation(null);
-                      tokenStatus('ready');
-                      const cancellation = cancellationRevision.current;
-                      return mutate(
-                        `/api/workspaces/${workspace.id}/invitations`,
-                        { email },
-                        (value) => parseInvitation(value, workspace.id),
-                        (created) => {
-                          storeInvitation(created);
-                          if (cancellation !== cancellationRevision.current)
-                            void verifyInvitation(created);
-                          void client.invalidateQueries({
-                            queryKey: [
-                              'identity',
-                              userId,
-                              revision,
-                              'workspace',
-                              workspace.id,
-                              'access',
-                            ],
-                          });
-                        },
-                      );
-                    }}
-                  />
-                  {invitation && invitationStatus !== 'ready' && (
-                    <div ref={invitationArea} className="mt-4">
-                      <p role={invitationStatus === 'error' ? 'alert' : 'status'}>
-                        {invitationStatus === 'checking'
-                          ? 'Checking invitation availability…'
-                          : 'Invitation availability could not be checked. Retry before sharing.'}
-                      </p>
-                      {invitationStatus === 'error' && (
+                  <div hidden={setupOpen}>
+                    <button
+                      className="control mt-6"
+                      type="button"
+                      aria-expanded={showAccess}
+                      onClick={() => setShowAccess((previous) => !previous)}
+                    >
+                      {showAccess ? 'Hide access management' : 'Manage workspace access'}
+                    </button>
+                    {showAccess && (
+                      <WorkspaceAccess
+                        workspaceId={workspace.id}
+                        userId={userId}
+                        validSelection={valid}
+                        onInvitationCancelled={(id) =>
+                          cancelledInvitations([id.toLowerCase()], false)
+                        }
+                        onCancellationUncertain={() => cancelledInvitations([], true)}
+                        onMemberRevoked={(result) =>
+                          cancelledInvitations(result.cancelledInvitationIds, result.hasMore)
+                        }
+                        onDenied={(error) => {
+                          mutationEpoch.current += 1;
+                          storeInvitation(null);
+                          setDenied(errorMessage(error));
+                          void client.invalidateQueries({ queryKey: workspacesKey });
+                        }}
+                      />
+                    )}
+                    <h3
+                      ref={invitationHeading}
+                      tabIndex={-1}
+                      className="mt-8 font-semibold focus-visible:outline focus-visible:outline-2"
+                    >
+                      Invite a member
+                    </h3>
+                    <p className="mt-2 text-slate-600">
+                      Share the token manually. Acceptance requires the member’s matching verified
+                      email. Invitations expire after seven days.
+                    </p>
+                    <ActionForm
+                      label="Member email"
+                      action="Create invitation"
+                      type="email"
+                      valid={valid}
+                      submit={(email) => {
+                        storeInvitation(null);
+                        tokenStatus('ready');
+                        const cancellation = cancellationRevision.current;
+                        return mutate(
+                          `/api/workspaces/${workspace.id}/invitations`,
+                          { email },
+                          (value) => parseInvitation(value, workspace.id),
+                          (created) => {
+                            storeInvitation(created);
+                            if (cancellation !== cancellationRevision.current)
+                              void verifyInvitation(created);
+                            void client.invalidateQueries({
+                              queryKey: [
+                                'identity',
+                                userId,
+                                revision,
+                                'workspace',
+                                workspace.id,
+                                'access',
+                              ],
+                            });
+                          },
+                        );
+                      }}
+                    />
+                    {invitation && invitationStatus !== 'ready' && (
+                      <div ref={invitationArea} className="mt-4">
+                        <p role={invitationStatus === 'error' ? 'alert' : 'status'}>
+                          {invitationStatus === 'checking'
+                            ? 'Checking invitation availability…'
+                            : 'Invitation availability could not be checked. Retry before sharing.'}
+                        </p>
+                        {invitationStatus === 'error' && (
+                          <button
+                            type="button"
+                            className="control mt-3"
+                            onClick={() => {
+                              invitationHeading.current?.focus();
+                              void verifyInvitation(invitation);
+                            }}
+                          >
+                            Retry invitation check
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="control mt-3"
                           onClick={() => {
                             invitationHeading.current?.focus();
-                            void verifyInvitation(invitation);
+                            storeInvitation(null);
                           }}
                         >
-                          Retry invitation check
+                          Dismiss token
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="control mt-3"
-                        onClick={() => {
-                          invitationHeading.current?.focus();
-                          storeInvitation(null);
-                        }}
-                      >
-                        Dismiss token
-                      </button>
-                    </div>
-                  )}
-                  {invitation && invitationStatus === 'ready' && (
-                    <div ref={invitationArea} className="mt-4">
-                      <label htmlFor="created-invitation">
-                        Invitation token — copy and share once
-                      </label>
-                      <input
-                        id="created-invitation"
-                        className="field font-mono"
-                        readOnly
-                        value={invitation.token}
-                        onFocus={(event) => event.currentTarget.select()}
-                      />
-                      <p className="mt-2">
-                        For {invitation.email}. This token disappears when you leave this workspace.
-                      </p>
-                      <button
-                        type="button"
-                        className="control mt-3"
-                        onClick={() => {
-                          invitationHeading.current?.focus();
-                          storeInvitation(null);
-                        }}
-                      >
-                        Dismiss token
-                      </button>
-                    </div>
-                  )}
+                      </div>
+                    )}
+                    {invitation && invitationStatus === 'ready' && (
+                      <div ref={invitationArea} className="mt-4">
+                        <label htmlFor="created-invitation">
+                          Invitation token — copy and share once
+                        </label>
+                        <input
+                          id="created-invitation"
+                          className="field font-mono"
+                          readOnly
+                          value={invitation.token}
+                          onFocus={(event) => event.currentTarget.select()}
+                        />
+                        <p className="mt-2">
+                          For {invitation.email}. This token disappears when you leave this
+                          workspace.
+                        </p>
+                        <button
+                          type="button"
+                          className="control mt-3"
+                          onClick={() => {
+                            invitationHeading.current?.focus();
+                            storeInvitation(null);
+                          }}
+                        >
+                          Dismiss token
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <p className="mt-4 text-slate-600">

@@ -15,6 +15,60 @@ body {
 }
 
 @layer components {
+  .setup-wizard {
+    @apply mt-6 min-w-0 rounded-xl border border-slate-200 bg-white p-5 sm:p-6;
+  }
+  .setup-heading {
+    @apply flex flex-wrap items-start justify-between gap-4;
+  }
+  .setup-progress {
+    @apply my-6 grid grid-cols-1 gap-2 border-y border-slate-200 py-4 text-sm text-clio-muted sm:grid-cols-3 xl:grid-cols-5;
+  }
+  .setup-progress li {
+    @apply flex items-center gap-2;
+  }
+  .setup-step-number {
+    @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-300 text-xs;
+  }
+  .setup-progress li[aria-current="step"] {
+    @apply font-semibold text-blue-800;
+  }
+  .setup-progress li[aria-current="step"] .setup-step-number {
+    @apply border-clio-blue bg-clio-blue text-white;
+  }
+  .setup-step-heading {
+    @apply mb-3 rounded text-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue;
+  }
+  .setup-help {
+    @apply max-w-3xl text-sm leading-6 text-clio-muted;
+  }
+  .setup-source-list {
+    @apply mt-4 grid grid-cols-1 gap-3;
+  }
+  .setup-source-option {
+    @apply flex cursor-pointer items-start gap-3 rounded-md border border-slate-200 p-4 has-checked:border-clio-blue has-checked:bg-blue-50;
+  }
+  .setup-source-option input {
+    @apply mt-1 h-4 w-4 shrink-0 accent-clio-blue focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue;
+  }
+  .setup-actions {
+    @apply mt-6 flex flex-wrap gap-3 border-t border-slate-200 pt-5;
+  }
+  .setup-actions .control[aria-disabled="true"] {
+    @apply cursor-not-allowed opacity-60;
+  }
+  .setup-actions .setup-secondary {
+    @apply border border-slate-200 bg-white text-clio-ink;
+  }
+  .setup-evidence-list {
+    @apply my-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2;
+  }
+  .setup-evidence-list dt {
+    @apply font-semibold;
+  }
+  .setup-evidence-list dd {
+    @apply mt-1 leading-6 text-clio-muted;
+  }
   .control {
     @apply rounded-md bg-clio-blue px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue disabled:cursor-wait disabled:opacity-60;
   }

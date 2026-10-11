@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MockCollectionHistory } from '../mock-collection/mock-collection';
+import type { SourceSetupPresentation, SourceSetupStatus } from '../source-setup/provider-state';
 import {
   type Draft,
   type Mapping,
@@ -12,19 +13,33 @@ import {
   parseSavedMapping,
 } from './api';
 
-export function DeploymentMappings({
-  workspace,
-  serviceId,
-  serviceName,
-  userId,
-  validSelection,
-}: {
+type Props = {
+  setup?: SourceSetupPresentation;
   workspace: Workspace;
   serviceId: string;
   serviceName: string;
   userId: string;
   validSelection: () => boolean;
-}) {
+};
+export function DeploymentMappings(props: Props) {
+  const session = useSession();
+  return (
+    <MappingScope
+      key={`${props.userId}:${session.revision}:${props.workspace.id}:${props.serviceId}`}
+      {...props}
+    />
+  );
+}
+function MappingScope({ workspace, serviceId, serviceName, userId, validSelection, setup }: Props) {
+  const setupRef = useRef(setup);
+  setupRef.current = setup;
+  const [editorStatus, setEditorStatus] = useState({ revision: -1, ready: false, busy: false });
+  const [historyStatus, setHistoryStatus] = useState<SourceSetupStatus & { revision: number }>({
+    revision: -1,
+    ready: false,
+    busy: false,
+    hasSavedResult: false,
+  });
   const session = useSession();
   const client = useQueryClient();
   const revision = session.revision;
@@ -72,6 +87,7 @@ export function DeploymentMappings({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      setupRef.current?.onStatus({ ready: false, busy: false, hasSavedResult: false });
       for (const controller of controllers.current) controller.abort();
       void client.cancelQueries({ queryKey: key });
       client.removeQueries({ queryKey: key });
@@ -80,6 +96,52 @@ export function DeploymentMappings({
   useEffect(() => {
     if (query.error instanceof ApiError && query.error.status === 401) session.expire(revision);
   }, [query.error, session.expire, revision]);
+  useEffect(() => {
+    if (
+      query.error instanceof ApiError &&
+      (query.error.status === 403 || query.error.status === 404)
+    )
+      setupRef.current?.onAccessLost();
+  }, [query.error]);
+  const savedRevision = query.data?.revision ?? -1;
+  const reportEditor = useCallback(
+    (status: { ready: boolean; busy: boolean }) => {
+      setEditorStatus({ ...status, revision: savedRevision });
+    },
+    [savedRevision],
+  );
+  const reportHistory = useCallback(
+    (status: SourceSetupStatus) => {
+      setHistoryStatus({ ...status, revision: savedRevision });
+    },
+    [savedRevision],
+  );
+  const accessLost = useCallback(() => {
+    setDenied(true);
+    setupRef.current?.onAccessLost();
+  }, []);
+  const setupReady =
+    valid() &&
+    workspace.role === 'owner' &&
+    !denied &&
+    !editingDenied &&
+    query.isSuccess &&
+    query.data !== null &&
+    editorStatus.revision === savedRevision &&
+    editorStatus.ready &&
+    historyStatus.revision === savedRevision &&
+    historyStatus.ready;
+  const setupBusy = editorStatus.busy || historyStatus.busy;
+  const hasSavedResult =
+    valid() &&
+    !denied &&
+    query.isSuccess &&
+    query.data !== null &&
+    historyStatus.revision === savedRevision &&
+    historyStatus.hasSavedResult;
+  useEffect(() => {
+    setupRef.current?.onStatus({ ready: setupReady, busy: setupBusy, hasSavedResult });
+  }, [setupReady, setupBusy, hasSavedResult]);
   async function execute<T>(endpoint: string, parse: (value: unknown) => T, body?: object) {
     const controller = new AbortController();
     controllers.current.add(controller);
@@ -95,7 +157,12 @@ export function DeploymentMappings({
         if (error.status === 401) session.expire(revision);
         if (error.status === 404) {
           setDenied(true);
+          setupRef.current?.onAccessLost();
           client.removeQueries({ queryKey: key });
+        }
+        if (error.status === 403 && !body && setupRef.current) {
+          setDenied(true);
+          setupRef.current.onAccessLost();
         }
         if (error.status === 403 && endpoint === 'deployment-mapping' && body) {
           setEditingDenied(true);
@@ -150,6 +217,8 @@ export function DeploymentMappings({
           <MappingEditor
             key={`${query.data?.revision ?? 'unset'}:${reload}:${workspace.role === 'owner' && !editingDenied}`}
             mapping={query.data}
+            onStatus={reportEditor}
+            configureVisible={setup?.step !== 'collect'}
             owner={workspace.role === 'owner' && !editingDenied}
             valid={valid}
             clearNotice={() => setNotice('')}
@@ -183,6 +252,15 @@ export function DeploymentMappings({
             <MockCollectionHistory
               key={`${userId}:${revision}:${workspace.id}:${serviceId}`}
               mapping={query.data}
+              {...(setup
+                ? {
+                    setup: {
+                      step: setup.step,
+                      onStatus: reportHistory,
+                      onAccessLost: accessLost,
+                    },
+                  }
+                : {})}
               owner={workspace.role === 'owner' && !editingDenied}
               userId={userId}
               validSelection={valid}
@@ -209,7 +287,11 @@ function MappingEditor({
   reload,
   preview,
   clearNotice,
+  onStatus,
+  configureVisible = true,
 }: {
+  configureVisible?: boolean;
+  onStatus?: (status: { ready: boolean; busy: boolean }) => void;
   mapping: Mapping | null;
   owner: boolean;
   valid: () => boolean;
@@ -241,6 +323,14 @@ function MappingEditor({
       epoch.current += 1;
     };
   }, []);
+  const setupDirty =
+    mapping === null ||
+    draft.primaryProvider !== mapping.primaryProvider ||
+    draft.productionEnvironment !== mapping.productionEnvironment ||
+    draft.exposureAttested !== mapping.exposureAttested;
+  useEffect(() => {
+    onStatus?.({ ready: !setupDirty && !conflict, busy: !!busy });
+  }, [setupDirty, conflict, busy, onStatus]);
   function edit(next: Draft) {
     epoch.current += 1;
     setDraft(next);
@@ -296,78 +386,84 @@ function MappingEditor({
   }
   return (
     <div className="mt-4">
-      {mapping ? (
-        <p>
-          Saved mock revision {mapping.revision}. Observed at {mapping.observedAt}.
-        </p>
-      ) : (
-        <p>No mock settings saved for this service.</p>
-      )}
-      {owner ? (
-        <form className="mt-4" onSubmit={submit}>
-          <fieldset disabled={!!busy} className="space-y-4">
-            <legend className="font-semibold">Fictional deployment source</legend>
-            <div>
-              <label htmlFor={`${id}-provider`}>Mock primary provider</label>
-              <select
-                className="field"
-                id={`${id}-provider`}
-                value={draft.primaryProvider}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === 'github' || value === 'argocd')
-                    edit({ ...draft, primaryProvider: value });
-                }}
-              >
-                <option value="github">GitHub (mock)</option>
-                <option value="argocd">Argo CD (mock)</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor={`${id}-environment`}>Production environment (mock)</label>
-              <input
-                className="field"
-                id={`${id}-environment`}
-                aria-invalid={error.startsWith('Enter a production environment')}
-                aria-describedby={error ? `${id}-error` : undefined}
-                value={draft.productionEnvironment}
-                onChange={(event) => edit({ ...draft, productionEnvironment: event.target.value })}
-                required
-                autoComplete="off"
-              />
-            </div>
-            <label className="flex items-start gap-3" htmlFor={`${id}-attestation`}>
-              <input
-                id={`${id}-attestation`}
-                type="checkbox"
-                checked={draft.exposureAttested}
-                onChange={(event) => edit({ ...draft, exposureAttested: event.target.checked })}
-              />
-              I attest to production exposure for this MOCK example only. This does not attest to
-              real production exposure.
-            </label>
-          </fieldset>
-          <button className="control mt-4" type="submit" disabled={!!busy || conflict}>
-            Save mock settings
-          </button>
-        </form>
-      ) : (
-        <div className="mt-4">
-          <p>Only workspace owners can edit mock settings.</p>
-          {mapping && (
-            <dl className="mt-3">
-              <dt>Mock primary provider</dt>
-              <dd>{mapping.primaryProvider === 'github' ? 'GitHub (mock)' : 'Argo CD (mock)'}</dd>
-              <dt>Production environment (mock)</dt>
-              <dd>{mapping.productionEnvironment}</dd>
-              <dt>Mock exposure attestation</dt>
-              <dd>
-                {mapping.exposureAttested ? 'Attested for this mock example only' : 'Not attested'}
-              </dd>
-            </dl>
-          )}
-        </div>
-      )}
+      <div hidden={!configureVisible}>
+        {mapping ? (
+          <p>
+            Saved mock revision {mapping.revision}. Observed at {mapping.observedAt}.
+          </p>
+        ) : (
+          <p>No mock settings saved for this service.</p>
+        )}
+        {owner ? (
+          <form className="mt-4" onSubmit={submit}>
+            <fieldset disabled={!!busy} className="space-y-4">
+              <legend className="font-semibold">Fictional deployment source</legend>
+              <div>
+                <label htmlFor={`${id}-provider`}>Mock primary provider</label>
+                <select
+                  className="field"
+                  id={`${id}-provider`}
+                  value={draft.primaryProvider}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === 'github' || value === 'argocd')
+                      edit({ ...draft, primaryProvider: value });
+                  }}
+                >
+                  <option value="github">GitHub (mock)</option>
+                  <option value="argocd">Argo CD (mock)</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor={`${id}-environment`}>Production environment (mock)</label>
+                <input
+                  className="field"
+                  id={`${id}-environment`}
+                  aria-invalid={error.startsWith('Enter a production environment')}
+                  aria-describedby={error ? `${id}-error` : undefined}
+                  value={draft.productionEnvironment}
+                  onChange={(event) =>
+                    edit({ ...draft, productionEnvironment: event.target.value })
+                  }
+                  required
+                  autoComplete="off"
+                />
+              </div>
+              <label className="flex items-start gap-3" htmlFor={`${id}-attestation`}>
+                <input
+                  id={`${id}-attestation`}
+                  type="checkbox"
+                  checked={draft.exposureAttested}
+                  onChange={(event) => edit({ ...draft, exposureAttested: event.target.checked })}
+                />
+                I attest to production exposure for this MOCK example only. This does not attest to
+                real production exposure.
+              </label>
+            </fieldset>
+            <button className="control mt-4" type="submit" disabled={!!busy || conflict}>
+              Save mock settings
+            </button>
+          </form>
+        ) : (
+          <div className="mt-4">
+            <p>Only workspace owners can edit mock settings.</p>
+            {mapping && (
+              <dl className="mt-3">
+                <dt>Mock primary provider</dt>
+                <dd>{mapping.primaryProvider === 'github' ? 'GitHub (mock)' : 'Argo CD (mock)'}</dd>
+                <dt>Production environment (mock)</dt>
+                <dd>{mapping.productionEnvironment}</dd>
+                <dt>Mock exposure attestation</dt>
+                <dd>
+                  {mapping.exposureAttested
+                    ? 'Attested for this mock example only'
+                    : 'Not attested'}
+                </dd>
+              </dl>
+            )}
+          </div>
+        )}
+      </div>
       {error && (
         <p role="alert" id={`${id}-error`} className="mt-3 text-red-700">
           {error}
@@ -383,31 +479,35 @@ function MappingEditor({
           Reload saved settings
         </button>
       )}
-      {mapping && (
-        <>
-          <button
-            className="control mt-4"
-            type="button"
-            disabled={!!busy || dirty || conflict}
-            onClick={() => {
-              const ticket = epoch.current;
-              void action('Loading fictional preview…', async () => {
-                const value = await preview();
-                if (mounted.current && valid() && epoch.current === ticket) setResult(value);
-              });
-            }}
-          >
-            Preview saved mock settings
-          </button>
-          {dirty && <p className="mt-2">Save your changes before previewing the saved revision.</p>}
-        </>
-      )}
+      <div hidden={!configureVisible}>
+        {mapping && (
+          <>
+            <button
+              className="control mt-4"
+              type="button"
+              disabled={!!busy || dirty || conflict}
+              onClick={() => {
+                const ticket = epoch.current;
+                void action('Loading fictional preview…', async () => {
+                  const value = await preview();
+                  if (mounted.current && valid() && epoch.current === ticket) setResult(value);
+                });
+              }}
+            >
+              Preview saved mock settings
+            </button>
+            {dirty && (
+              <p className="mt-2">Save your changes before previewing the saved revision.</p>
+            )}
+          </>
+        )}
+      </div>
       {busy && (
         <p role="status" className="mt-3">
           {busy}
         </p>
       )}
-      {result && <PreviewResult preview={result} />}
+      <div hidden={!configureVisible}>{result && <PreviewResult preview={result} />}</div>
     </div>
   );
 }

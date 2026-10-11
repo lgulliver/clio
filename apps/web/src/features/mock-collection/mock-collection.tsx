@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mapping, Preview } from '../deployment-mappings/api';
 import { ApiError, errorMessage, request } from '../identity/api';
 import { useSession } from '../identity/session';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import { newestFirst, parseRun, parseRuns, type Run } from './api';
 
 export function MockCollectionHistory({
@@ -11,13 +12,18 @@ export function MockCollectionHistory({
   userId,
   validSelection,
   reloadMapping,
+  setup,
 }: {
+  setup?: SourceSetupPresentation;
   mapping: Mapping;
   owner: boolean;
   userId: string;
   validSelection: () => boolean;
   reloadMapping: () => Promise<void>;
 }) {
+  const setupRef = useRef(setup);
+  const lastStatus = useRef('');
+  setupRef.current = setup;
   const session = useSession();
   const revision = session.revision;
   const client = useQueryClient();
@@ -26,6 +32,7 @@ export function MockCollectionHistory({
   const pending = useRef(false);
   const replay = useRef<{ revision: number; requestId: string } | null>(null);
   const polls = useRef(0);
+  const [confirmation, setConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [queueDenied, setQueueDenied] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
@@ -66,6 +73,8 @@ export function MockCollectionHistory({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      lastStatus.current = '';
+      setupRef.current?.onStatus({ ready: false, busy: false, hasSavedResult: false });
       controller.current?.abort();
       replay.current = null;
       void client.cancelQueries({ queryKey: key });
@@ -73,7 +82,10 @@ export function MockCollectionHistory({
     };
   }, [client, key]);
   useEffect(() => {
-    if (replay.current?.revision !== mapping.revision) replay.current = null;
+    if (replay.current?.revision !== mapping.revision) {
+      replay.current = null;
+      setConfirmation(false);
+    }
     setConflict(false);
     setError('');
   }, [mapping.revision]);
@@ -83,6 +95,7 @@ export function MockCollectionHistory({
       if (failure.status === 401) session.expire(revision);
       if (failure.status === 404) {
         setUnavailable(true);
+        setupRef.current?.onAccessLost();
         client.removeQueries({ queryKey: key });
       }
       if (failure.status === 403) {
@@ -94,7 +107,8 @@ export function MockCollectionHistory({
   useEffect(() => {
     if (query.error instanceof ApiError && valid()) {
       if (query.error.status === 401) session.expire(revision);
-      if (query.error.status === 404) {
+      if (query.error.status === 404 || (setupRef.current && query.error.status === 403)) {
+        setupRef.current?.onAccessLost();
         setUnavailable(true);
         client.removeQueries({ queryKey: key });
       }
@@ -102,6 +116,31 @@ export function MockCollectionHistory({
   }, [query.error, client, key, revision, session.expire, valid]);
   const active =
     query.data?.some((run) => run.status === 'pending' || run.status === 'running') ?? false;
+  const setupReady =
+    valid() && owner && !queueDenied && !unavailable && !conflict && query.isSuccess;
+  const setupBusy = busy || confirmation;
+  const hasSavedResult =
+    valid() &&
+    !unavailable &&
+    query.isSuccess &&
+    query.data.some(
+      (run) =>
+        run.status === 'succeeded' &&
+        run.result !== null &&
+        run.mappingRevision === mapping.revision,
+    );
+  useEffect(() => {
+    const signature = JSON.stringify([
+      setupReady,
+      setupBusy,
+      hasSavedResult,
+      mapping.revision,
+      !!setupRef.current,
+    ]);
+    if (lastStatus.current === signature) return;
+    lastStatus.current = signature;
+    setupRef.current?.onStatus({ ready: setupReady, busy: setupBusy, hasSavedResult });
+  });
   // At most 30 automatic refreshes per observation period. Manual refresh starts another period.
   useEffect(() => {
     if (
@@ -147,13 +186,17 @@ export function MockCollectionHistory({
     controller.current = next;
     const body = replay.current ?? { revision: mapping.revision, requestId: crypto.randomUUID() };
     replay.current = body;
+    setConfirmation(true);
     try {
       const run = await request(path, (value) => parseRun(value, mapping, body.revision), {
         body,
         signal: next.signal,
       });
       if (!valid() || next.signal.aborted) return;
-      if (replay.current === body) replay.current = null;
+      if (replay.current === body) {
+        replay.current = null;
+        setConfirmation(false);
+      }
       setNotice(`Mock collection queued for saved revision ${run.mappingRevision}.`);
       setConflict(false);
       polls.current = 0;
@@ -173,7 +216,10 @@ export function MockCollectionHistory({
       // Network, server and unverifiable success responses may follow an accepted request.
       // Keep the same request ID until an accepted result or definite client rejection.
       if (failure instanceof ApiError && failure.status >= 400 && failure.status < 500) {
-        if (replay.current === body) replay.current = null;
+        if (replay.current === body) {
+          replay.current = null;
+          setConfirmation(false);
+        }
       }
       if (failure instanceof ApiError && failure.status === 409) {
         setConflict(true);
@@ -217,27 +263,33 @@ export function MockCollectionHistory({
   }
   return (
     <section className="mt-6 border-t border-slate-200 pt-6" aria-label="Mock collection history">
-      <h4 className="text-lg font-semibold">Mock collection history</h4>
-      <p className="mt-2">Fictional data only. These runs do not change your workspace metrics.</p>
-      <p className="mt-2">
-        Queueing uses saved mock revision {mapping.revision}. Save edits first to include them.
-      </p>
+      <div hidden={setup?.step === 'configure'}>
+        <h4 className="text-lg font-semibold">Mock collection history</h4>
+        <p className="mt-2">
+          Fictional data only. These runs do not change your workspace metrics.
+        </p>
+        <p className="mt-2">
+          Queueing uses saved mock revision {mapping.revision}. Save edits first to include them.
+        </p>
+      </div>
       {unavailable || (query.error instanceof ApiError && query.error.status === 404) ? (
         <p role="alert">Run history is no longer available to you.</p>
       ) : (
         <>
-          {owner && !queueDenied ? (
-            <button
-              className="control mt-3"
-              type="button"
-              disabled={busy || conflict || (active && replay.current === null)}
-              onClick={() => void queue()}
-            >
-              Queue mock collection
-            </button>
-          ) : (
-            <p className="mt-2">Only workspace owners can queue mock collection.</p>
-          )}
+          <span hidden={setup?.step === 'configure'}>
+            {owner && !queueDenied ? (
+              <button
+                className="control mt-3"
+                type="button"
+                disabled={busy || conflict || (active && replay.current === null)}
+                onClick={() => void queue()}
+              >
+                Queue mock collection
+              </button>
+            ) : (
+              <p className="mt-2">Only workspace owners can queue mock collection.</p>
+            )}
+          </span>
           <button
             className="control mt-3 ml-3"
             type="button"
@@ -279,14 +331,18 @@ export function MockCollectionHistory({
             <p role="alert" className="mt-2">
               {errorMessage(query.error)} Refresh runs to try again.
             </p>
-          ) : query.data.length === 0 ? (
-            <p className="mt-2">No mock collection runs yet.</p>
           ) : (
-            <ol className="mt-4 space-y-4" aria-label="Latest 25 mock collection runs">
-              {query.data.map((run) => (
-                <RunSummary key={run.id} run={run} />
-              ))}
-            </ol>
+            <div hidden={setup?.step === 'configure'}>
+              {query.data.length === 0 ? (
+                <p className="mt-2">No mock collection runs yet.</p>
+              ) : (
+                <ol className="mt-4 space-y-4" aria-label="Latest 25 mock collection runs">
+                  {query.data.map((run) => (
+                    <RunSummary key={run.id} run={run} />
+                  ))}
+                </ol>
+              )}
+            </div>
           )}
           {active && (
             <p className="mt-3">

@@ -83,6 +83,8 @@ pnpm worker:mock --once
 
 ## Workspace, service and mock settings
 
+Owners can use **Set up a data source** in Workspace for the guided wizard: select or create a service, choose GitHub Deployments, Argo CD or a fictional demo, save the source configuration, collect a reporting window, then review independent evidence requirements. Back/Next preserves source drafts. Continue to Collection only after saving; continue to Evidence only after a successful result exists for the current saved revision. A queued request still needs its separate worker. Finish means the setup was reviewed, not that coverage is complete. See the [wizard guide](providers/source-setup-wizard.md) for real-source prerequisites and evidence expectations. Existing service controls remain available for ongoing source management.
+
 1. In Settings, sign in with GitHub. Create and select a workspace; its creator becomes owner.
 2. Create and select a service. No example workspace or service is seeded.
 3. Choose **GitHub (mock)** or **Argo CD (mock)** as primary deployment source. Enter `production` for the fixture's environment.

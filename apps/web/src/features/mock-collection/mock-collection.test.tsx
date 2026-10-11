@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
 import { DeploymentMappings } from '../deployment-mappings/deployment-mappings';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import { completed, json, mapping, queued, scope } from './fixtures.test-support';
 import { MockCollectionHistory } from './mock-collection';
 
@@ -18,12 +19,13 @@ vi.mock('../identity/session', () => ({
 const fetchMock =
   vi.fn<(input: string | URL | Request, options?: RequestInit) => Promise<Response>>();
 const reload = vi.fn<() => Promise<void>>();
-function mount(owner = true) {
+function mount(owner = true, setup?: SourceSetupPresentation) {
   const client = createQueryClient();
   const content = (serviceId = scope.serviceId, userId = 'alice', mappingRevision = 1) => (
     <QueryClientProvider client={client}>
       <MockCollectionHistory
         key={`${serviceId}:${userId}:${identity.revision}`}
+        {...(setup ? { setup } : {})}
         mapping={{ ...mapping, serviceId, revision: mappingRevision }}
         userId={userId}
         owner={owner}
@@ -409,5 +411,59 @@ describe('mock collection history', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('mock setup collection status', () => {
+  it('requires success for current mapping revision without blocking navigation on queued work', async () => {
+    fetchMock.mockResolvedValue(json({ runs: [queued] }));
+    const onStatus = vi.fn();
+    const view = mount(true, { step: 'collect', onStatus, onAccessLost: vi.fn() });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    fetchMock.mockResolvedValue(json({ runs: [completed] }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh runs' }));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: false, hasSavedResult: true }),
+    );
+    view.switchScope(scope.serviceId, 'alice', 2);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    view.unmount();
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: false });
+  });
+  it('keeps unconfirmed queue request busy across refresh, and propagates read access loss', async () => {
+    fetchMock.mockImplementation(async (_input, options) =>
+      options?.method === 'POST' ? json({}, 503) : json({ runs: [] }),
+    );
+    const onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    mount(true, { step: 'collect', onStatus, onAccessLost });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await screen.findByText(/Retry queueing to confirm the same request/);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: true, hasSavedResult: false }),
+    );
+    fetchMock.mockResolvedValue(json({}, 403));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh runs' }));
+    await waitFor(() => expect(onAccessLost).toHaveBeenCalled());
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(false));
   });
 });

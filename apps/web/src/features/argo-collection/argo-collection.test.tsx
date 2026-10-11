@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
 import { withMetric } from '../measurements/fixtures.test-support';
+import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import { WorkspacePage } from '../workspace/workspace-page';
 import { ArgoCollection } from './argo-collection';
 import {
@@ -32,16 +33,18 @@ vi.mock('../identity/session', () => ({
 }));
 const fetchMock =
   vi.fn<(input: string | URL | Request, options?: RequestInit) => Promise<Response>>();
-function mount(owner = true) {
+function mount(owner = true, setup?: SourceSetupPresentation) {
   const client = createQueryClient();
   const content = (
     serviceId = scope.serviceId,
     userId = 'alice',
     workspaceId = scope.workspaceId,
     role: 'owner' | 'member' = owner ? 'owner' : 'member',
+    presentation = setup,
   ) => (
     <QueryClientProvider client={client}>
       <ArgoCollection
+        {...(presentation ? { setup: presentation } : {})}
         workspace={{ id: workspaceId, name: 'Test', role }}
         serviceId={serviceId}
         serviceName="Delivery"
@@ -54,6 +57,16 @@ function mount(owner = true) {
   return {
     ...view,
     client,
+    present: (presentation: SourceSetupPresentation) =>
+      view.rerender(
+        content(
+          scope.serviceId,
+          'alice',
+          scope.workspaceId,
+          owner ? 'owner' : 'member',
+          presentation,
+        ),
+      ),
     switchScope: (serviceId: string, userId = 'alice', workspaceId = scope.workspaceId) =>
       view.rerender(content(serviceId, userId, workspaceId)),
     demote: () => view.rerender(content(scope.serviceId, 'alice', scope.workspaceId, 'member')),
@@ -1097,4 +1110,268 @@ describe('live Argo workflow', () => {
       applicationOperationsBelongToService: true,
     });
   });
+});
+
+describe('Argo setup presentation', () => {
+  it('keeps staged forms mounted, rejects dirty drafts and retains dates across Back/Next', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-connection')
+        ? json({
+            connection,
+            configured: true,
+            sources: [{ ...source, archiveProducers: [archiveProducer] }],
+          })
+        : defaultRead(input),
+    );
+    const onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    const setup: SourceSetupPresentation = { step: 'configure', onStatus, onAccessLost };
+    const view = mount(true, setup);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    const collect = screen.getByRole('button', { name: 'Collect Argo evidence', hidden: true });
+    expect(collect).not.toBeVisible();
+    const field = screen.getByLabelText('Source history archive');
+    fireEvent.change(field, { target: { value: archiveProducer.producerId } });
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(false));
+    view.present({ ...setup, step: 'collect', onStatus: (status) => onStatus(status) });
+    expect(field).not.toBeVisible();
+    expect(collect).toBeVisible();
+    dates();
+    view.present(setup);
+    expect(screen.getByLabelText('Source history archive')).toBe(field);
+    expect(field).toHaveValue(archiveProducer.producerId);
+    fireEvent.change(field, { target: { value: '' } });
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(true));
+    view.present({ ...setup, step: 'collect' });
+    expect(screen.getByLabelText('Start date (UTC)')).toHaveValue('2026-01-01');
+    view.unmount();
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: false });
+  });
+  it('requires persisted configuration and ignores successful results from older revisions', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-connection')
+        ? json({ connection: null, configured: true, sources: [source] })
+        : json({ runs: [completed] }),
+    );
+    const onStatus = vi.fn();
+    const view = mount(true, { step: 'configure', onStatus, onAccessLost: vi.fn() });
+    await screen.findByText('No live Argo connection saved.');
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: false,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-connection')
+        ? json({ connection: { ...connection, revision: 2 }, configured: true, sources: [source] })
+        : json({ runs: [completed] }),
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Refresh connection and runs' }));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    view.unmount();
+  });
+  it('keeps accepted queued work navigable, saved success only after completion, and read denial as access loss', async () => {
+    let run = queued;
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-collection-runs') ? json({ runs: [run] }) : defaultRead(input),
+    );
+    const onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    mount(true, { step: 'collect', onStatus, onAccessLost });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    run = completed;
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Refresh connection and runs' }));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: false, hasSavedResult: true }),
+    );
+    fetchMock.mockResolvedValue(json({}, 403));
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Refresh connection and runs' }));
+    await waitFor(() => expect(onAccessLost).toHaveBeenCalled());
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(false));
+  });
+});
+
+it('blocks setup readiness when current Argo source grant drifts', async () => {
+  fetchMock.mockImplementation(async (input) =>
+    String(input).endsWith('/argo-connection')
+      ? json({ connection, configured: true, sources: [{ ...source, environment: 'changed' }] })
+      : defaultRead(input),
+  );
+  const onStatus = vi.fn();
+  mount(true, { step: 'configure', onStatus, onAccessLost: vi.fn() });
+  await screen.findByText(/Granted source changed/);
+  await waitFor(() =>
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: false }),
+  );
+});
+
+describe('Argo setup request fences', () => {
+  it('keeps unconfirmed replay busy and mounted through stage changes', async () => {
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST' ? json({}, 503) : defaultRead(input),
+    );
+    const onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    const setup: SourceSetupPresentation = { step: 'collect', onStatus, onAccessLost };
+    const view = mount(true, setup);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    dates();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Collect Argo evidence' }));
+    const retry = await screen.findByRole('button', { name: 'Retry collection request' });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: true, hasSavedResult: false }),
+    );
+    view.present({ ...setup, step: 'configure' });
+    expect(retry).not.toBeVisible();
+    expect(screen.getByRole('alert')).toBeVisible();
+    view.present(setup);
+    expect(screen.getByRole('button', { name: 'Retry collection request' })).toBe(retry);
+    await userEvent.setup().click(retry);
+    expect(posts()[0]?.[1]?.body).toBe(posts()[1]?.[1]?.body);
+    expect(onAccessLost).not.toHaveBeenCalled();
+  });
+  it('clears pending confirmation when disconnect removes the collection form', async () => {
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST'
+        ? String(input).endsWith('/argo-connection/disconnect')
+          ? json({ connection: { ...connection, revision: 2, active: false } })
+          : json({}, 503)
+        : defaultRead(input),
+    );
+    const onStatus = vi.fn();
+    const setup: SourceSetupPresentation = { step: 'collect', onStatus, onAccessLost: vi.fn() };
+    const view = mount(true, setup);
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(true));
+    dates();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Collect Argo evidence' }));
+    await screen.findByRole('button', { name: 'Retry collection request' });
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].busy).toBe(true));
+    view.present({ ...setup, step: 'configure' });
+    await user.click(screen.getByRole('button', { name: 'Disconnect Argo' }));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: false,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry collection request', hidden: true }),
+    ).not.toBeInTheDocument();
+  });
+  it('blocks advancement after operator write denial while preserving scoped read access', async () => {
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'POST' ? json({}, 403) : defaultRead(input),
+    );
+    const onStatus = vi.fn(),
+      onAccessLost = vi.fn();
+    mount(true, { step: 'collect', onStatus, onAccessLost });
+    await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(true));
+    dates();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Collect Argo evidence' }));
+    await screen.findByText(/This action is not permitted/);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: false,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    expect(onAccessLost).not.toHaveBeenCalled();
+  });
+  it('accepted enqueue unlocks navigation without claiming saved success', async () => {
+    let accepted = false;
+    fetchMock.mockImplementation(async (input, options) => {
+      if (options?.method === 'POST') {
+        accepted = true;
+        return json({ run: queued });
+      }
+      if (String(input).endsWith('/argo-collection-runs'))
+        return json({ runs: accepted ? [queued] : [] });
+      return defaultRead(input);
+    });
+    const onStatus = vi.fn();
+    mount(true, { step: 'collect', onStatus, onAccessLost: vi.fn() });
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+    dates();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Collect Argo evidence' }));
+    await screen.findByText('Collection confirmed for saved revision 1.');
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith({
+        ready: true,
+        busy: false,
+        hasSavedResult: false,
+      }),
+    );
+  });
+});
+
+it('reports Argo detail reads without blocking navigation and blocks readiness until failed reads recover', async () => {
+  const detail = deferred();
+  fetchMock.mockImplementation(async (input) =>
+    String(input).endsWith(`/${completed.id}`)
+      ? detail.promise
+      : String(input).endsWith('/argo-collection-runs')
+        ? json({ runs: [completed] })
+        : defaultRead(input),
+  );
+  const onStatus = vi.fn();
+  mount(true, { step: 'collect', onStatus, onAccessLost: vi.fn() });
+  await waitFor(() =>
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: false, hasSavedResult: true }),
+  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: `View run ${completed.createdAt}` }));
+  await waitFor(() =>
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: false, hasSavedResult: true }),
+  );
+  await act(async () => detail.resolve(json({}, 500)));
+  await waitFor(() =>
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: true }),
+  );
+  fetchMock.mockImplementation(async (input) => defaultRead(input));
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Retry run detail' }));
+  await waitFor(() =>
+    expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: false, hasSavedResult: true }),
+  );
 });

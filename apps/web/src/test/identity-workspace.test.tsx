@@ -80,6 +80,83 @@ beforeEach(() => {
   };
 });
 describe('browser identity and workspace', () => {
+  it('preserves member service controls when owner demotion closes an open wizard', async () => {
+    let owner = true;
+    handler = (path) => {
+      if (path === '/api/me') return json(identity());
+      if (path === '/api/workspaces')
+        return json({
+          workspaces: [workspace(first, 'First workspace', owner ? 'owner' : 'member')],
+        });
+      if (path.endsWith('/services'))
+        return json({
+          services: [{ id: serviceId, workspaceId: first, name: 'Readable service' }],
+        });
+      throw new Error(`Unexpected test request: ${path}`);
+    };
+    const { client } = renderApp();
+    const user = userEvent.setup();
+    await choose(user);
+    await user.click(await screen.findByRole('button', { name: 'Set up a data source' }));
+    owner = false;
+    await act(async () => {
+      await client.invalidateQueries({
+        predicate: (query) => query.queryKey.at(-1) === 'workspaces',
+      });
+    });
+    expect(await screen.findByText('Your role: member')).toBeVisible();
+    expect(
+      screen.queryByRole('region', { name: 'Data source setup wizard' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Mock settings for Readable service' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Live GitHub for Readable service' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Live Argo for Readable service' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Set up a data source' })).not.toBeInTheDocument();
+  });
+  it('opens owner source wizard, creates a service inside it and resets on workspace change', async () => {
+    let created = false;
+    handler = (path, options) => {
+      if (path === '/api/me') return json(identity());
+      if (path === '/api/workspaces')
+        return json({ workspaces: [workspace(), workspace(second, 'Member workspace', 'member')] });
+      if (path.endsWith('/services')) {
+        if (options?.method === 'POST') {
+          created = true;
+          return json({ service: { id: serviceId, workspaceId: first, name: 'Wizard service' } });
+        }
+        return json({
+          services:
+            created && path.includes(first)
+              ? [{ id: serviceId, workspaceId: first, name: 'Wizard service' }]
+              : [],
+        });
+      }
+      throw new Error(`Unexpected test request: ${path}`);
+    };
+    renderApp();
+    const user = userEvent.setup();
+    await choose(user);
+    await user.click(await screen.findByRole('button', { name: 'Set up a data source' }));
+    expect(screen.getByRole('heading', { name: 'Step 1 of 5: Service' })).toHaveFocus();
+    await user.type(screen.getByLabelText('New service name'), 'Wizard service');
+    await user.click(screen.getByRole('button', { name: 'Create service for setup' }));
+    await screen.findByRole('option', { name: 'Wizard service' });
+    await user.selectOptions(screen.getByLabelText('Service for setup'), serviceId);
+    await user.click(screen.getByRole('button', { name: 'Next: Source' }));
+    expect(screen.getByRole('heading', { name: 'Step 2 of 5: Source' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Close setup' }));
+    expect(screen.getByRole('button', { name: 'Set up a data source' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Set up a data source' }));
+    expect(screen.getByRole('heading', { name: 'Step 1 of 5: Service' })).toBeVisible();
+    await choose(user, second);
+    await screen.findByText('Your role: member');
+    expect(
+      screen.queryByRole('region', { name: 'Data source setup wizard' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set up a data source' })).not.toBeInTheDocument();
+  });
   it('shows signed-out state, posts only allowed login fields and rejects untrusted redirect', async () => {
     handler = (path) =>
       path === '/api/me'
