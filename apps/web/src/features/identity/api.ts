@@ -117,10 +117,10 @@ export function apiOrigin(value: unknown): string {
 export async function request<T>(
   path: string,
   parse: (value: unknown) => T,
-  options: { signal?: AbortSignal; body?: object } = {},
+  options: { signal?: AbortSignal; body?: object; method?: 'DELETE' } = {},
 ): Promise<T> {
   const response = await fetch(`${apiOrigin(import.meta.env.VITE_API_URL)}${path}`, {
-    method: options.body ? 'POST' : 'GET',
+    method: options.method ?? (options.body ? 'POST' : 'GET'),
     credentials: 'include',
     cache: 'no-store',
     referrerPolicy: 'no-referrer',
@@ -130,6 +130,10 @@ export async function request<T>(
       : {}),
   });
   if (!response.ok) throw new ApiError(response.status);
+  if (options.method === 'DELETE') {
+    if (response.status !== 204) throw new ApiError(0);
+    return parse(undefined);
+  }
   let value: unknown;
   try {
     value = await response.json();
@@ -160,4 +164,71 @@ export function parseRedirect(value: unknown): string {
 }
 export function parseLogout(value: unknown): void {
   if (record(value).success !== true) throw new ApiError(0);
+}
+
+export type WorkspaceMember = {
+  userId: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'member';
+  createdAt: string;
+};
+export type PendingInvitation = {
+  id: string;
+  email: string;
+  status: 'pending';
+  createdAt: string;
+  expiresAt: string;
+};
+export type AccessList<T> = { items: T[]; hasMore: boolean };
+function timestamp(value: unknown): string {
+  const result = string(value);
+  if (!Number.isFinite(Date.parse(result))) throw new ApiError(0);
+  return result;
+}
+function accessList<T>(
+  value: unknown,
+  workspaceId: string,
+  key: string,
+  parse: (value: unknown) => T,
+): AccessList<T> {
+  const data = record(value);
+  const items = data[key];
+  if (
+    data.workspaceId !== workspaceId ||
+    typeof data.hasMore !== 'boolean' ||
+    !Array.isArray(items) ||
+    items.length > 100
+  )
+    throw new ApiError(0);
+  return { items: items.map(parse), hasMore: data.hasMore };
+}
+export function parseMembers(value: unknown, workspaceId: string): AccessList<WorkspaceMember> {
+  return accessList(value, workspaceId, 'members', (value) => {
+    const item = record(value);
+    if (item.role !== 'owner' && item.role !== 'member') throw new ApiError(0);
+    return {
+      userId: string(item.userId),
+      name: string(item.name),
+      email: string(item.email),
+      role: item.role,
+      createdAt: timestamp(item.createdAt),
+    };
+  });
+}
+export function parsePendingInvitations(
+  value: unknown,
+  workspaceId: string,
+): AccessList<PendingInvitation> {
+  return accessList(value, workspaceId, 'invitations', (value) => {
+    const item = record(value);
+    if (item.status !== 'pending') throw new ApiError(0);
+    return {
+      id: uuid(item.id),
+      email: string(item.email),
+      status: item.status,
+      createdAt: timestamp(item.createdAt),
+      expiresAt: timestamp(item.expiresAt),
+    };
+  });
 }

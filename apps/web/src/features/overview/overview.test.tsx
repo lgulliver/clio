@@ -6,9 +6,16 @@ import { createQueryClient } from '../../lib/query-client';
 import {
   archiveSummary,
   completed as argoCompleted,
+  result as argoResult,
   coverageAssessment,
 } from '../argo-collection/fixtures.test-support';
-import { completed, json, scope } from '../github-collection/fixtures.test-support';
+import {
+  completed,
+  result as githubResult,
+  json,
+  scope,
+} from '../github-collection/fixtures.test-support';
+import { withMetric } from '../measurements/fixtures.test-support';
 import { completed as mockCompleted } from '../mock-collection/fixtures.test-support';
 import { Overview } from './overview';
 
@@ -102,6 +109,27 @@ beforeEach(() => {
 });
 
 describe('stored results overview', () => {
+  it('shows all five actual calculations for each live provider', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/github-collection-runs')
+        ? json({ runs: [{ ...completed, result: withMetric(githubResult) }] })
+        : String(input).endsWith('/argo-collection-runs')
+          ? json({ runs: [{ ...argoCompleted, result: withMetric(argoResult) }] })
+          : defaultRead(input),
+    );
+    mount();
+    await select();
+    const github = await screen.findByRole('region', { name: 'Live GitHub stored results' });
+    const argo = await screen.findByRole('region', { name: 'Live Argo CD stored results' });
+    for (const card of [github, argo]) {
+      const metrics = await within(card).findByRole('region', { name: /Engineering metrics$/ });
+      expect(within(metrics).getAllByRole('heading')).toHaveLength(5);
+      expect(within(metrics).getByRole('region', { name: /Change lead time$/ })).toHaveTextContent(
+        'Observed candidates: 1',
+      );
+    }
+  });
+
   it('signed-out/checking/error states make no evidence absence claim or protected reads', () => {
     identity.status = 'signed-out';
     const view = mount();
@@ -190,7 +218,7 @@ describe('stored results overview', () => {
       expect(within(card).getByText('2026-01-04T00:01:00.000001Z')).toBeVisible();
       expect(within(card).getByText(/2026-01-01T00:00:00Z to 2026-01-03T00:00:00Z/)).toBeVisible();
       expect(within(card).getByText(/Coverage incomplete/)).toBeVisible();
-      expect(within(card).getByText(/Deployment rate, change failure rate/)).toHaveTextContent(
+      expect(within(card).getByText(/All five metric details unavailable/)).toHaveTextContent(
         'unavailable',
       );
     },

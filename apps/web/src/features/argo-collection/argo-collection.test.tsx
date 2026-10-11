@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
+import { withMetric } from '../measurements/fixtures.test-support';
 import { WorkspacePage } from '../workspace/workspace-page';
 import { ArgoCollection } from './argo-collection';
 import {
@@ -13,6 +14,7 @@ import {
   coverageAssessment,
   json,
   queued,
+  result,
   scope,
   source,
 } from './fixtures.test-support';
@@ -90,6 +92,26 @@ beforeEach(() => {
 });
 
 describe('live Argo workflow', () => {
+  it('renders all five saved calculations in Settings detail', async () => {
+    const run = { ...completed, result: withMetric(result) };
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/argo-collection-runs')
+        ? json({ runs: [run] })
+        : String(input).endsWith(`/${completed.id}`)
+          ? json({ run })
+          : defaultRead(input),
+    );
+    mount(false);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: `View run ${completed.createdAt}` }));
+    const metrics = await screen.findByRole('region', { name: 'Argo CD: Engineering metrics' });
+    expect(within(metrics).getAllByRole('heading')).toHaveLength(5);
+    expect(
+      within(metrics).getByRole('region', { name: 'Argo CD: Failed deployment recovery time' }),
+    ).toHaveTextContent('600 seconds');
+  });
+
   it('member reads sealed capture bounds and missing intervals without archive write controls', async () => {
     const captured = {
       ...completed,
@@ -185,9 +207,7 @@ describe('live Argo workflow', () => {
     );
     expect(within(detail).getByText(/Evidence cutoff:.*OEMS revision:/)).toBeVisible();
     expect(
-      within(detail).getByText(
-        /Deployments per day, change failure rate and recovery time are unavailable/,
-      ),
+      within(detail).getByText(/All five metric details unavailable for this older saved result/),
     ).toBeVisible();
     expect(posts()).toHaveLength(0);
   });

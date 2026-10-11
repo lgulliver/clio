@@ -103,6 +103,60 @@ export function createIdentityRepository(pool: Pool) {
         createRepository(client).listServices(workspaceId),
       );
     },
+    async listMembers(actor: Actor, workspaceId: string) {
+      return scoped(actor, workspaceId, true, async (client) => {
+        const result = await client.query<{
+          userId: string;
+          name: string;
+          email: string;
+          role: 'owner' | 'member';
+          createdAt: Date;
+        }>(
+          `SELECT m.user_id AS "userId", u.name, u.email, m.role, m.created_at AS "createdAt"
+           FROM workspace_memberships m JOIN auth_users u ON u.id = m.user_id
+           WHERE m.workspace_id = $1 ORDER BY m.user_id LIMIT 101`,
+          [workspaceId],
+        );
+        return {
+          workspaceId,
+          members: result.rows.slice(0, 100).map((row) => ({
+            userId: row.userId,
+            name: row.name,
+            email: row.email,
+            role: row.role,
+            createdAt: row.createdAt.toISOString(),
+          })),
+          hasMore: result.rows.length > 100,
+        };
+      });
+    },
+    async listInvitations(actor: Actor, workspaceId: string) {
+      return scoped(actor, workspaceId, true, async (client) => {
+        const result = await client.query<{
+          id: string;
+          email: string;
+          createdAt: Date;
+          expiresAt: Date;
+        }>(
+          `SELECT id, email, created_at AS "createdAt", expires_at AS "expiresAt"
+           FROM workspace_invitations WHERE workspace_id = $1
+           AND consumed_at IS NULL AND cancelled_at IS NULL AND expires_at > clock_timestamp()
+           ORDER BY id LIMIT 101`,
+          [workspaceId],
+        );
+        return {
+          workspaceId,
+          invitations: result.rows.slice(0, 100).map((row) => ({
+            id: row.id,
+            email: row.email,
+            status: 'pending' as const,
+            createdAt: row.createdAt.toISOString(),
+            expiresAt: row.expiresAt.toISOString(),
+          })),
+          hasMore: result.rows.length > 100,
+        };
+      });
+    },
     async createService(actor: Actor, workspaceId: string, serviceName: unknown) {
       const normalized = name(serviceName);
       return scoped(actor, workspaceId, true, (client) =>
@@ -192,6 +246,7 @@ export function createIdentityRepository(pool: Pool) {
             [workspaceId],
           );
           if ((owners.rows[0]?.count ?? 0) <= 1) throw new IdentityError(409, 'last_owner');
+          throw new IdentityError(409, 'owner_protected');
         }
         // An earlier invitation must not undo revocation. A later explicit
         // invitation can grant access again; cancellation is scoped to this

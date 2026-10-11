@@ -7,6 +7,7 @@ import { CoverageAssessment } from '../argo-collection/coverage-assessment';
 import { type Run as GitHubRun, parseRuns as parseGitHubRuns } from '../github-collection/api';
 import { ApiError, errorMessage, parseServices, parseWorkspaces, request } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MetricResults } from '../measurements/metric-results';
 import { type Run as MockRun, parseRuns as parseMockRuns } from '../mock-collection/api';
 
 type StoredRun = GitHubRun | ArgoRun | MockRun;
@@ -349,10 +350,19 @@ function ResultHistory({ runs }: { runs: StoredRun[] }) {
             </>
           )}
           <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
-          <p>
-            Deployment rate, change failure rate and failed deployment recovery time: unavailable.
-            Change lead time and deployment rework rate: unavailable from these stored results.
-          </p>
+          {result.mode === 'live' ? (
+            <MetricResults
+              result={result.metricResult}
+              sourceLabel={
+                'provider' in result && result.provider === 'argocd' ? 'Argo CD' : 'GitHub'
+              }
+            />
+          ) : (
+            <p>
+              Deployment rate, change failure rate and failed deployment recovery time: unavailable.
+              Change lead time and deployment rework rate: unavailable from these stored results.
+            </p>
+          )}
         </>
       ) : (
         <p>

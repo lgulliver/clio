@@ -80,6 +80,7 @@ export function captureGitHub(input: {
     throw new Error('Unexpected GitHub coverage');
   const result = parseResult(
     {
+      metricResult: metric,
       mode: 'live',
       workspaceId: connection.workspaceId,
       serviceId: connection.serviceId,

@@ -314,6 +314,18 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       );
       return { preview: previewMapping(input.mapping, input.service) };
     });
+    routes.get('/api/workspaces/:workspaceId/members', async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const id = uuid(params(request, ['workspaceId']).workspaceId);
+      if (!repository) throw new IdentityError(503, 'unavailable');
+      return repository.listMembers(current, id);
+    });
+    routes.get('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const id = uuid(params(request, ['workspaceId']).workspaceId);
+      if (!repository) throw new IdentityError(503, 'unavailable');
+      return repository.listInvitations(current, id);
+    });
     routes.post('/api/workspaces/:workspaceId/invitations', async (request, reply) => {
       const current = await actor(request, reply, true);
       const id = uuid(params(request, ['workspaceId']).workspaceId);

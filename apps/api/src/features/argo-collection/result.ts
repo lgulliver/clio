@@ -1,6 +1,7 @@
 import { oemsContract } from '@clio/oems';
 import { storedRevision } from '../github-collection/db-value.ts';
 import { object, uuid } from '../identity/input.ts';
+import { parseMetricResult } from '../measurements/metric-result.ts';
 import { parseArchiveSummary } from './archive-summary.ts';
 import { parseCoverageAssessment } from './coverage-assessment.ts';
 import {
@@ -65,6 +66,7 @@ export function parseResult(
     'coverageAssessment',
     'archiveSummary',
     'enrichmentSummary',
+    'metricResult',
     'mode',
     'provider',
     'retainedReceiptCount',
@@ -124,7 +126,7 @@ export function parseResult(
     frequency.status !== 'provisional' ||
     frequency.deploymentsPerDay !== null ||
     row.changeFailureRate !== null ||
-    row.failedDeploymentRecoveryTime !== null ||
+    (!Object.hasOwn(row, 'metricResult') && row.failedDeploymentRecoveryTime !== null) ||
     qualifyingCount + unknownCount > deploymentCount ||
     frequencyCount > qualifyingCount ||
     instant(cutoff) < instant(connection.observedAt) ||
@@ -159,7 +161,32 @@ export function parseResult(
       archiveSummary.missingIntervals.some((i) => instant(i.end) > instant(cutoff)))
   )
     throw new Error('Invalid archive result');
+  const metricResult = Object.hasOwn(row, 'metricResult')
+    ? parseMetricResult(row.metricResult, {
+        serviceId: connection.serviceId,
+        window: pinnedWindow,
+        evidenceCutoff: cutoff,
+        unknownCount,
+        deploymentFrequency: {
+          count: frequencyCount,
+          status: String(frequency.status),
+          deploymentsPerDay: null,
+          qualityReasons,
+        },
+        changeFailureRate: null,
+        failedDeploymentRecoveryTime:
+          typeof row.failedDeploymentRecoveryTime === 'number'
+            ? row.failedDeploymentRecoveryTime
+            : null,
+      })
+    : undefined;
+  if (
+    metricResult &&
+    metricResult.failed_deployment_recovery_time.median_seconds !== row.failedDeploymentRecoveryTime
+  )
+    throw new Error('Invalid recovery summary');
   return {
+    ...(metricResult ? { metricResult } : {}),
     ...(archiveSummary ? { archiveSummary } : {}),
     ...(Object.hasOwn(row, 'coverageAssessment')
       ? {
@@ -204,7 +231,8 @@ export function parseResult(
       qualityReasons,
     },
     changeFailureRate: null,
-    failedDeploymentRecoveryTime: null,
+    failedDeploymentRecoveryTime:
+      metricResult?.failed_deployment_recovery_time.median_seconds ?? null,
   };
 }
 export function storedWindow(value: unknown) {

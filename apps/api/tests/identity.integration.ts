@@ -623,3 +623,184 @@ describe('real identity/session/workspace boundary', () => {
     ).toBe(0);
   });
 });
+
+it('lists safe owner-only access, filters invitations, scopes writes and preserves immediate revocation', async () => {
+  const owner = await login('8001', 'access-owner@example.com');
+  const member = await login('8002', 'access-member@example.com');
+  const outsider = await login('8003', 'access-outsider@example.com');
+  const id = await workspace(owner.cookie, 'Access');
+  const other = await workspace(outsider.cookie, 'Other access');
+  const consumed = await invite(owner.cookie, id, 'access-member@example.com');
+  expect((await accept(member.cookie, consumed.token)).statusCode).toBe(200);
+  const cancelled = await invite(owner.cookie, id, 'cancelled-access@example.com');
+  await repository.cancelInvitation(owner, id, cancelled.id);
+  const expired = await invite(owner.cookie, id, 'expired-access@example.com');
+  await pool.query(
+    "UPDATE workspace_invitations SET created_at = now() - interval '8 days', expires_at = now() - interval '1 day' WHERE id = $1",
+    [expired.id],
+  );
+  const pending = await invite(owner.cookie, id, 'pending-access@example.com');
+  const cross = await invite(outsider.cookie, other, 'cross-access@example.com');
+  for (const suffix of ['members', 'invitations']) {
+    for (const [cookie, workspaceId, status] of [
+      [member.cookie, id, 403],
+      [outsider.cookie, id, 404],
+      [owner.cookie, other, 404],
+      [owner.cookie, randomUUID(), 404],
+    ] as const) {
+      expect(
+        (
+          await server.inject({
+            url: `/api/workspaces/${workspaceId}/${suffix}`,
+            headers: headers(cookie),
+          })
+        ).statusCode,
+      ).toBe(status);
+    }
+  }
+  const members = await server.inject({
+    url: `/api/workspaces/${id}/members`,
+    headers: headers(owner.cookie),
+  });
+  expect(members.statusCode).toBe(200);
+  expect(members.headers['cache-control']).toBe('no-store');
+  expect(record(members.json()).members).toEqual(
+    expect.arrayContaining([
+      {
+        userId: member.userId,
+        name: 'Name 8002',
+        email: 'access-member@example.com',
+        role: 'member',
+        createdAt: expect.any(String),
+      },
+    ]),
+  );
+  const invitations = await server.inject({
+    url: `/api/workspaces/${id}/invitations`,
+    headers: headers(owner.cookie),
+  });
+  expect(invitations.json()).toEqual({
+    workspaceId: id,
+    invitations: [
+      {
+        id: pending.id,
+        email: 'pending-access@example.com',
+        status: 'pending',
+        createdAt: expect.any(String),
+        expiresAt: expect.any(String),
+      },
+    ],
+    hasMore: false,
+  });
+  for (const response of [members, invitations]) {
+    for (const privateField of ['token', 'hash', 'session', 'account', 'created_by'])
+      expect(response.body).not.toContain(privateField);
+  }
+  for (const path of [`members/${member.userId}`, `invitations/${pending.id}`]) {
+    expect(
+      (
+        await server.inject({
+          method: 'DELETE',
+          url: `/api/workspaces/${id}/${path}`,
+          headers: headers(member.cookie),
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: 'DELETE',
+          url: `/api/workspaces/${id}/${path}`,
+          headers: { cookie: owner.cookie, origin: 'https://evil.example' },
+        })
+      ).statusCode,
+    ).toBe(403);
+  }
+  expect(
+    (
+      await server.inject({
+        method: 'DELETE',
+        url: `/api/workspaces/${id}/invitations/${cross.id}`,
+        headers: headers(owner.cookie),
+      })
+    ).statusCode,
+  ).toBe(404);
+  expect(
+    (
+      await server.inject({
+        method: 'DELETE',
+        url: `/api/workspaces/${id}/members/${owner.userId}`,
+        headers: headers(owner.cookie),
+      })
+    ).statusCode,
+  ).toBe(409);
+  await pool.query(
+    "INSERT INTO workspace_memberships (workspace_id, user_id, role) VALUES ($1, $2, 'owner')",
+    [id, outsider.userId],
+  );
+  expect(
+    (
+      await server.inject({
+        method: 'DELETE',
+        url: `/api/workspaces/${id}/members/${outsider.userId}`,
+        headers: headers(owner.cookie),
+      })
+    ).statusCode,
+  ).toBe(409);
+  expect(
+    (
+      await server.inject({
+        method: 'DELETE',
+        url: `/api/workspaces/${id}/invitations/${pending.id}`,
+        headers: headers(owner.cookie),
+      })
+    ).statusCode,
+  ).toBe(204);
+  expect((await repository.listInvitations(owner, id)).invitations).toEqual([]);
+  expect(
+    (
+      await server.inject({
+        method: 'DELETE',
+        url: `/api/workspaces/${id}/members/${member.userId}`,
+        headers: headers(owner.cookie),
+      })
+    ).statusCode,
+  ).toBe(204);
+  expect(
+    (
+      await server.inject({
+        url: `/api/workspaces/${id}/services`,
+        headers: headers(member.cookie),
+      })
+    ).statusCode,
+  ).toBe(404);
+  expect(
+    (await repository.listMembers(owner, id)).members.some((row) => row.userId === member.userId),
+  ).toBe(false);
+  await pool.query('DELETE FROM auth_sessions WHERE id = $1', [owner.sessionId]);
+  await expect(repository.listMembers(owner, id)).rejects.toMatchObject({ status: 401 });
+  await expect(repository.listInvitations(owner, id)).rejects.toMatchObject({ status: 401 });
+});
+
+it('bounds member and invitation reads and reports overflow honestly', async () => {
+  const owner = await login('8101', 'bounded-access@example.com');
+  const id = await workspace(owner.cookie, 'Bounded access');
+  for (let index = 0; index < 101; index += 1) {
+    const userId = `bounded-${id}-${index}`;
+    await pool.query(
+      'INSERT INTO auth_users (id, name, email, email_verified) VALUES ($1, $2, $3, true)',
+      [userId, `Fixture ${index}`, `${userId}@example.com`],
+    );
+    await pool.query(
+      "INSERT INTO workspace_memberships (workspace_id, user_id, role) VALUES ($1, $2, 'member')",
+      [id, userId],
+    );
+    await repository.invite(owner, id, `invite-${index}@example.com`);
+  }
+  const members = await repository.listMembers(owner, id);
+  const invitations = await repository.listInvitations(owner, id);
+  expect(members.members).toHaveLength(100);
+  expect(members.hasMore).toBe(true);
+  expect(invitations.invitations).toHaveLength(100);
+  expect(invitations.hasMore).toBe(true);
+});

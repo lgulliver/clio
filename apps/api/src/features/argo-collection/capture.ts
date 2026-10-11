@@ -112,6 +112,7 @@ export function captureArgo(input: {
   const result = parseResult(
     {
       ...(input.archiveSummary ? { archiveSummary: input.archiveSummary } : {}),
+      metricResult: metric,
       mode: 'live',
       workspaceId: connection.workspaceId,
       serviceId: connection.serviceId,

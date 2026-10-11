@@ -1,5 +1,6 @@
 import { oemsContract } from '@clio/oems';
 import { object, uuid } from '../identity/input.ts';
+import { parseMetricResult } from '../measurements/metric-result.ts';
 import { storedRevision } from './db-value.ts';
 import {
   type Connection,
@@ -29,6 +30,7 @@ export function parseResult(
   pinnedWindow: ReturnType<typeof windowInput>,
 ) {
   const row = object(value, [
+    'metricResult',
     'mode',
     'workspaceId',
     'serviceId',
@@ -79,7 +81,7 @@ export function parseResult(
     frequency.status !== 'provisional' ||
     frequency.deploymentsPerDay !== null ||
     row.changeFailureRate !== null ||
-    row.failedDeploymentRecoveryTime !== null ||
+    (!Object.hasOwn(row, 'metricResult') && row.failedDeploymentRecoveryTime !== null) ||
     qualifyingCount + unknownCount > deploymentCount ||
     frequencyCount > qualifyingCount ||
     instant(cutoff) < instant(connection.observedAt) ||
@@ -98,7 +100,32 @@ export function parseResult(
     new Set(qualityReasons).size !== qualityReasons.length
   )
     throw new Error('Invalid stored GitHub result');
+  const metricResult = Object.hasOwn(row, 'metricResult')
+    ? parseMetricResult(row.metricResult, {
+        serviceId: connection.serviceId,
+        window: pinnedWindow,
+        evidenceCutoff: cutoff,
+        unknownCount,
+        deploymentFrequency: {
+          count: frequencyCount,
+          status: String(frequency.status),
+          deploymentsPerDay: null,
+          qualityReasons,
+        },
+        changeFailureRate: null,
+        failedDeploymentRecoveryTime:
+          typeof row.failedDeploymentRecoveryTime === 'number'
+            ? row.failedDeploymentRecoveryTime
+            : null,
+      })
+    : undefined;
+  if (
+    metricResult &&
+    metricResult.failed_deployment_recovery_time.median_seconds !== row.failedDeploymentRecoveryTime
+  )
+    throw new Error('Invalid recovery summary');
   return {
+    ...(metricResult ? { metricResult } : {}),
     mode: row.mode,
     workspaceId: connection.workspaceId,
     serviceId: connection.serviceId,
@@ -122,7 +149,8 @@ export function parseResult(
       qualityReasons,
     },
     changeFailureRate: null,
-    failedDeploymentRecoveryTime: null,
+    failedDeploymentRecoveryTime:
+      metricResult?.failed_deployment_recovery_time.median_seconds ?? null,
   };
 }
 export function storedWindow(value: unknown) {

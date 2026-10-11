@@ -43,6 +43,8 @@ describe('unconfigured identity boundary', () => {
       for (const [method, url] of [
         ['GET', '/api/me'],
         ['GET', '/api/workspaces'],
+        ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/members'],
+        ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/invitations'],
         ['POST', '/api/workspaces'],
         ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/services'],
         ['POST', '/api/auth/sign-in/social'],

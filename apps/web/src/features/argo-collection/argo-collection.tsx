@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MetricResults } from '../measurements/metric-results';
 import {
   type Connection,
   closedWindow,
@@ -1036,7 +1037,7 @@ function StoredRun({ run }: { run: Run }) {
           <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
           <CoverageAssessment assessment={result.coverageAssessment} />
           <p>Quality reasons: {result.deploymentFrequency.qualityReasons.join(', ')}.</p>
-          <p>Deployments per day, change failure rate and recovery time are unavailable.</p>
+          <MetricResults result={result.metricResult} sourceLabel="Argo CD" />
         </>
       )}
     </>

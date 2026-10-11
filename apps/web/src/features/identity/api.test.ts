@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { apiOrigin, parseInvitation, parseRedirect, parseServices, parseUser } from './api';
+import {
+  apiOrigin,
+  parseInvitation,
+  parseMembers,
+  parsePendingInvitations,
+  parseRedirect,
+  parseServices,
+  parseUser,
+} from './api';
 
 describe('browser trust boundary', () => {
   it('accepts the actual disabled-redirect GitHub OAuth response, rejects unsafe destinations', () => {
@@ -47,4 +55,54 @@ describe('browser trust boundary', () => {
     ).toThrow();
     expect(() => parseInvitation({ invitation: { token: 'secret' } }, 'scope')).toThrow();
   });
+});
+
+it('bounds access lists, checks workspace/role/status/date, strips private fields', () => {
+  const workspaceId = '11111111-1111-4111-8111-111111111111';
+  const member = {
+    userId: 'stable',
+    name: 'Member',
+    email: 'member@example.test',
+    role: 'member',
+    createdAt: '2026-10-11T00:00:00Z',
+    token: 'private',
+  };
+  expect(parseMembers({ workspaceId, members: [member], hasMore: true }, workspaceId)).toEqual({
+    items: [
+      {
+        userId: 'stable',
+        name: 'Member',
+        email: 'member@example.test',
+        role: 'member',
+        createdAt: member.createdAt,
+      },
+    ],
+    hasMore: true,
+  });
+  for (const payload of [
+    { workspaceId: 'other', members: [member], hasMore: false },
+    { workspaceId, members: [member] },
+    { workspaceId, members: Array.from({ length: 101 }, () => member), hasMore: true },
+    { workspaceId, members: [{ ...member, role: 'admin' }], hasMore: false },
+    { workspaceId, members: [{ ...member, createdAt: 'bad' }], hasMore: false },
+  ])
+    expect(() => parseMembers(payload, workspaceId)).toThrow();
+  expect(() =>
+    parsePendingInvitations(
+      {
+        workspaceId,
+        invitations: [
+          {
+            id: workspaceId,
+            email: member.email,
+            status: 'consumed',
+            createdAt: member.createdAt,
+            expiresAt: member.createdAt,
+          },
+        ],
+        hasMore: false,
+      },
+      workspaceId,
+    ),
+  ).toThrow();
 });

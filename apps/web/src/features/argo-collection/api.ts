@@ -1,5 +1,7 @@
+import type { MetricResult } from '@clio/oems';
 import { oemsContract } from '@clio/oems/contract';
 import { ApiError, record } from '../identity/api';
+import { parseMetricResult } from '../measurements/metric-result';
 
 export type Scope = { workspaceId: string; serviceId: string };
 export type ArchiveProducer = {
@@ -61,6 +63,7 @@ export type CoverageAssessment = {
   unknownReworkCount: number;
 };
 export type Result = Scope & {
+  metricResult?: MetricResult;
   provider: 'argocd';
   mode: 'live';
   connectionRevision: number;
@@ -98,7 +101,7 @@ export type Result = Scope & {
     qualityReasons: string[];
   };
   changeFailureRate: null;
-  failedDeploymentRecoveryTime: null;
+  failedDeploymentRecoveryTime: number | null;
 };
 export type Run = Scope & {
   id: string;
@@ -516,6 +519,7 @@ function coverageAssessment(
 function result(value: unknown, scope: Scope, revision: number): Result {
   const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'metricResult') ? ['metricResult'] : []),
     ...(Object.hasOwn(raw, 'coverageAssessment') ? ['coverageAssessment'] : []),
     ...(Object.hasOwn(raw, 'enrichmentSummary') ? ['enrichmentSummary'] : []),
     ...(Object.hasOwn(raw, 'archiveSummary') ? ['archiveSummary'] : []),
@@ -577,7 +581,7 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     frequency.qualityReasons.length === 0 ||
     frequency.qualityReasons.length > 50 ||
     item.changeFailureRate !== null ||
-    item.failedDeploymentRecoveryTime !== null
+    (!Object.hasOwn(item, 'metricResult') && item.failedDeploymentRecoveryTime !== null)
   )
     return fail();
   const period = exact(item.observationPeriod, ['start', 'end']);
@@ -629,7 +633,33 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     new Set(reasons).size !== reasons.length
   )
     return fail();
+  const metricResult = Object.hasOwn(item, 'metricResult')
+    ? parseMetricResult(item.metricResult, {
+        serviceId: scope.serviceId,
+        window: { start, end, calendarDays: days },
+        evidenceCutoff,
+        unknownCount,
+        deploymentFrequency: {
+          count,
+          status: 'provisional',
+          deploymentsPerDay: null,
+          qualityReasons: reasons,
+        },
+        changeFailureRate: null,
+        failedDeploymentRecoveryTime:
+          typeof item.failedDeploymentRecoveryTime === 'number'
+            ? item.failedDeploymentRecoveryTime
+            : null,
+      })
+    : undefined;
+  if (
+    metricResult &&
+    metricResult.failed_deployment_recovery_time.median_seconds !==
+      item.failedDeploymentRecoveryTime
+  )
+    return fail();
   return {
+    ...(metricResult ? { metricResult } : {}),
     ...scope,
     mode: 'live',
     connectionRevision: revision,
@@ -660,7 +690,8 @@ function result(value: unknown, scope: Scope, revision: number): Result {
       qualityReasons: reasons,
     },
     changeFailureRate: null,
-    failedDeploymentRecoveryTime: null,
+    failedDeploymentRecoveryTime:
+      metricResult?.failed_deployment_recovery_time.median_seconds ?? null,
     ...(Object.hasOwn(item, 'coverageAssessment')
       ? {
           coverageAssessment: coverageAssessment(item.coverageAssessment, {

@@ -581,3 +581,299 @@ describe('browser identity and workspace', () => {
     expect(client.getQueryCache().getAll()).toHaveLength(0);
   });
 });
+
+const accessMember = {
+  userId: 'bob/id',
+  name: 'Bob',
+  email: 'bob@example.test',
+  role: 'member',
+  createdAt: '2026-10-11T00:00:00Z',
+};
+const accessInvite = {
+  id: serviceId,
+  email: 'invited@example.test',
+  status: 'pending',
+  createdAt: '2026-10-11T00:00:00Z',
+  expiresAt: '2026-10-18T00:00:00Z',
+};
+function accessHandler(overrides?: Handler): Handler {
+  return (path, options) => {
+    if (path === '/api/me') return json(identity());
+    if (path === '/api/workspaces')
+      return json({ workspaces: [workspace(), workspace(second, 'Second workspace')] });
+    if (path.endsWith('/services')) return json({ services: [] });
+    if (overrides) return overrides(path, options);
+    if (path.endsWith('/members'))
+      return json({
+        workspaceId: first,
+        members: [accessMember, { ...accessMember, userId: 'alice', name: 'Alice', role: 'owner' }],
+        hasMore: false,
+      });
+    if (path.endsWith('/invitations'))
+      return json({ workspaceId: first, invitations: [accessInvite], hasMore: false });
+    throw new Error(path);
+  };
+}
+async function openAccess(user: ReturnType<typeof userEvent.setup>) {
+  await choose(user);
+  await user.click(await screen.findByRole('button', { name: 'Manage workspace access' }));
+}
+describe('owner workspace access', () => {
+  it('revalidates after targeted revocation/cancellation, handles 204 and omits owner actions', async () => {
+    let revoked = false;
+    let cancelled = false;
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'DELETE') {
+        if (path.endsWith('/members/bob%2Fid')) revoked = true;
+        else if (path.endsWith(`/invitations/${serviceId}`)) cancelled = true;
+        else throw new Error(path);
+        return new Response(null, { status: 204 });
+      }
+      if (path.endsWith('/members'))
+        return json({
+          workspaceId: first,
+          members: revoked
+            ? []
+            : [accessMember, { ...accessMember, userId: 'alice', name: 'Alice', role: 'owner' }],
+          hasMore: false,
+        });
+      return json({
+        workspaceId: first,
+        invitations: cancelled ? [] : [accessInvite],
+        hasMore: false,
+      });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    expect(await screen.findByText('Alice (bob@example.test) — owner')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /Revoke access for Alice/ }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    expect(await screen.findByText('No members found.')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+    await user.click(
+      screen.getByRole('button', { name: /Cancel invitation for invited@example.test/ }),
+    );
+    expect(await screen.findByText('No pending invitations.')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(
+      2,
+    );
+  });
+  it('clears a displayed invitation after revocation cancels pending invitations', async () => {
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'POST' && path.endsWith('/invitations'))
+        return json(
+          {
+            invitation: {
+              id: serviceId,
+              workspaceId: first,
+              email: 'bob@example.test',
+              expiresAt: accessInvite.expiresAt,
+              token,
+            },
+          },
+          201,
+        );
+      if (options?.method === 'DELETE') return new Response(null, { status: 204 });
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(await screen.findByLabelText('Member email'), 'bob@example.test');
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    expect(await screen.findByLabelText('Invitation token — copy and share once')).toHaveValue(
+      token,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText('Invitation token — copy and share once'),
+      ).not.toBeInTheDocument(),
+    );
+  });
+  it('shows loading, retryable error, empty lists and honest overflow', async () => {
+    const late = deferred<Response>();
+    let failed = true;
+    handler = accessHandler((path) =>
+      path.endsWith('/members')
+        ? failed
+          ? late.promise
+          : json({ workspaceId: first, members: [], hasMore: true })
+        : json({ workspaceId: first, invitations: [], hasMore: false }),
+    );
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    expect(screen.getByText('Loading workspace access…')).toBeVisible();
+    await act(async () => {
+      late.resolve(json({}, 503));
+      await late.promise;
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Clio is unavailable');
+    failed = false;
+    await user.click(screen.getByRole('button', { name: 'Retry workspace access' }));
+    expect(await screen.findByText('No members found.')).toBeVisible();
+    expect(screen.getByText(/this list is incomplete/)).toBeVisible();
+    expect(screen.getByText('No pending invitations.')).toBeVisible();
+  });
+  it.each(['read', 'write'])('drops late %s after workspace change', async (kind) => {
+    const late = deferred<Response>();
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'DELETE') return late.promise;
+      if (path.endsWith('/members'))
+        return kind === 'read'
+          ? late.promise
+          : json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    if (kind === 'write') {
+      await user.click(
+        await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+      );
+      expect(screen.getByText('Updating access…')).toBeVisible();
+      expect(screen.queryByRole('button', { name: /Revoke access for/ })).not.toBeInTheDocument();
+    }
+    await choose(user, second);
+    await act(async () => {
+      late.resolve(
+        kind === 'read'
+          ? json({ workspaceId: first, members: [accessMember], hasMore: false })
+          : new Response(null, { status: 204 }),
+      );
+      await late.promise;
+    });
+    expect(screen.queryByText(/Access revoked for Bob/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/bob@example.test/)).not.toBeInTheDocument();
+  });
+  it('expires identity and drops late reads when identity changes', async () => {
+    const late = deferred<Response>();
+    let expired = false;
+    const original = accessHandler((path) =>
+      path.endsWith('/members')
+        ? late.promise
+        : json({ workspaceId: first, invitations: [], hasMore: false }),
+    );
+    handler = (path, options) =>
+      path === '/api/me' && expired ? json({}, 401) : original(path, options);
+    const { client } = renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    expired = true;
+    act(() => window.dispatchEvent(new Event('focus')));
+    await screen.findByRole('button', { name: 'Sign in with GitHub' });
+    await act(async () => {
+      late.resolve(json({ workspaceId: first, members: [accessMember], hasMore: false }));
+      await late.promise;
+    });
+    expect(screen.queryByText(/bob@example.test/)).not.toBeInTheDocument();
+    expect(client.getQueryCache().getAll()).toHaveLength(0);
+  });
+  it('hides owner controls for members without issuing access reads', async () => {
+    handler = (path) => {
+      if (path === '/api/me') return json(identity());
+      if (path === '/api/workspaces')
+        return json({ workspaces: [workspace(first, 'Member workspace', 'member')] });
+      if (path.endsWith('/services')) return json({ services: [] });
+      throw new Error(path);
+    };
+    renderApp();
+    await choose(userEvent.setup());
+    await screen.findByText('No services yet.');
+    expect(
+      screen.queryByRole('button', { name: 'Manage workspace access' }),
+    ).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) => String(input).endsWith('/members') || String(input).endsWith('/invitations'),
+      ),
+    ).toBe(false);
+  });
+  it.each([401, 403, 404])('fails closed on access read status %s', async (status) => {
+    handler = accessHandler(() => json({}, status));
+    renderApp();
+    await openAccess(userEvent.setup());
+    if (status === 401) await screen.findByRole('button', { name: 'Sign in with GitHub' });
+    else await screen.findByRole('button', { name: 'Refresh access' });
+    expect(
+      screen.queryByRole('button', { name: 'Manage workspace access' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Member email')).not.toBeInTheDocument();
+  });
+});
+
+it.each([401, 403, 404, 503])(
+  'handles access write status %s without retaining stale controls',
+  async (status) => {
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'DELETE') return json({ error: 'private-payload' }, status);
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.click(
+      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    if (status === 401) await screen.findByRole('button', { name: 'Sign in with GitHub' });
+    else if (status === 503) {
+      expect(await screen.findByRole('alert')).toHaveTextContent('Clio is unavailable');
+      expect(
+        screen.getByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+      ).toBeEnabled();
+    } else {
+      await screen.findByRole('button', { name: 'Refresh access' });
+      expect(screen.queryByText(/bob@example.test/)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText(/private-payload/)).not.toBeInTheDocument();
+  },
+);
+it('drops late access write after identity changes', async () => {
+  const late = deferred<Response>();
+  let expired = false;
+  const original = accessHandler((path, options) => {
+    if (options?.method === 'DELETE') return late.promise;
+    if (path.endsWith('/members'))
+      return json({ workspaceId: first, members: [accessMember], hasMore: false });
+    return json({ workspaceId: first, invitations: [], hasMore: false });
+  });
+  handler = (path, options) =>
+    path === '/api/me' && expired ? json({}, 401) : original(path, options);
+  const { client } = renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  );
+  expired = true;
+  act(() => window.dispatchEvent(new Event('focus')));
+  await screen.findByRole('button', { name: 'Sign in with GitHub' });
+  await act(async () => {
+    late.resolve(new Response(null, { status: 204 }));
+    await late.promise;
+  });
+  expect(screen.queryByText(/Access revoked/)).not.toBeInTheDocument();
+  expect(client.getQueryCache().getAll()).toHaveLength(0);
+});
+it('loads owner access during StrictMode effect replay', async () => {
+  handler = accessHandler();
+  renderApp('/settings', true);
+  await openAccess(userEvent.setup());
+  expect(
+    await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  ).toBeVisible();
+});

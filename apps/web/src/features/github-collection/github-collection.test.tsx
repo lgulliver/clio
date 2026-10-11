@@ -3,8 +3,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
+import { withMetric } from '../measurements/fixtures.test-support';
 import { WorkspacePage } from '../workspace/workspace-page';
-import { completed, connection, json, queued, scope } from './fixtures.test-support';
+import { completed, connection, json, queued, result, scope } from './fixtures.test-support';
 import { GitHubCollection } from './github-collection';
 
 const identity = vi.hoisted(() => ({ revision: 1, valid: true, expire: vi.fn() }));
@@ -80,6 +81,26 @@ beforeEach(() => {
 });
 
 describe('live GitHub workflow', () => {
+  it('renders all five saved calculations in Settings detail', async () => {
+    const run = { ...completed, result: withMetric(result) };
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/github-collection-runs')
+        ? json({ runs: [run] })
+        : String(input).endsWith(`/${completed.id}`)
+          ? json({ run })
+          : defaultRead(input),
+    );
+    mount(false);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: `View run ${completed.createdAt}` }));
+    const metrics = await screen.findByRole('region', { name: 'GitHub: Engineering metrics' });
+    expect(within(metrics).getAllByRole('heading')).toHaveLength(5);
+    expect(
+      within(metrics).getByRole('region', { name: 'GitHub: Failed deployment recovery time' }),
+    ).toHaveTextContent('600 seconds');
+  });
+
   it('member reads connection/history/detail and honest zero provisional count without write controls', async () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).endsWith('/github-collection-runs')
@@ -108,9 +129,7 @@ describe('live GitHub workflow', () => {
     );
     expect(within(detail).getByText(/Evidence cutoff:.*OEMS revision:/)).toBeVisible();
     expect(
-      within(detail).getByText(
-        /Deployments per day, change failure rate and recovery time are unavailable/,
-      ),
+      within(detail).getByText(/All five metric details unavailable for this older saved result/),
     ).toBeVisible();
     expect(posts()).toHaveLength(0);
   });

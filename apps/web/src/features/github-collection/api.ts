@@ -1,5 +1,7 @@
+import type { MetricResult } from '@clio/oems';
 import { oemsContract } from '@clio/oems/contract';
 import { ApiError, record } from '../identity/api';
+import { parseMetricResult } from '../measurements/metric-result';
 
 export type Scope = { workspaceId: string; serviceId: string };
 export type Connection = Scope & {
@@ -19,6 +21,7 @@ export type Connection = Scope & {
 };
 export type Window = { start: string; end: string };
 export type Result = Scope & {
+  metricResult?: MetricResult;
   mode: 'live';
   connectionRevision: number;
   oemsRevision: string;
@@ -40,7 +43,7 @@ export type Result = Scope & {
     qualityReasons: string[];
   };
   changeFailureRate: null;
-  failedDeploymentRecoveryTime: null;
+  failedDeploymentRecoveryTime: number | null;
 };
 export type Run = Scope & {
   id: string;
@@ -198,7 +201,9 @@ export function parseSavedConnection(
   return parsed;
 }
 function result(value: unknown, scope: Scope, revision: number): Result {
+  const raw = record(value);
   const item = exact(value, [
+    ...(Object.hasOwn(raw, 'metricResult') ? ['metricResult'] : []),
     'mode',
     'workspaceId',
     'serviceId',
@@ -248,7 +253,7 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     frequency.qualityReasons.length === 0 ||
     frequency.qualityReasons.length > 50 ||
     item.changeFailureRate !== null ||
-    item.failedDeploymentRecoveryTime !== null
+    (!Object.hasOwn(item, 'metricResult') && item.failedDeploymentRecoveryTime !== null)
   )
     return fail();
   const reasons = frequency.qualityReasons.map((reason: unknown) => text(reason));
@@ -263,7 +268,33 @@ function result(value: unknown, scope: Scope, revision: number): Result {
     new Set(reasons).size !== reasons.length
   )
     return fail();
+  const metricResult = Object.hasOwn(item, 'metricResult')
+    ? parseMetricResult(item.metricResult, {
+        serviceId: scope.serviceId,
+        window: { start, end, calendarDays: days },
+        evidenceCutoff,
+        unknownCount,
+        deploymentFrequency: {
+          count,
+          status: 'provisional',
+          deploymentsPerDay: null,
+          qualityReasons: reasons,
+        },
+        changeFailureRate: null,
+        failedDeploymentRecoveryTime:
+          typeof item.failedDeploymentRecoveryTime === 'number'
+            ? item.failedDeploymentRecoveryTime
+            : null,
+      })
+    : undefined;
+  if (
+    metricResult &&
+    metricResult.failed_deployment_recovery_time.median_seconds !==
+      item.failedDeploymentRecoveryTime
+  )
+    return fail();
   return {
+    ...(metricResult ? { metricResult } : {}),
     ...scope,
     mode: 'live',
     connectionRevision: revision,
@@ -286,7 +317,8 @@ function result(value: unknown, scope: Scope, revision: number): Result {
       qualityReasons: reasons,
     },
     changeFailureRate: null,
-    failedDeploymentRecoveryTime: null,
+    failedDeploymentRecoveryTime:
+      metricResult?.failed_deployment_recovery_time.median_seconds ?? null,
   };
 }
 function run(value: unknown, scope: Scope): Run {

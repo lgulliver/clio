@@ -17,6 +17,7 @@ import {
   type Workspace,
 } from '../identity/api';
 import { useSession } from '../identity/session';
+import { WorkspaceAccess } from './workspace-access';
 
 export function WorkspacePage({ authError }: { authError: boolean }) {
   const session = useSession();
@@ -148,6 +149,7 @@ function WorkspaceScope({
   const mounted = useRef(true);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [denied, setDenied] = useState('');
+  const [showAccess, setShowAccess] = useState(false);
   const [selectedService, setSelectedService] = useState('');
   const [sourceMode, setSourceMode] = useState<'mock' | 'live' | 'argo'>('mock');
   const serviceSelection = useRef('');
@@ -382,6 +384,32 @@ function WorkspaceScope({
                       )
                     }
                   />
+                  <button
+                    className="control mt-6"
+                    type="button"
+                    aria-expanded={showAccess}
+                    onClick={() => setShowAccess((previous) => !previous)}
+                  >
+                    {showAccess ? 'Hide access management' : 'Manage workspace access'}
+                  </button>
+                  {showAccess && (
+                    <WorkspaceAccess
+                      workspaceId={workspace.id}
+                      userId={userId}
+                      validSelection={valid}
+                      onInvitationCancelled={(id) =>
+                        setInvitation((current) =>
+                          id === null || current?.id === id ? null : current,
+                        )
+                      }
+                      onDenied={(error) => {
+                        mutationEpoch.current += 1;
+                        setInvitation(null);
+                        setDenied(errorMessage(error));
+                        void client.invalidateQueries({ queryKey: workspacesKey });
+                      }}
+                    />
+                  )}
                   <h3 className="mt-8 font-semibold">Invite a member</h3>
                   <p className="mt-2 text-slate-600">
                     Share the token manually. Acceptance requires the member’s matching verified
@@ -398,7 +426,19 @@ function WorkspaceScope({
                         `/api/workspaces/${workspace.id}/invitations`,
                         { email },
                         (value) => parseInvitation(value, workspace.id),
-                        setInvitation,
+                        (created) => {
+                          setInvitation(created);
+                          void client.invalidateQueries({
+                            queryKey: [
+                              'identity',
+                              userId,
+                              revision,
+                              'workspace',
+                              workspace.id,
+                              'access',
+                            ],
+                          });
+                        },
                       );
                     }}
                   />
