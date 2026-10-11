@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mapping, Preview } from '../deployment-mappings/api';
 import { ApiError, errorMessage, request } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MetricResults } from '../measurements/metric-results';
 import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import { newestFirst, parseRun, parseRuns, type Run } from './api';
 
@@ -265,6 +266,11 @@ export function MockCollectionHistory({
     <section className="mt-6 border-t border-slate-200 pt-6" aria-label="Mock collection history">
       <div hidden={setup?.step === 'configure'}>
         <h4 className="text-lg font-semibold">Mock collection history</h4>
+        <p>
+          {mapping.scenario === 'complete-lifecycle'
+            ? 'Complete lifecycle — fictional. Complete within fictional fixture only.'
+            : 'Partial — fictional.'}
+        </p>
         <p className="mt-2">
           Fictional data only. These runs do not change your workspace metrics.
         </p>
@@ -367,6 +373,11 @@ function RunSummary({ run }: { run: Run }) {
         Saved mock revision {run.mappingRevision} · {run.status}
       </h5>
       <p>
+        {run.scenario === 'complete-lifecycle'
+          ? 'Complete lifecycle — fictional'
+          : 'Partial — fictional'}
+      </p>
+      <p>
         {run.primaryProvider === 'github' ? 'GitHub (mock)' : 'Argo CD (mock)'} · Attempts:{' '}
         {run.attempts} of 3
       </p>
@@ -386,7 +397,13 @@ function RunSummary({ run }: { run: Run }) {
 function StoredResult({ result }: { result: Preview }) {
   return (
     <div className="mt-3">
-      <p>Stored fictional result · Provisional · Qualification: {result.qualification}</p>
+      <p>
+        Stored fictional result ·{' '}
+        {result.scenario === 'complete-lifecycle'
+          ? 'Complete lifecycle — fictional'
+          : 'Provisional'}{' '}
+        · Qualification: {result.qualification}
+      </p>
       <p>
         Sample window: {result.window.start} to {result.window.end} (UTC,{' '}
         {result.window.calendarDays} calendar days).
@@ -398,16 +415,30 @@ function StoredResult({ result }: { result: Preview }) {
         Fictional rollouts: {result.rolloutCount}. Qualifying fictional deployments:{' '}
         {result.deploymentFrequency.count}.
       </p>
-      <p>
-        Coverage incomplete: collection{' '}
-        {result.coverage.collectionComplete ? 'complete' : 'incomplete'}, deployment history{' '}
-        {result.coverage.deploymentHistoryComplete ? 'complete' : 'incomplete'}, recovery evidence{' '}
-        {result.coverage.recoveryEvidenceComplete ? 'complete' : 'incomplete'}.
-      </p>
+      {result.metricResult ? (
+        <p>
+          Complete within fictional fixture. No live source coverage or native measurement basis.
+        </p>
+      ) : (
+        <p>
+          Coverage incomplete: collection{' '}
+          {result.coverage.collectionComplete ? 'complete' : 'incomplete'}, deployment history{' '}
+          {result.coverage.deploymentHistoryComplete ? 'complete' : 'incomplete'}, recovery evidence{' '}
+          {result.coverage.recoveryEvidenceComplete ? 'complete' : 'incomplete'}.
+        </p>
+      )}
       <p>
         Quality reasons: {result.deploymentFrequency.qualityReasons.join(', ') || 'None reported'}.
       </p>
-      <p>Deployments per day, change failure rate and recovery time are unavailable.</p>
+      {result.metricResult ? (
+        <MetricResults
+          result={result.metricResult}
+          sourceLabel="Fictional lifecycle"
+          headingLevel={6}
+        />
+      ) : (
+        <p>Deployments per day, change failure rate and recovery time are unavailable.</p>
+      )}
       {result.qualification === 'unknown' && (
         <p>Production exposure is unconfirmed for this fictional result.</p>
       )}

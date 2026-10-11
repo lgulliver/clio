@@ -21,6 +21,7 @@ type QualityMetric =
 function MetricCard({
   name,
   sourceLabel,
+  headingLevel = 4,
   metric,
   primary,
   unit,
@@ -30,6 +31,7 @@ function MetricCard({
 }: {
   name: string;
   sourceLabel: string | undefined;
+  headingLevel?: 4 | 5 | 6;
   metric: QualityMetric;
   primary: string;
   unit?: string;
@@ -37,13 +39,14 @@ function MetricCard({
   children: ReactNode;
   evidence: ReactNode;
 }) {
+  const Heading = headingLevel === 6 ? 'h6' : headingLevel === 5 ? 'h5' : 'h4';
   const provisional = metric.status === 'provisional';
   return (
     <section
       aria-label={sourceLabel ? `${sourceLabel}: ${name}` : name}
       className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
     >
-      <h4 className="text-base font-semibold text-slate-900">{name}</h4>
+      <Heading className="text-base font-semibold text-slate-900">{name}</Heading>
       <p
         className={`mt-3 self-start rounded-md px-2 py-1 text-xs font-medium ${
           provisional ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-slate-700'
@@ -89,16 +92,19 @@ function MetricCard({
 function Ratio({
   label,
   sourceLabel,
+  headingLevel = 4,
   metric,
 }: {
   label: string;
   sourceLabel?: string | undefined;
+  headingLevel?: 4 | 5 | 6;
   metric: MetricResult['change_fail_rate'];
 }) {
   return (
     <MetricCard
       name={label}
       sourceLabel={sourceLabel}
+      headingLevel={headingLevel}
       metric={metric}
       primary={percent(metric.ratio)}
       primaryLabel="Rate"
@@ -133,9 +139,11 @@ function Ratio({
 export function MetricResults({
   result,
   sourceLabel,
+  headingLevel = 4,
 }: {
   result: MetricResult | undefined;
   sourceLabel?: string | undefined;
+  headingLevel?: 4 | 5 | 6;
 }) {
   const label = (name: string) => (sourceLabel ? `${sourceLabel}: ${name}` : name);
   if (!result)
@@ -156,6 +164,7 @@ export function MetricResults({
       <MetricCard
         name="Deployment frequency"
         sourceLabel={sourceLabel}
+        headingLevel={headingLevel}
         metric={frequency}
         primary={
           frequency.deployments_per_day === null
@@ -178,6 +187,7 @@ export function MetricResults({
       <MetricCard
         name="Change lead time"
         sourceLabel={sourceLabel}
+        headingLevel={headingLevel}
         metric={lead}
         primary={lead.median_seconds === null ? 'Unavailable' : numberText(lead.median_seconds)}
         unit="seconds"
@@ -207,16 +217,19 @@ export function MetricResults({
       <Ratio
         label="Change failure rate"
         sourceLabel={sourceLabel}
+        headingLevel={headingLevel}
         metric={result.change_fail_rate}
       />
       <Ratio
         label="Deployment rework rate"
         sourceLabel={sourceLabel}
+        headingLevel={headingLevel}
         metric={result.deployment_rework_rate}
       />
       <MetricCard
         name="Failed deployment recovery time"
         sourceLabel={sourceLabel}
+        headingLevel={headingLevel}
         metric={recovery}
         primary={
           recovery.median_seconds === null ? 'Unavailable' : numberText(recovery.median_seconds)

@@ -1,9 +1,16 @@
-import { type Preview, parsePreview, type Scope } from '../deployment-mappings/api';
+import {
+  type MockScenario,
+  type Preview,
+  parsePreview,
+  parseScenario,
+  type Scope,
+} from '../deployment-mappings/api';
 import { ApiError, record } from '../identity/api';
 
 export type Run = Scope & {
   id: string;
   mode: 'mock';
+  scenario?: MockScenario;
   mappingRevision: number;
   mappingObservedAt: string;
   primaryProvider: 'github' | 'argocd';
@@ -64,6 +71,7 @@ function run(value: unknown, scope: Scope): Run {
     'completedAt',
     'failureCode',
     'result',
+    ...(Object.hasOwn(item, 'scenario') ? ['scenario'] : []),
   ];
   if (
     Object.keys(item).length !== keys.length ||
@@ -78,6 +86,7 @@ function run(value: unknown, scope: Scope): Run {
       item.status !== 'failed')
   )
     return fail();
+  const scenario = parseScenario(item.scenario);
   const mappingRevision = integer(item.mappingRevision, 1);
   const mappingObservedAt = timestamp(item.mappingObservedAt);
   const attempts = integer(item.attempts, 0);
@@ -105,6 +114,7 @@ function run(value: unknown, scope: Scope): Run {
           { preview: item.result },
           {
             ...scope,
+            scenario,
             mode: 'mock',
             revision: mappingRevision,
             observedAt: mappingObservedAt,
@@ -115,6 +125,7 @@ function run(value: unknown, scope: Scope): Run {
         )
       : null;
   return {
+    ...(item.scenario === undefined ? {} : { scenario }),
     ...scope,
     id: uuid(item.id),
     mode: 'mock',

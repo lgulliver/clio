@@ -242,7 +242,10 @@ function ResultHistory({
           {success.mode === 'mock' && (
             <p>
               Fictional {success.primaryProvider === 'github' ? 'GitHub' : 'Argo CD'} sample. Does
-              not measure this service's live delivery.
+              not measure this service's live delivery.{' '}
+              {success.scenario === 'complete-lifecycle'
+                ? 'Complete lifecycle — fictional.'
+                : 'Partial — fictional.'}
             </p>
           )}
           <dl className="space-y-2 break-words">
@@ -309,12 +312,23 @@ function ResultHistory({
               </p>
             </>
           )}
-          <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
-          {result.mode === 'live' ? (
+          {result.mode === 'mock' && result.scenario === 'complete-lifecycle' ? (
+            <p>
+              Complete within fictional fixture. No live source coverage or native measurement
+              basis.
+            </p>
+          ) : (
+            <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
+          )}
+          {result.mode === 'live' || result.metricResult ? (
             <MetricResults
               result={result.metricResult}
               sourceLabel={
-                'provider' in result && result.provider === 'argocd' ? 'Argo CD' : 'GitHub'
+                result.mode === 'mock'
+                  ? 'Fictional lifecycle'
+                  : 'provider' in result && result.provider === 'argocd'
+                    ? 'Argo CD'
+                    : 'GitHub'
               }
             />
           ) : (

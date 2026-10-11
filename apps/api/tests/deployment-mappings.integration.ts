@@ -372,3 +372,24 @@ describe('transactional mapping HTTP/storage', () => {
     );
   });
 });
+
+it('defaults omitted stored scenario to partial and rejects unknown or contradictory SQL profiles', async () => {
+  const service = await createIdentityRepository(pool).createService(
+    owner,
+    workspaceId,
+    `Legacy fictional ${randomUUID()}`,
+  );
+  const insert = `INSERT INTO deployment_mapping_revisions(workspace_id,service_id,mode,revision,primary_provider,production_environment,exposure_attested,created_by) VALUES($1,$2,'mock',1,'github','production',false,$3)`;
+  await pool.query(insert, [workspaceId, service.id, owner.userId]);
+  expect((await createMappingRepository(pool).get(owner, workspaceId, service.id))?.scenario).toBe(
+    'partial',
+  );
+  for (const scenario of ['unknown', 'complete-lifecycle']) {
+    await expect(
+      pool.query(
+        `INSERT INTO deployment_mapping_revisions(workspace_id,service_id,mode,revision,primary_provider,production_environment,exposure_attested,created_by,scenario) VALUES($1,$2,'mock',2,'github','production',false,$3,$4)`,
+        [workspaceId, service.id, owner.userId, scenario],
+      ),
+    ).rejects.toThrow();
+  }
+});

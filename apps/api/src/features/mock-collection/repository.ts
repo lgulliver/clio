@@ -35,7 +35,7 @@ export function createMockCollectionRepository(pool: Pool) {
           return previous;
         }
         const latest = await client.query<Record<string, unknown>>(
-          `SELECT revision, primary_provider, production_environment, exposure_attested, to_char(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM deployment_mapping_revisions WHERE workspace_id=$1 AND service_id=$2 ORDER BY revision DESC LIMIT 1`,
+          `SELECT revision, scenario, primary_provider, production_environment, exposure_attested, to_char(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed FROM deployment_mapping_revisions WHERE workspace_id=$1 AND service_id=$2 ORDER BY revision DESC LIMIT 1`,
           [workspaceId, serviceId],
         );
         const row = latest.rows[0];
@@ -50,6 +50,7 @@ export function createMockCollectionRepository(pool: Pool) {
           workspaceId,
           serviceId,
           mode: 'mock',
+          scenario: row.scenario,
           revision: body.revision,
           primaryProvider: row.primary_provider,
           productionEnvironment: row.production_environment,

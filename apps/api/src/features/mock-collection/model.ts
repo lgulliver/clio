@@ -1,5 +1,11 @@
 import { oemsContract } from '@clio/oems';
-import { type DeploymentMapping, revision } from '../deployment-mappings/input.ts';
+import {
+  type DeploymentMapping,
+  fixtureProfile,
+  revision,
+  scenario,
+} from '../deployment-mappings/input.ts';
+import { parseLifecycleResult } from '../deployment-mappings/lifecycle-result.ts';
 import type { previewMapping } from '../deployment-mappings/preview.ts';
 import { name, object, uuid } from '../identity/input.ts';
 
@@ -23,6 +29,7 @@ export function parseMapping(value: unknown): DeploymentMapping {
     'productionEnvironment',
     'exposureAttested',
     'observedAt',
+    'scenario',
   ]);
   if (
     row.mode !== 'mock' ||
@@ -30,7 +37,10 @@ export function parseMapping(value: unknown): DeploymentMapping {
     typeof row.exposureAttested !== 'boolean'
   )
     throw new Error('Invalid captured mapping');
+  const selected = scenario(row.scenario);
+  fixtureProfile(selected, name(row.productionEnvironment), row.exposureAttested);
   return {
+    ...(row.scenario === undefined ? {} : { scenario: selected }),
     workspaceId: uuid(row.workspaceId),
     serviceId: uuid(row.serviceId),
     mode: row.mode,
@@ -89,6 +99,7 @@ function storedRun(row: Record<string, unknown>) {
     workspaceId: mapping.workspaceId,
     serviceId: mapping.serviceId,
     mode: mapping.mode,
+    ...(mapping.scenario === undefined ? {} : { scenario: mapping.scenario }),
     mappingRevision: mapping.revision,
     mappingObservedAt: mapping.observedAt,
     primaryProvider: mapping.primaryProvider,
@@ -114,6 +125,7 @@ function parsePreview(
   value: unknown,
   mapping: DeploymentMapping,
 ): ReturnType<typeof previewMapping> {
+  if (mapping.scenario === 'complete-lifecycle') return parseLifecycleResult(value, mapping);
   const row = object(value, [
     'mode',
     'workspaceId',

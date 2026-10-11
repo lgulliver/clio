@@ -1,8 +1,16 @@
+import type { MetricResult } from '@clio/oems';
 import { oemsContract } from '@clio/oems/contract';
 import { ApiError, record } from '../identity/api';
+import { parseLifecycleResult } from './lifecycle-result';
 
 export type Scope = { workspaceId: string; serviceId: string };
+export type MockScenario = 'partial' | 'complete-lifecycle';
+export function parseScenario(value: unknown): MockScenario {
+  if (value === undefined) return 'partial';
+  return value === 'partial' || value === 'complete-lifecycle' ? value : fail();
+}
 export type Draft = {
+  scenario?: MockScenario;
   primaryProvider: 'github' | 'argocd';
   productionEnvironment: string;
   exposureAttested: boolean;
@@ -10,6 +18,9 @@ export type Draft = {
 export type Mapping = Scope & Draft & { mode: 'mock'; revision: number; observedAt: string };
 export type Preview = Scope & {
   mode: 'mock';
+  scenario?: 'complete-lifecycle';
+  resultVersion?: 'clio.mock.lifecycle.v1';
+  metricResult?: MetricResult;
   mappingRevision: number;
   oemsRevision: string;
   window: { start: string; end: string; timezone: 'UTC'; calendarDays: number };
@@ -17,18 +28,18 @@ export type Preview = Scope & {
   qualification: 'qualifying' | 'unknown' | 'excluded';
   rolloutCount: number;
   coverage: {
-    collectionComplete: false;
-    deploymentHistoryComplete: false;
-    recoveryEvidenceComplete: false;
+    collectionComplete: boolean;
+    deploymentHistoryComplete: boolean;
+    recoveryEvidenceComplete: boolean;
   };
   deploymentFrequency: {
     count: number;
-    status: 'provisional';
-    deploymentsPerDay: null;
+    status: MetricResult['deployment_frequency']['status'];
+    deploymentsPerDay: number | null;
     qualityReasons: string[];
   };
-  changeFailureRate: null;
-  failedDeploymentRecoveryTime: null;
+  changeFailureRate: number | null;
+  failedDeploymentRecoveryTime: number | null;
 };
 // Response contract pin; validation/calculation remain server-side.
 const oemsRevision = oemsContract.revision;
@@ -84,7 +95,14 @@ export function parseMapping(value: unknown, scope: Scope): Mapping | null {
     typeof item.exposureAttested !== 'boolean'
   )
     return fail();
+  const scenario = parseScenario(item.scenario);
+  if (
+    scenario === 'complete-lifecycle' &&
+    (item.productionEnvironment !== 'production' || !item.exposureAttested)
+  )
+    return fail();
   return {
+    ...(item.scenario === undefined ? {} : { scenario }),
     ...scope,
     mode: 'mock',
     revision: integer(item.revision, 1),
@@ -102,6 +120,14 @@ export function parseSavedMapping(value: unknown, scope: Scope, expectedRevision
 export function parsePreview(value: unknown, mapping: Mapping): Preview {
   const item = record(record(value).preview);
   bind(item, mapping);
+  if (parseScenario(mapping.scenario) === 'complete-lifecycle')
+    return parseLifecycleResult(item, mapping);
+  if (
+    item.scenario !== undefined ||
+    item.resultVersion !== undefined ||
+    item.metricResult !== undefined
+  )
+    return fail();
   const window = record(item.window);
   const coverage = record(item.coverage);
   const frequency = record(item.deploymentFrequency);

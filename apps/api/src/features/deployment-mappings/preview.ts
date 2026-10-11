@@ -1,6 +1,9 @@
+import { isDeepStrictEqual } from 'node:util';
 import { type EvidenceBatch, identity, reconcileDeployments } from '@clio/adapters';
 import { calculate, oemsContract } from '@clio/oems';
-import type { DeploymentMapping } from './input.ts';
+import { type DeploymentMapping, fixtureProfile } from './input.ts';
+import { completeLifecycle, lifecycleEvidence } from './lifecycle-fixture.ts';
+import { parseLifecycleResult } from './lifecycle-result.ts';
 
 const fixtureObservedAt = '2026-01-03T00:00:00.000Z';
 const window = {
@@ -56,9 +59,19 @@ export function fictionalEvidence(provider: DeploymentMapping['primaryProvider']
 export function captureMapping(
   mapping: DeploymentMapping,
   service: { id: string; name: string },
-  evidence: EvidenceBatch = fictionalEvidence(mapping.primaryProvider),
+  evidence: EvidenceBatch = mapping.scenario === 'complete-lifecycle'
+    ? lifecycleEvidence(mapping.primaryProvider)
+    : fictionalEvidence(mapping.primaryProvider),
 ) {
   if (service.id !== mapping.serviceId) throw new Error('Preview service mismatch');
+  const complete = mapping.scenario === 'complete-lifecycle';
+  fixtureProfile(
+    mapping.scenario ?? 'partial',
+    mapping.productionEnvironment,
+    mapping.exposureAttested,
+  );
+  if (complete && !isDeepStrictEqual(evidence, lifecycleEvidence(mapping.primaryProvider)))
+    throw new Error('Fictional lifecycle evidence mismatch');
   const sourceId = identity(mapping.primaryProvider, 'mock-instance');
   const observations = [
     mapping.observedAt,
@@ -76,7 +89,7 @@ export function captureMapping(
       ),
     ),
   ).toISOString();
-  const result = reconcileDeployments({
+  const reconciled = reconcileDeployments({
     datasetId: identity(
       'mock-preview',
       mapping.workspaceId,
@@ -92,15 +105,20 @@ export function captureMapping(
       observedAt: mapping.observedAt,
       sourceRef: `urn:clio:mock:mapping:${mapping.workspaceId}:${service.id}:${mapping.revision}`,
       primarySourceId: sourceId,
-      deploymentBindings: [
-        {
-          sourceId,
-          sourceDeploymentId:
-            mapping.primaryProvider === 'github'
-              ? 'mock-deployment-1'
-              : identity('application', 'mock-application', 'operation', 'mock-operation-1'),
-        },
-      ],
+      deploymentBindings: complete
+        ? evidence.deployments.map((d) => ({
+            sourceId: d.sourceId,
+            sourceDeploymentId: d.sourceDeploymentId,
+          }))
+        : [
+            {
+              sourceId,
+              sourceDeploymentId:
+                mapping.primaryProvider === 'github'
+                  ? 'mock-deployment-1'
+                  : identity('application', 'mock-application', 'operation', 'mock-operation-1'),
+            },
+          ],
       environments: [
         {
           sourceId,
@@ -118,7 +136,11 @@ export function captureMapping(
     },
     batches: [evidence],
   });
-  if (!result.ok) throw new Error('Fictional preview failed validation');
+  if (!reconciled.ok) throw new Error('Fictional preview failed validation');
+  const result = complete
+    ? completeLifecycle(reconciled.data, mapping.primaryProvider)
+    : reconciled;
+  if (!result.ok) throw new Error('Fictional lifecycle failed validation');
   const data = result.data.data;
   const metrics = calculate(result.data);
   const metric = metrics.find((row) => row.service_id === service.id);
@@ -126,18 +148,26 @@ export function captureMapping(
   if (
     !metric ||
     !rollout ||
-    data.deployments.length !== 1 ||
-    data.collection_complete !== false ||
-    data.deployment_history_complete !== false ||
-    data.recovery_evidence_complete !== false ||
-    metric.deployment_frequency.status !== 'provisional' ||
-    metric.deployment_frequency.deployments_per_day !== null ||
-    metric.change_fail_rate.ratio !== null ||
-    metric.failed_deployment_recovery_time.median_seconds !== null
+    (!complete &&
+      (data.deployments.length !== 1 ||
+        data.collection_complete !== false ||
+        data.deployment_history_complete !== false ||
+        data.recovery_evidence_complete !== false ||
+        metric.deployment_frequency.status !== 'provisional' ||
+        metric.deployment_frequency.deployments_per_day !== null ||
+        metric.change_fail_rate.ratio !== null ||
+        metric.failed_deployment_recovery_time.median_seconds !== null))
   )
     throw new Error('Unexpected fictional preview quality');
   const preview = {
     mode: mapping.mode,
+    ...(complete
+      ? {
+          scenario: 'complete-lifecycle' as const,
+          resultVersion: 'clio.mock.lifecycle.v1' as const,
+          metricResult: metric,
+        }
+      : {}),
     workspaceId: mapping.workspaceId,
     serviceId: service.id,
     mappingRevision: mapping.revision,
@@ -165,13 +195,16 @@ export function captureMapping(
     changeFailureRate: metric.change_fail_rate.ratio,
     failedDeploymentRecoveryTime: metric.failed_deployment_recovery_time.median_seconds,
   };
+  if (complete) parseLifecycleResult(preview, mapping);
   return { preview, evidence, snapshot: data, metrics, oemsRevision: oemsContract.revision };
 }
 
 export function previewMapping(
   mapping: DeploymentMapping,
   service: { id: string; name: string },
-  evidence: EvidenceBatch = fictionalEvidence(mapping.primaryProvider),
+  evidence: EvidenceBatch = mapping.scenario === 'complete-lifecycle'
+    ? lifecycleEvidence(mapping.primaryProvider)
+    : fictionalEvidence(mapping.primaryProvider),
 ) {
   return captureMapping(mapping, service, evidence).preview;
 }

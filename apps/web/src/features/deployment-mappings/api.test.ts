@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../identity/api';
+import { lifecyclePreview } from '../mock-collection/lifecycle.test-support';
 import { parseMapping, parsePreview, parseSavedMapping } from './api';
 
 const scope = {
@@ -133,4 +134,28 @@ describe('mock contract parsing', () => {
       ).window.end,
     ).toBe('2026-10-01T00:00:00.000002Z');
   });
+});
+
+it('binds full fictional results to saved scenario, version, scope and pinned metric schema', () => {
+  const complete = {
+    ...mapping(),
+    scenario: 'complete-lifecycle' as const,
+    exposureAttested: true,
+    observedAt: '2026-10-10T00:00:00.000Z',
+  };
+  expect(parsePreview({ preview: lifecyclePreview }, complete)).toEqual(lifecyclePreview);
+  for (const change of [
+    { scenario: 'partial' },
+    { resultVersion: 'clio.mock.lifecycle.v2' },
+    { serviceId: scope.workspaceId },
+    { mappingRevision: 2 },
+    { oemsRevision: 'other' },
+    { coverage: { ...lifecyclePreview.coverage, collectionComplete: false } },
+    { metricResult: { ...lifecyclePreview.metricResult, service_id: scope.workspaceId } },
+    { metricResult: { ...lifecyclePreview.metricResult, privateEvidence: 'forbidden' } },
+  ])
+    expect(() => parsePreview({ preview: { ...lifecyclePreview, ...change } }, complete)).toThrow();
+  expect(() => parsePreview({ preview: lifecyclePreview }, mapping())).toThrow();
+  expect(() => parsePreview({ preview: fictional }, complete)).toThrow();
+  expect(() => parseMapping({ mapping: { ...saved, scenario: 'unknown' } }, scope)).toThrow();
 });

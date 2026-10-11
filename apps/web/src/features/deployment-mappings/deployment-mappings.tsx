@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError, errorMessage, request, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MetricResults } from '../measurements/metric-results';
 import { MockCollectionHistory } from '../mock-collection/mock-collection';
 import type { SourceSetupPresentation, SourceSetupStatus } from '../source-setup/provider-state';
 import {
@@ -325,6 +326,7 @@ function MappingEditor({
   }, []);
   const setupDirty =
     mapping === null ||
+    (draft.scenario ?? 'partial') !== (mapping.scenario ?? 'partial') ||
     draft.primaryProvider !== mapping.primaryProvider ||
     draft.productionEnvironment !== mapping.productionEnvironment ||
     draft.exposureAttested !== mapping.exposureAttested;
@@ -378,6 +380,7 @@ function MappingEditor({
     // Send only the contract's editable fields, never response metadata.
     void action('Saving mock settings…', () =>
       save({
+        ...(draft.scenario === undefined ? {} : { scenario: draft.scenario }),
         primaryProvider: draft.primaryProvider,
         productionEnvironment: environment,
         exposureAttested: draft.exposureAttested,
@@ -389,7 +392,11 @@ function MappingEditor({
       <div hidden={!configureVisible}>
         {mapping ? (
           <p>
-            Saved mock revision {mapping.revision}. Observed at {mapping.observedAt}.
+            Saved mock revision {mapping.revision}. Observed at {mapping.observedAt}.{' '}
+            {mapping.scenario === 'complete-lifecycle'
+              ? 'Complete lifecycle — fictional'
+              : 'Partial — fictional'}
+            .
           </p>
         ) : (
           <p>No mock settings saved for this service.</p>
@@ -398,6 +405,39 @@ function MappingEditor({
           <form className="mt-4" onSubmit={submit}>
             <fieldset disabled={!!busy} className="space-y-4">
               <legend className="font-semibold">Fictional deployment source</legend>
+              <div>
+                <label htmlFor={`${id}-scenario`}>Fictional scenario</label>
+                <select
+                  className="field"
+                  id={`${id}-scenario`}
+                  aria-describedby={
+                    draft.scenario === 'complete-lifecycle' ? `${id}-scenario-help` : undefined
+                  }
+                  value={draft.scenario ?? 'partial'}
+                  onChange={(event) => {
+                    const scenario = event.target.value;
+                    if (scenario === 'partial' || scenario === 'complete-lifecycle')
+                      edit({
+                        ...draft,
+                        scenario,
+                        ...(scenario === 'complete-lifecycle'
+                          ? { productionEnvironment: 'production', exposureAttested: true }
+                          : {}),
+                      });
+                  }}
+                >
+                  <option value="partial">Partial — fictional</option>
+                  <option value="complete-lifecycle">Complete lifecycle — fictional</option>
+                </select>
+                {draft.scenario === 'complete-lifecycle' && (
+                  <p id={`${id}-scenario-help`} className="mt-2">
+                    Healthy → broken → recovery, January 1–3, 2026 UTC. Complete within fictional
+                    fixture only. Production environment and fictional exposure are fixed. Use a
+                    separate service named Fictional lifecycle demo; these records never describe
+                    live delivery.
+                  </p>
+                )}
+              </div>
               <div>
                 <label htmlFor={`${id}-provider`}>Mock primary provider</label>
                 <select
@@ -419,8 +459,16 @@ function MappingEditor({
                 <input
                   className="field"
                   id={`${id}-environment`}
+                  disabled={draft.scenario === 'complete-lifecycle'}
                   aria-invalid={error.startsWith('Enter a production environment')}
-                  aria-describedby={error ? `${id}-error` : undefined}
+                  aria-describedby={
+                    [
+                      error ? `${id}-error` : '',
+                      draft.scenario === 'complete-lifecycle' ? `${id}-scenario-help` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ') || undefined
+                  }
                   value={draft.productionEnvironment}
                   onChange={(event) =>
                     edit({ ...draft, productionEnvironment: event.target.value })
@@ -432,6 +480,10 @@ function MappingEditor({
               <label className="flex items-start gap-3" htmlFor={`${id}-attestation`}>
                 <input
                   id={`${id}-attestation`}
+                  aria-describedby={
+                    draft.scenario === 'complete-lifecycle' ? `${id}-scenario-help` : undefined
+                  }
+                  disabled={draft.scenario === 'complete-lifecycle'}
                   type="checkbox"
                   checked={draft.exposureAttested}
                   onChange={(event) => edit({ ...draft, exposureAttested: event.target.checked })}
@@ -449,6 +501,12 @@ function MappingEditor({
             <p>Only workspace owners can edit mock settings.</p>
             {mapping && (
               <dl className="mt-3">
+                <dt>Fictional scenario</dt>
+                <dd>
+                  {mapping.scenario === 'complete-lifecycle'
+                    ? 'Complete lifecycle — fictional'
+                    : 'Partial — fictional'}
+                </dd>
                 <dt>Mock primary provider</dt>
                 <dd>{mapping.primaryProvider === 'github' ? 'GitHub (mock)' : 'Argo CD (mock)'}</dd>
                 <dt>Production environment (mock)</dt>
@@ -517,7 +575,13 @@ function PreviewResult({ preview }: { preview: Preview }) {
       <h4 className="font-semibold">
         Fictional preview · Saved mock revision {preview.mappingRevision}
       </h4>
-      <p className="mt-2">Mock data · Provisional · Qualification: {preview.qualification}</p>
+      <p className="mt-2">
+        Mock data ·{' '}
+        {preview.scenario === 'complete-lifecycle'
+          ? 'Complete lifecycle — fictional'
+          : 'Provisional'}{' '}
+        · Qualification: {preview.qualification}
+      </p>
       <p className="mt-2">
         Fictional rollouts: {preview.rolloutCount}. Qualifying fictional deployments:{' '}
         {preview.deploymentFrequency.count}.
@@ -527,10 +591,23 @@ function PreviewResult({ preview }: { preview: Preview }) {
         {preview.window.calendarDays} calendar days).
       </p>
       <p className="mt-2">Evidence cutoff: {preview.evidenceCutoff}.</p>
-      <p className="mt-2">
-        Coverage is incomplete. Deployment history and recovery evidence have not been collected.
-        Deployments per day, change failure rate and recovery time are unavailable.
-      </p>
+      {preview.metricResult ? (
+        <>
+          <p className="mt-2">
+            Complete within fictional fixture. No live source coverage or native measurement basis.
+          </p>
+          <MetricResults
+            result={preview.metricResult}
+            sourceLabel="Fictional lifecycle"
+            headingLevel={5}
+          />
+        </>
+      ) : (
+        <p className="mt-2">
+          Coverage is incomplete. Deployment history and recovery evidence have not been collected.
+          Deployments per day, change failure rate and recovery time are unavailable.
+        </p>
+      )}
       {preview.qualification === 'unknown' && (
         <p className="mt-2">Production exposure is unconfirmed for this mock selection.</p>
       )}

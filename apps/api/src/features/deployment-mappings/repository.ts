@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { IdentityError, uuid } from '../identity/input.ts';
 import { type Actor, authorizedWorkspaceTransaction } from '../identity/repository.ts';
 import { createRepository } from '../workspaces/repository.ts';
-import { type DeploymentMapping, revision, settings } from './input.ts';
+import { type DeploymentMapping, revision, scenario, settings } from './input.ts';
 
 const observedTime = `to_char(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed_at_text`;
 
@@ -20,6 +20,7 @@ function mapping(row: Record<string, unknown>): DeploymentMapping {
     workspaceId: uuid(row.workspace_id),
     serviceId: uuid(row.service_id),
     mode: row.mode,
+    scenario: scenario(row.scenario),
     revision: revision(typeof row.revision === 'string' ? Number(row.revision) : row.revision),
     primaryProvider: row.primary_provider,
     productionEnvironment: row.production_environment,
@@ -29,7 +30,7 @@ function mapping(row: Record<string, unknown>): DeploymentMapping {
 }
 async function latest(client: PoolClient, workspaceId: string, serviceId: string) {
   const result = await client.query<Record<string, unknown>>(
-    `SELECT workspace_id, service_id, mode, revision, primary_provider, production_environment, exposure_attested, observed_at, ${observedTime}
+    `SELECT workspace_id, service_id, mode, scenario, revision, primary_provider, production_environment, exposure_attested, observed_at, ${observedTime}
     FROM deployment_mapping_revisions WHERE workspace_id = $1 AND service_id = $2 ORDER BY revision DESC LIMIT 1`,
     [workspaceId, serviceId],
   );
@@ -70,8 +71,8 @@ export function createMappingRepository(pool: Pool) {
         )
           throw new IdentityError(409, 'conflict');
         const result = await client.query<Record<string, unknown>>(
-          `INSERT INTO deployment_mapping_revisions (workspace_id, service_id, mode, revision, primary_provider, production_environment, exposure_attested, created_by)
-          VALUES ($1, $2, 'mock', $3, $4, $5, $6, $7) RETURNING *, ${observedTime}`,
+          `INSERT INTO deployment_mapping_revisions (workspace_id, service_id, mode, revision, primary_provider, production_environment, exposure_attested, created_by, scenario)
+          VALUES ($1, $2, 'mock', $3, $4, $5, $6, $7, $8) RETURNING *, ${observedTime}`,
           [
             service.workspaceId,
             service.id,
@@ -80,6 +81,7 @@ export function createMappingRepository(pool: Pool) {
             body.productionEnvironment,
             body.exposureAttested,
             actor.userId,
+            body.scenario,
           ],
         );
         const row = result.rows[0];

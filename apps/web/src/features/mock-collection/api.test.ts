@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../identity/api';
 import { parseHistoryPage, parseRun, parseRuns } from './api';
 import { completed, preview, queued, scope } from './fixtures.test-support';
+import { lifecyclePreview } from './lifecycle.test-support';
 
 describe('stored mock run parsing', () => {
   it('reads historical results without latest mapping and keeps microseconds/nulls/pin', () => {
@@ -113,4 +114,13 @@ describe('saved history pages', () => {
     };
     expect(() => parseHistoryPage({ runs: [pending] }, scope, { succeeded: true })).toThrow();
   });
+});
+
+it('reads original complete scenario without current mapping or silently promoting legacy results', () => {
+  const complete = { ...completed, scenario: 'complete-lifecycle', result: lifecyclePreview };
+  expect(parseRun({ run: complete }, scope).result).toEqual(lifecyclePreview);
+  expect(() => parseRun({ run: { ...complete, scenario: 'partial' } }, scope)).toThrow();
+  expect(() => parseRun({ run: { ...complete, scenario: undefined } }, scope)).toThrow();
+  expect(() => parseRun({ run: { ...complete, scenario: 'unknown' } }, scope)).toThrow();
+  expect(() => parseRun({ run: complete }, scope, 2)).toThrow();
 });

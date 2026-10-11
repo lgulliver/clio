@@ -518,6 +518,108 @@ describe('durable mock collection', () => {
       'ALTER TABLE mock_collection_snapshots RENAME COLUMN missing_evidence TO evidence',
     );
   });
+  it('captures complete scenario immutably across mapping changes, replay and expired lease takeover', async () => {
+    // Own service avoids altering any real provider connection or previous fixture history.
+    session();
+    const service = await identities.createService(
+      owner,
+      workspaceId,
+      `Fictional lifecycle ${randomUUID()}`,
+    );
+    serviceId = service.id;
+    const mapping = await mappings.save(owner, workspaceId, serviceId, {
+      ...settings,
+      scenario: 'complete-lifecycle',
+    });
+    const body = { revision: mapping.revision, requestId: randomUUID() };
+    const queued = await runs.enqueue(owner, workspaceId, serviceId, body);
+    expect(queued.scenario).toBe('complete-lifecycle');
+    const first = await worker.claim();
+    if (!first || first.id !== queued.id || typeof first.serviceName !== 'string')
+      throw new Error('Missing lifecycle claim');
+    const captured = parseMapping(first.mapping);
+    expect(captured.scenario).toBe('complete-lifecycle');
+    await mappings.save(owner, workspaceId, serviceId, {
+      ...settings,
+      expectedRevision: 1,
+      scenario: 'partial',
+      exposureAttested: false,
+    });
+    expect(await runs.enqueue(owner, workspaceId, serviceId, body)).toMatchObject({
+      id: queued.id,
+      createdAt: queued.createdAt,
+      mappingRevision: queued.mappingRevision,
+      mappingObservedAt: queued.mappingObservedAt,
+      scenario: 'complete-lifecycle',
+      status: 'running',
+      attempts: 1,
+    });
+    await expire(first.id);
+    const second = await worker.claim();
+    if (!second || second.id !== first.id) throw new Error('Missing replacement lifecycle lease');
+    const capture = captureMapping(captured, { id: service.id, name: first.serviceName });
+    expect(await worker.complete(first, capture)).toBe(false);
+    expect(await worker.complete(second, capture)).toBe(true);
+    expect(await worker.complete(second, capture)).toBe(false);
+    const saved = await runs.get(member, workspaceId, serviceId, queued.id);
+    expect(saved).toMatchObject({
+      scenario: 'complete-lifecycle',
+      mappingRevision: 1,
+      attempts: 2,
+      status: 'succeeded',
+      result: {
+        scenario: 'complete-lifecycle',
+        resultVersion: 'clio.mock.lifecycle.v1',
+        deploymentFrequency: { count: 3, deploymentsPerDay: 1.5 },
+        changeFailureRate: 1 / 3,
+        failedDeploymentRecoveryTime: 1800,
+        metricResult: {
+          change_lead_time: { median_seconds: 3600 },
+          deployment_rework_rate: { ratio: 1 / 3 },
+        },
+      },
+    });
+    expect((await runs.enqueue(owner, workspaceId, serviceId, body)).id).toBe(queued.id);
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS count FROM mock_collection_snapshots WHERE run_id=$1',
+          [queued.id],
+        )
+      ).rows[0]?.count,
+    ).toBe(1);
+    const next = await runs.enqueue(owner, workspaceId, serviceId, {
+      revision: 2,
+      requestId: randomUUID(),
+    });
+    await processOne(pool);
+    expect((await runs.get(owner, workspaceId, serviceId, next.id)).result).toMatchObject({
+      coverage: { collectionComplete: false },
+      deploymentFrequency: { count: 0, deploymentsPerDay: null },
+    });
+    expect(await runs.get(member, workspaceId, serviceId, queued.id)).toEqual(saved);
+    await expect(async () =>
+      mappings.save(owner, workspaceId, serviceId, {
+        ...settings,
+        expectedRevision: 2,
+        scenario: 'complete-lifecycle',
+        productionEnvironment: 'staging',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      pool.query(
+        "UPDATE deployment_mapping_revisions SET scenario='partial' WHERE workspace_id=$1 AND service_id=$2 AND revision=1",
+        [workspaceId, serviceId],
+      ),
+    ).rejects.toThrow('immutable');
+    await pool.query(
+      'ALTER TABLE deployment_mapping_revisions RENAME COLUMN scenario TO missing_scenario',
+    );
+    await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+    await pool.query(
+      'ALTER TABLE deployment_mapping_revisions RENAME COLUMN missing_scenario TO scenario',
+    );
+  });
 });
 
 it('saved history finds success behind 30 failures and pages tied timestamps with scoped authorization', async () => {

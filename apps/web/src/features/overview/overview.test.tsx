@@ -22,6 +22,7 @@ import {
 } from '../measurement-evidence/fixtures.test-support';
 import { withMetric } from '../measurements/fixtures.test-support';
 import { completed as mockCompleted } from '../mock-collection/fixtures.test-support';
+import { lifecyclePreview } from '../mock-collection/lifecycle.test-support';
 import { Overview } from './overview';
 
 const identity = vi.hoisted(() => ({
@@ -928,3 +929,30 @@ it.each(['newest', 'service', 'workspace', 'session'] as const)(
     expect(screen.queryByText('Deployment census missing')).not.toBeInTheDocument();
   },
 );
+
+it('shows five server metrics for saved fictional lifecycle separately from live histories', async () => {
+  fetchMock.mockImplementation(async (input) =>
+    String(input).includes('/mock-collection-runs')
+      ? json({
+          runs: [{ ...mockCompleted, scenario: 'complete-lifecycle', result: lifecyclePreview }],
+          nextCursor: null,
+        })
+      : defaultRead(input),
+  );
+  mount();
+  await select();
+  for (const name of [
+    'Deployment frequency',
+    'Change lead time',
+    'Change failure rate',
+    'Deployment rework rate',
+    'Failed deployment recovery time',
+  ])
+    expect(
+      await screen.findByRole('region', { name: `Fictional lifecycle: ${name}` }),
+    ).toBeVisible();
+  expect(screen.getByText(/Complete lifecycle — fictional/)).toBeVisible();
+  expect(screen.getByText(/Complete within fictional fixture/)).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Live GitHub' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Live Argo CD' })).toBeVisible();
+});

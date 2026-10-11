@@ -152,7 +152,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
   await pool.query('SELECT id, workspace_id, name, created_at FROM services LIMIT 0');
   await pool.query(
-    'SELECT workspace_id, service_id, mode, revision, primary_provider, production_environment, exposure_attested, observed_at, created_by FROM deployment_mapping_revisions LIMIT 0',
+    'SELECT workspace_id, service_id, mode, scenario, revision, primary_provider, production_environment, exposure_attested, observed_at, created_by FROM deployment_mapping_revisions LIMIT 0',
   );
   await pool.query(
     'SELECT id, workspace_id, service_id, mapping_revision, request_id, mapping_input, service_name, status, attempts, created_at, updated_at, completed_at, failure_code, result, lease_token, lease_until, available_at FROM mock_collection_runs LIMIT 0',

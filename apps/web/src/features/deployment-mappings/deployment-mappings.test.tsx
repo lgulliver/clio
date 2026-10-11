@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../lib/query-client';
 import { createAppRouter } from '../../router';
 import { SessionProvider, useSession } from '../identity/session';
+import { lifecyclePreview } from '../mock-collection/lifecycle.test-support';
 import type { SourceSetupPresentation } from '../source-setup/provider-state';
 import { DeploymentMappings } from './deployment-mappings';
 
@@ -722,4 +723,58 @@ describe('mock setup presentation', () => {
     await waitFor(() => expect(onAccessLost).toHaveBeenCalled());
     expect(onStatus.mock.lastCall?.[0].ready).toBe(false);
   });
+});
+
+it('selects complete fictional scenario, fixes its profile and previews all five server metrics', async () => {
+  let current = { ...initial, scenario: 'partial' };
+  mappingHandler = (path, options) => {
+    if (path.endsWith('/deployment-preview'))
+      return json({
+        preview: {
+          ...lifecyclePreview,
+          mappingRevision: 2,
+          metricResult: {
+            ...lifecyclePreview.metricResult,
+            dataset_id: `mock-preview:${workspaceId}:${serviceId}:2`,
+          },
+        },
+      });
+    if (options?.method === 'POST') {
+      expect(JSON.parse(String(options.body))).toEqual({
+        expectedRevision: 1,
+        scenario: 'complete-lifecycle',
+        primaryProvider: 'github',
+        productionEnvironment: 'production',
+        exposureAttested: true,
+      });
+      current = { ...current, scenario: 'complete-lifecycle', revision: 2, exposureAttested: true };
+    }
+    return json({ mapping: current });
+  };
+  mount();
+  const user = userEvent.setup();
+  await select(user);
+  await user.selectOptions(
+    await screen.findByLabelText('Fictional scenario'),
+    'complete-lifecycle',
+  );
+  expect(screen.getByLabelText('Production environment (mock)')).toBeDisabled();
+  expect(screen.getByRole('checkbox')).toBeChecked();
+  expect(screen.getByRole('checkbox')).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
+  await screen.findByText('Mock settings saved.');
+  await user.click(screen.getByRole('button', { name: 'Preview saved mock settings' }));
+  for (const name of [
+    'Deployment frequency',
+    'Change lead time',
+    'Change failure rate',
+    'Deployment rework rate',
+    'Failed deployment recovery time',
+  ])
+    expect(
+      await screen.findByRole('region', { name: `Fictional lifecycle: ${name}` }),
+    ).toBeVisible();
+  expect(
+    screen.getByText(/Complete within fictional fixture\. No live source coverage/),
+  ).toBeVisible();
 });

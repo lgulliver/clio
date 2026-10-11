@@ -28,7 +28,7 @@ const sources: { id: Source; name: string; description: string; guide: string }[
     id: 'mock',
     name: 'Fictional demo',
     description: 'Try the collection workflow with mock deployments. No live provider access.',
-    guide: '',
+    guide: 'synthetic-lifecycle-demo.md',
   },
 ];
 
@@ -321,8 +321,9 @@ export function SourceSetupWizard({
               </p>
               {source === 'mock' ? (
                 <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  This demo uses fictional evidence. Its results remain provisional and do not
-                  establish live source coverage.
+                  This demo uses fictional evidence. Choose Partial or Complete lifecycle —
+                  fictional. Complete coverage applies only within the fictional fixture; neither
+                  scenario establishes live source coverage or a native measurement basis.
                 </p>
               ) : (
                 <>
