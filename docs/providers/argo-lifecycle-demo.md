@@ -81,3 +81,19 @@ For a fully reviewed population/history, an optional fifth CLI argument identifi
 After midnight, a reviewed closed-day scenario with three qualified operations gives deployment count three, failure rate `1/3` and rework rate `1/3`. Lead time uses each genuine committer timestamp and first activation. Recovery stays approximate under polling even with complete supporting coverage. If observation stopped before midnight, extend coverage only from independently retained evidence; do not edit `closedAt` to imply unseen coverage.
 
 The helper validates the supplied ledger against native identities and timing, but does not open its referenced health/exposure/Git receipts. Operators must verify and retain those actual source records before constructing the ledger. A reviewed recovery reference must include the restoring probe and causal scenario evidence; it replaces the default probe reference in the report lineage.
+
+## Verified local exercise: 11 October 2026
+
+The dedicated Kind sandbox completed all three real rollouts for `clio-lifecycle-verified`, pinned to full configuration commit `40d923dec328edb8a2aad8b37db6c98f63777f30` and using the genuine local application commits listed in the scenario README. The original demos and an earlier attempt with an ambiguous whole-second baseline were preserved separately.
+
+| Stage | Exposure / activation (`effectiveAt`, UTC) | Functional probe (UTC) | HTTP result |
+| --- | --- | --- | --- |
+| Healthy | 15:23:44.677 | 15:23:44.699 | 200 |
+| Broken | 15:24:08.585 | 15:24:08.606 | 503 |
+| Recovery | 15:24:42.635 | 15:24:42.656 | 200 |
+
+Each controller operation reported Succeeded/Healthy. Native, application provenance and exact-byte consumer exposure submissions were accepted for every operation. The coordinator checked functional receipt digests against the actual build and exposure receipts. Separate change-link, classification and recovery reports were then accepted against the saved native basis. These operator statements describe three application changes, one failed deployment, one incident-driven corrective rollout and one approximate recovery episode; acceptance alone does not verify their truth. The retained episode spans 34.071 seconds from broken activation to the successful recovery probe; this is an approximate observation, not an exact recovery metric.
+
+The wizard saved a separate measurement for the closed window `[2026-10-10, 2026-10-11)`. Today's three operations remain retained but fall outside that window. The UI shows an observed deployment count of zero, provisional status and unavailable rates/medians; this does not establish that no deployments occurred. Collection, deployment history and recovery coverage all remain incomplete: no population report or reviewed service history was supplied, and the recovery interval does not cover that previous day. The coordinator verified these visible limitations in the browser. Native collection and independent measurement results remain separate.
+
+To report this exercise's actual day, collect `[2026-10-11, 2026-10-12)` after 00:00 UTC on 12 October (01:00 BST), fetch that new basis and generate reports in a fresh directory against it. Those reports receive fresh event UUIDs and remain alongside the immutable earlier reports, scoped to their respective bases; they do not replace earlier records. Retrying an existing submission instead requires its original report file and UUID. Complete metrics still require independently supported census, history and relevant gap resolutions; midnight alone does not provide them. Preserve the existing ledger closure and approximate recovery status. Tokens and retained raw evidence stay in owner-only storage outside Git; temporary loopback forwards were stopped after capture.
