@@ -57,7 +57,7 @@ function MetricCard({
   return (
     <section
       aria-label={sourceLabel ? `${sourceLabel}: ${name}` : name}
-      className="metric-card flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
+      className="metric-card flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
     >
       <Heading className="text-base font-semibold text-slate-900">{name}</Heading>
       <p
@@ -98,7 +98,8 @@ function MetricCard({
           Observed evidence only; incomplete quality keeps this metric provisional.
         </p>
       )}
-      <details className="mt-5 border-t border-slate-200 pt-3 text-sm text-slate-700">
+      <div aria-hidden="true" className="metric-evidence-spacer" />
+      <details className="metric-evidence border-t border-slate-200 pt-3 text-sm text-slate-700">
         <summary className="cursor-pointer rounded-sm font-medium text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
           Evidence details
         </summary>
@@ -195,7 +196,7 @@ export function MetricResults({
   return (
     <CompactMetrics value={{ compact, history }}>
       <section
-        className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 lg:grid-cols-5"
+        className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 lg:grid-cols-5"
         aria-label={label('Engineering metrics')}
       >
         <MetricCard

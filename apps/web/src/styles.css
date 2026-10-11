@@ -387,3 +387,11 @@ body {
 .delivery-dashboard .history-browser .history-controls .control:first-child {
   color: #93c5fd;
 }
+
+.metric-evidence-spacer {
+  flex-grow: 1;
+  min-height: 1.25rem;
+}
+.delivery-dashboard .metric-evidence-spacer {
+  min-height: 12px;
+}
