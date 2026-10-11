@@ -9,62 +9,91 @@ import {
 } from './api';
 
 export function MeasurementDetails({ result }: { result: MeasurementResult }) {
+  const coverage = [
+    { label: 'Collection', complete: result.coverage.collectionComplete },
+    { label: 'Deployment history', complete: result.coverage.deploymentHistoryComplete },
+    { label: 'Recovery evidence', complete: result.coverage.recoveryEvidenceComplete },
+  ];
   return (
-    <div className="mt-3 space-y-3">
-      <h3 className="font-semibold">Selected saved measurement</h3>
-      <p>
-        This independent measurement preserves its saved evidence. Native collection results remain
-        separate.
-      </p>
-      <dl className="space-y-2 break-words">
+    <div className="mt-5 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold">Selected saved measurement</h3>
+        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+          {result.provider === 'github' ? 'GitHub' : 'Argo CD'}
+        </span>
+      </div>
+      <dl className="measurement-context">
         <div>
-          <dt className="font-medium">Basis provider</dt>
-          <dd>{result.provider === 'github' ? 'GitHub' : 'Argo CD'}</dd>
-        </div>
-        <div>
-          <dt className="font-medium">Window (UTC, end exclusive)</dt>
+          <dt>Window (UTC, end exclusive)</dt>
           <dd>
-            {result.window.start} to {result.window.end}
+            {result.window.start.slice(0, 10)} to {result.window.end.slice(0, 10)}
           </dd>
         </div>
         <div>
-          <dt className="font-medium">Original collection evidence cutoff</dt>
-          <dd>{result.basisEvidenceCutoff}</dd>
-        </div>
-        <div>
-          <dt className="font-medium">Measurement evidence cutoff</dt>
+          <dt>Measurement evidence cutoff</dt>
           <dd>{result.evidenceCutoff}</dd>
         </div>
         <div>
-          <dt className="font-medium">Connection revision</dt>
-          <dd>{result.connectionRevision}</dd>
-        </div>
-        <div>
-          <dt className="font-medium">OEMS revision</dt>
-          <dd>{result.oemsRevision}</dd>
+          <dt>Original collection evidence cutoff</dt>
+          <dd>{result.basisEvidenceCutoff}</dd>
         </div>
       </dl>
-      <p>
-        Saved coverage: collection {result.coverage.collectionComplete ? 'complete' : 'incomplete'},{' '}
-        deployment history {result.coverage.deploymentHistoryComplete ? 'complete' : 'incomplete'},{' '}
-        recovery evidence {result.coverage.recoveryEvidenceComplete ? 'complete' : 'incomplete'}.
-      </p>
+      <ul className="coverage-strip" aria-label="Saved measurement coverage">
+        {coverage.map(({ label, complete }) => (
+          <li
+            key={label}
+            className={`coverage-chip ${complete ? 'coverage-complete' : 'coverage-incomplete'}`}
+          >
+            {label}: {complete ? 'complete' : 'incomplete'}
+          </li>
+        ))}
+      </ul>
+      <MetricResults result={result.metricResult} sourceLabel="Independent measurement" />
       {result.assessment.blockers.length > 0 ? (
-        <div>
+        <div className="evidence-needed">
           <h3 className="font-semibold">Missing measurement evidence</h3>
-          <ul className="list-disc pl-6">
+          <ul>
             {result.assessment.blockers.map((blocker) => (
               <li key={blocker}>{blockerLabels[blocker]}</li>
             ))}
           </ul>
         </div>
       ) : (
-        <p>No saved assessment blockers. Metric quality and observation status are shown below.</p>
+        <p className="text-sm text-clio-muted">
+          No saved assessment blockers. Metric quality and observation status are shown above.
+        </p>
       )}
-      <MetricResults result={result.metricResult} sourceLabel="Independent measurement" />
+      <details className="saved-context">
+        <summary>Saved measurement context</summary>
+        <p className="mt-3 text-clio-muted">
+          This independent measurement preserves its saved evidence. Native collection results
+          remain separate.
+        </p>
+        <dl className="mt-3 grid grid-cols-1 gap-4 break-words sm:grid-cols-2">
+          <div>
+            <dt className="font-medium">Basis provider</dt>
+            <dd>{result.provider === 'github' ? 'GitHub' : 'Argo CD'}</dd>
+          </div>
+          <div>
+            <dt className="font-medium">Connection revision</dt>
+            <dd>{result.connectionRevision}</dd>
+          </div>
+          <div>
+            <dt className="font-medium">Exact reporting window (UTC)</dt>
+            <dd>
+              {result.window.start} to {result.window.end}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium">OEMS revision</dt>
+            <dd>{result.oemsRevision}</dd>
+          </div>
+        </dl>
+      </details>
     </div>
   );
 }
+
 export function MeasurementHistory({
   workspaceId,
   serviceId,

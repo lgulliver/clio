@@ -2,41 +2,85 @@ import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { IdentityControls } from '../features/identity/session';
 
+function NavigationIcon({ settings = false }: { settings?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+    >
+      {settings ? (
+        <>
+          <path d="M4 7h16M4 17h16" />
+          <rect x="7" y="4" width="4" height="6" rx="1" fill="currentColor" stroke="none" />
+          <rect x="14" y="14" width="4" height="6" rx="1" fill="currentColor" stroke="none" />
+        </>
+      ) : (
+        <>
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      <a
-        href="#main-content"
-        className="sr-only rounded bg-white p-3 focus:not-sr-only focus:absolute focus:z-10"
-      >
+    <div className="app-frame font-sans">
+      <a href="#main-content" className="skip-link">
         Skip to content
       </a>
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-5">
-          <Link to="/" className="text-xl font-semibold tracking-tight">
-            Clio
+      <aside className="app-sidebar">
+        <Link to="/" className="app-brand">
+          <span className="brand-mark" aria-hidden="true">
+            c
+          </span>
+          Clio
+        </Link>
+        <nav aria-label="Main navigation" className="app-navigation">
+          <Link
+            to="/"
+            className="navigation-link"
+            activeOptions={{ exact: true }}
+            activeProps={{
+              className: 'navigation-link navigation-link-active',
+              'aria-current': 'page',
+            }}
+          >
+            <NavigationIcon /> Overview
           </Link>
-          <nav aria-label="Main navigation" className="flex gap-5 text-sm font-medium">
-            <Link
-              to="/"
-              activeOptions={{ exact: true }}
-              activeProps={{ className: 'text-indigo-700', 'aria-current': 'page' }}
-            >
-              Overview
-            </Link>
-            <Link
-              to="/settings"
-              activeProps={{ className: 'text-indigo-700', 'aria-current': 'page' }}
-            >
-              Workspace
-            </Link>
-          </nav>
-          <IdentityControls />
+          <Link
+            to="/settings"
+            className="navigation-link"
+            activeProps={{
+              className: 'navigation-link navigation-link-active',
+              'aria-current': 'page',
+            }}
+          >
+            <NavigationIcon settings /> Workspace
+          </Link>
+        </nav>
+        <div className="sidebar-note">
+          <span className="sidebar-note-mark" aria-hidden="true" />
+          Evidence-led delivery
         </div>
-      </header>
-      <main id="main-content" className="mx-auto max-w-6xl px-6 py-12">
-        {children}
-      </main>
+      </aside>
+      <div className="app-content">
+        <header className="app-topbar">
+          <span className="topbar-title">Engineering delivery</span>
+          <IdentityControls />
+        </header>
+        <main id="main-content" className="app-main">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

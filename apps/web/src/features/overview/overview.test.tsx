@@ -695,7 +695,19 @@ describe('independent measurement history in Overview', () => {
     expect(await within(card).findByText('Selected saved measurement')).toBeVisible();
     expect(within(card).getByText('2026-01-04T00:00:30.000001Z', { selector: 'dd' })).toBeVisible();
     expect(within(card).getByText('2026-01-04T00:01:00.000001Z', { selector: 'dd' })).toBeVisible();
-    expect(within(card).getByText(/Saved coverage/)).toHaveTextContent('collection complete');
+    expect(
+      within(card).getByRole('list', { name: 'Saved measurement coverage' }),
+    ).toHaveTextContent('Collection: complete');
+    fireEvent.click(
+      within(
+        within(card).getByRole('region', { name: 'Independent measurement: Deployment frequency' }),
+      ).getByText('Evidence details', { selector: 'summary' }),
+    );
+    fireEvent.click(
+      within(
+        within(card).getByRole('region', { name: 'Independent measurement: Change lead time' }),
+      ).getByText('Evidence details', { selector: 'summary' }),
+    );
     expect(within(card).getByText(/0.5 deployments per day/)).toBeVisible();
     expect(within(card).getByText(/86,400 seconds/)).toBeVisible();
     const native = screen.getByRole('region', { name: 'Live GitHub stored results' });
@@ -722,6 +734,13 @@ describe('independent measurement history in Overview', () => {
       const card = screen.getByRole('region', { name: 'Independent measurements stored results' });
       await within(card).findByText('Selected saved measurement');
       if (complete) {
+        fireEvent.click(
+          within(
+            within(card).getByRole('region', {
+              name: 'Independent measurement: Deployment frequency',
+            }),
+          ).getByText('Evidence details', { selector: 'summary' }),
+        );
         expect(within(card).getByText(/0 deployments per day/)).toBeVisible();
         expect(within(card).getAllByText('Status: no observations.')).toHaveLength(4);
       } else {
@@ -795,7 +814,13 @@ describe('independent measurement history in Overview', () => {
     fireEvent.click(
       within(card).getByRole('button', { name: 'Newest Independent measurements saved result' }),
     );
-    await within(card).findByText(/0.5 deployments per day/);
+    expect(
+      within(
+        await within(card).findByRole('region', {
+          name: 'Independent measurement: Deployment frequency',
+        }),
+      ).getByText('0.5'),
+    ).toBeVisible();
   });
   it.each([401, 403, 404])(
     'measurement history scope loss %s hides native siblings too',
@@ -882,7 +907,13 @@ it.each(['newest', 'service', 'workspace', 'session'] as const)(
       newest.focus();
       fireEvent.click(newest);
       expect(newest).toHaveFocus();
-      await screen.findByText(/0.5 deployments per day/);
+      expect(
+        within(
+          await screen.findByRole('region', {
+            name: 'Independent measurement: Deployment frequency',
+          }),
+        ).getByText('0.5'),
+      ).toBeVisible();
     }
     if (change === 'service')
       fireEvent.change(screen.getByLabelText('Service'), { target: { value: otherService } });

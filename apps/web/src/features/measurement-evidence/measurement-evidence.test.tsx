@@ -204,6 +204,12 @@ describe('owner independent measurement workflow', () => {
     const metrics = screen.getByRole('region', {
       name: 'Independent measurement: Engineering metrics',
     });
+    for (const name of ['Deployment frequency', 'Change lead time'])
+      fireEvent.click(
+        within(
+          within(metrics).getByRole('region', { name: `Independent measurement: ${name}` }),
+        ).getByText('Evidence details', { selector: 'summary' }),
+      );
     expect(within(metrics).getByText(/0.5 deployments per day/)).toBeVisible();
     expect(within(metrics).getByText(/86,400 seconds/)).toBeVisible();
     expect(screen.getByText('2026-01-04T00:01:00.000001Z', { selector: 'dd' })).toBeVisible();

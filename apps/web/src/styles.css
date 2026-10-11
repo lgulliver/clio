@@ -1,22 +1,141 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-clio-blue: #315dda;
+  --color-clio-ink: #18233f;
+  --color-clio-muted: #56637c;
+  --color-clio-canvas: #f7f8fc;
 }
 
 body {
   margin: 0;
-  min-width: 320px;
+  background: var(--color-clio-canvas);
+  color: var(--color-clio-ink);
 }
 
 @layer components {
   .control {
-    @apply rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-indigo-600 disabled:cursor-wait disabled:opacity-60;
+    @apply rounded-md bg-clio-blue px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue disabled:cursor-wait disabled:opacity-60;
   }
   .field {
-    @apply mt-2 block w-full max-w-lg rounded-lg border border-slate-300 bg-white px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-60;
+    @apply mt-2 block w-full max-w-lg rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-clio-blue disabled:opacity-60;
   }
   .panel {
-    @apply mt-8 rounded-2xl border border-slate-200 bg-white p-8;
+    @apply mt-6 rounded-xl border border-slate-200 bg-white p-5 sm:p-6;
+  }
+  .app-frame {
+    @apply min-h-screen lg:grid lg:grid-cols-[210px_minmax(0,1fr)];
+  }
+  .skip-link {
+    @apply sr-only rounded-md bg-white p-3 focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:outline-2 focus:outline-clio-blue;
+  }
+  .app-sidebar {
+    @apply flex flex-wrap items-center gap-5 border-b border-slate-200 bg-white px-5 py-4 lg:sticky lg:top-0 lg:h-dvh lg:flex-col lg:items-stretch lg:border-r lg:border-b-0 lg:px-4 lg:py-7;
+  }
+  .app-brand {
+    @apply flex items-center gap-3 text-2xl font-semibold tracking-tight text-clio-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue lg:px-3;
+  }
+  .brand-mark {
+    @apply flex h-8 w-8 items-center justify-center rounded-lg bg-clio-blue pb-1 text-3xl font-semibold text-white;
+  }
+  .app-navigation {
+    @apply flex gap-1 lg:mt-9 lg:flex-col lg:gap-2;
+  }
+  .navigation-link {
+    @apply flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-clio-muted hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-clio-blue;
+  }
+  .navigation-link-active {
+    @apply bg-blue-50 text-blue-800 hover:bg-blue-50;
+  }
+  .sidebar-note {
+    @apply mt-auto hidden items-center gap-2 border-t border-slate-100 px-3 pt-5 text-xs text-clio-muted lg:flex;
+  }
+  .sidebar-note-mark {
+    @apply h-1.5 w-1.5 rounded-full bg-clio-blue;
+  }
+  .app-content {
+    @apply min-w-0;
+  }
+  .app-topbar {
+    @apply flex min-h-18 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-8;
+  }
+  .topbar-title {
+    @apply text-sm font-medium text-clio-muted;
+  }
+  .app-main {
+    @apply mx-auto max-w-[1440px] px-5 py-7 sm:px-8 sm:py-9;
+  }
+  .page-header {
+    @apply border-b border-slate-200 pb-6;
+  }
+  .page-header h1 {
+    @apply text-3xl font-semibold tracking-tight;
+  }
+  .page-header p {
+    @apply mt-2 max-w-2xl text-sm leading-6 text-clio-muted;
+  }
+  .overview-scope {
+    @apply mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2;
+  }
+  .scope-filter {
+    @apply text-sm font-medium text-clio-muted;
+  }
+  .scope-filter > .field {
+    @apply max-w-none;
+  }
+  .service-heading {
+    @apply mb-5 flex flex-wrap items-center justify-between gap-4;
+  }
+  .service-heading h2 {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+  .service-heading p {
+    @apply mt-1 text-sm text-clio-muted;
+  }
+  .text-action {
+    @apply rounded text-sm font-medium text-blue-800 underline decoration-blue-200 underline-offset-4 hover:decoration-blue-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue;
+  }
+  .history-browser > h2 {
+    @apply text-lg font-semibold;
+  }
+  .history-browser .history-controls .control {
+    @apply border border-slate-200 bg-white px-3 py-1.5 text-xs text-clio-muted hover:bg-slate-50;
+  }
+  .history-browser .history-controls .control:first-child {
+    @apply border-blue-200 text-blue-800;
+  }
+  .measurement-context {
+    @apply grid grid-cols-1 gap-4 border-y border-slate-200 py-4 text-sm sm:grid-cols-2 xl:grid-cols-3;
+  }
+  .measurement-context dt {
+    @apply mb-1 text-xs font-medium text-clio-muted;
+  }
+  .measurement-context dd {
+    @apply break-words text-sm;
+  }
+  .coverage-strip {
+    @apply flex flex-wrap gap-2 text-xs;
+  }
+  .coverage-chip {
+    @apply rounded-md border px-2.5 py-1.5 font-medium;
+  }
+  .coverage-incomplete {
+    @apply border-amber-200 bg-amber-50 text-amber-900;
+  }
+  .coverage-complete {
+    @apply border-emerald-200 bg-emerald-50 text-emerald-900;
+  }
+  .evidence-needed {
+    @apply rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950;
+  }
+  .evidence-needed ul {
+    @apply mt-2 grid list-disc gap-x-8 gap-y-1 pl-5 sm:grid-cols-2;
+  }
+  .saved-context {
+    @apply rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm;
+  }
+  .saved-context summary {
+    @apply cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue;
   }
 }

@@ -90,9 +90,9 @@ export function HistoryBrowser<
   const refreshing =
     recent.isFetching || newest.isFetching || (cursor !== undefined && older.isFetching);
   return (
-    <section aria-label={`${title} stored results`} className="panel">
+    <section aria-label={`${title} stored results`} className="panel history-browser">
       <h2 className="text-xl font-semibold">{title}</h2>
-      <div className="mt-3 flex flex-wrap gap-3">
+      <div className="history-controls mt-3 flex flex-wrap gap-2">
         <button
           className="control aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
           type="button"

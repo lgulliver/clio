@@ -20,12 +20,10 @@ export function Overview() {
   const session = useSession();
   return (
     <section>
-      <p className="text-sm font-medium text-indigo-700">Engineering delivery, made clearer</p>
-      <h1 className="mt-3 text-4xl font-semibold tracking-tight">Delivery overview</h1>
-      <p className="mt-5 max-w-2xl leading-7 text-slate-600">
-        Inspect saved service results. Sources stay separate; incomplete evidence does not establish
-        complete delivery measurements.
-      </p>
+      <header className="page-header">
+        <h1>Delivery overview</h1>
+        <p>Understand service delivery through saved measurements and their evidence.</p>
+      </header>
       {session.status === 'ready' && session.user ? (
         <WorkspaceSelection key={`${session.user.id}:${session.revision}`} />
       ) : (
@@ -55,11 +53,11 @@ function WorkspaceSelection() {
     return <ReadError error={query.error} retry={() => void query.refetch()} label="workspaces" />;
   const active = query.data.find((workspace) => workspace.id === selected);
   return (
-    <div className="mt-8">
+    <div className="overview-scope">
       {query.data.length === 0 ? (
         <p>No accessible workspaces. Create one or accept an invitation in Workspace.</p>
       ) : (
-        <>
+        <div className="scope-filter">
           <label htmlFor="overview-workspace">Workspace</label>
           <select
             id="overview-workspace"
@@ -74,30 +72,43 @@ function WorkspaceSelection() {
               </option>
             ))}
           </select>
-        </>
+        </div>
       )}
-      {active && <ServiceSelection key={active.id} workspaceId={active.id} />}
+      {active && (
+        <ServiceSelection key={active.id} workspaceId={active.id} workspaceName={active.name} />
+      )}
     </div>
   );
 }
 
-function ServiceSelection({ workspaceId }: { workspaceId: string }) {
+function ServiceSelection({
+  workspaceId,
+  workspaceName,
+}: {
+  workspaceId: string;
+  workspaceName: string;
+}) {
   const [selected, setSelected] = useState('');
   const query = useStoredRead(
     `${workspaceId}/services`,
     `/api/workspaces/${workspaceId}/services`,
     (value) => parseServices(value, workspaceId),
   );
-  if (query.isPending) return <p role="status">Loading services…</p>;
+  if (query.isPending)
+    return (
+      <p className="col-span-full" role="status">
+        Loading services…
+      </p>
+    );
   if (query.isError)
     return <ReadError error={query.error} retry={() => void query.refetch()} label="services" />;
   const active = query.data.find((service) => service.id === selected);
   return (
-    <div className="mt-6">
+    <>
       {query.data.length === 0 ? (
         <p>No services in this workspace. Add a service in Workspace.</p>
       ) : (
-        <>
+        <div className="scope-filter">
           <label htmlFor="overview-service">Service</label>
           <select
             id="overview-service"
@@ -112,16 +123,24 @@ function ServiceSelection({ workspaceId }: { workspaceId: string }) {
               </option>
             ))}
           </select>
-        </>
+        </div>
       )}
-      {active && <StoredResults key={active.id} workspaceId={workspaceId} serviceId={active.id} />}
-    </div>
+      {active && (
+        <StoredResults
+          key={active.id}
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          serviceId={active.id}
+          serviceName={active.name}
+        />
+      )}
+    </>
   );
 }
 
 function ReadError({ error, retry, label }: { error: unknown; retry: () => void; label: string }) {
   return (
-    <div className="panel">
+    <div className="panel col-span-full">
       <p role="alert">{errorMessage(error)}</p>
       <button className="control mt-3" type="button" onClick={retry}>
         Retry {label}
@@ -130,20 +149,46 @@ function ReadError({ error, retry, label }: { error: unknown; retry: () => void;
   );
 }
 
-function StoredResults({ workspaceId, serviceId }: { workspaceId: string; serviceId: string }) {
+function StoredResults({
+  workspaceId,
+  serviceId,
+  workspaceName,
+  serviceName,
+}: {
+  workspaceId: string;
+  serviceId: string;
+  workspaceName: string;
+  serviceName: string;
+}) {
   const [blocked, setBlocked] = useState(false);
   const scope = { workspaceId, serviceId };
   const path = `/api/workspaces/${workspaceId}/services/${serviceId}`;
   if (blocked)
     return (
-      <div className="panel" role="alert">
+      <div className="panel col-span-full" role="alert">
         Stored results are no longer accessible. Select another service or refresh your workspace
         access.
       </div>
     );
   return (
-    <div className="mt-8">
-      <p className="text-slate-600">
+    <div className="col-span-full mt-5">
+      <div className="service-heading">
+        <div>
+          <h2>{serviceName}</h2>
+          <p>{workspaceName}</p>
+        </div>
+        <Link to="/settings" className="text-action">
+          Manage workspace and sources
+        </Link>
+      </div>
+      <MeasurementHistory {...scope} onAccessLost={() => setBlocked(true)} />
+      <div className="mt-10 mb-4">
+        <p className="text-lg font-semibold">Native collection history</p>
+        <p className="mt-2 text-sm text-clio-muted">
+          Inspect source observations separately from independent measurements.
+        </p>
+      </div>
+      <p className="max-w-3xl text-sm leading-6 text-clio-muted">
         Each source shows up to 25 requests per page and independently finds its newest saved
         result. Saved results belong to their original window and connection or mapping revision;
         they may differ from current settings. Counts across sources must not be added together.
@@ -162,7 +207,6 @@ function StoredResults({ workspaceId, serviceId }: { workspaceId: string; servic
           renderResult={(newest, success) => <ResultHistory newest={newest} success={success} />}
         />
       ))}
-      <MeasurementHistory {...scope} onAccessLost={() => setBlocked(true)} />
     </div>
   );
 }
