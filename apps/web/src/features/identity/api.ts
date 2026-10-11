@@ -130,8 +130,9 @@ export async function request<T>(
       : {}),
   });
   if (!response.ok) throw new ApiError(response.status);
-  if (options.method === 'DELETE') {
-    if (response.status !== 204) throw new ApiError(0);
+  if (options.method === 'DELETE' && response.status !== 200 && response.status !== 204)
+    throw new ApiError(0);
+  if (options.method === 'DELETE' && response.status === 204) {
     return parse(undefined);
   }
   let value: unknown;
@@ -251,4 +252,25 @@ export function parsePendingInvitations(
       expiresAt: timestamp(item.expiresAt),
     };
   });
+}
+
+export type MemberRevocation = { cancelledInvitationIds: string[]; hasMore: boolean };
+export function parseMemberRevocation(value: unknown): MemberRevocation {
+  const data = record(value);
+  if (
+    Object.keys(data).length !== 2 ||
+    !Array.isArray(data.cancelledInvitationIds) ||
+    data.cancelledInvitationIds.length > 100 ||
+    typeof data.hasMore !== 'boolean' ||
+    (data.hasMore && data.cancelledInvitationIds.length !== 100)
+  )
+    throw new ApiError(0);
+  const ids = data.cancelledInvitationIds.map(uuid);
+  if (new Set(ids.map((id) => id.toLowerCase())).size !== ids.length) throw new ApiError(0);
+  return { cancelledInvitationIds: ids.map((id) => id.toLowerCase()), hasMore: data.hasMore };
+}
+export function parseInvitationStatus(value: unknown): boolean {
+  const data = record(value);
+  if (Object.keys(data).length !== 1 || typeof data.pending !== 'boolean') throw new ApiError(0);
+  return data.pending;
 }

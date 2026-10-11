@@ -32,7 +32,18 @@ The census proves collection scope only when independently exhaustive across act
 
 1. Five-metric presentation and workspace access management: delivered in `c18da86`, with full checks, PostgreSQL verification and opposite-engine review.
 2. Strict common evidence contracts, private native basis binding and pinned reconciliation: delivered in `7b7289e`; new Argo snapshots retain exact private gap manifests and explicit unbounded transport uncertainty.
-3. Durable private evidence ingress, measurement jobs/results and accessible application workflow.
-4. Saved-result discovery/history: delivered with independent successful-result lookup and bounded cursor navigation; real-source/operator guides and complete local acceptance verification remain required.
+3. Durable private evidence ingress, measurement jobs/results and accessible application workflow: implemented and locally verified. Private capability grants, authenticated basis projection/report ingress, lifetime storage/pacing budgets, fenced leased jobs, immutable all-five results and owner/member browser workflows are present. Integrated checks, PostgreSQL verification and opposite-engine review pass; delivery is recorded by the accompanying commit.
+4. Saved-result discovery/history: delivered with independent successful-result lookup and bounded cursor navigation. Measurement history extends that workflow. Real-source/operator setup is documented in [getting started](../getting-started.md) and [measurement evidence setup](../providers/connect-measurement-evidence.md); the integrated guide and local acceptance workflow have been reviewed and verified.
+
+## Verified acceptance on 2026-10-11
+
+- `pnpm check`: strict lint, all package type checks, 1,107 unit/component tests and the production browser build passed. `git diff --check` passed.
+- Real PostgreSQL: 177 integration tests passed, covering authenticated ingress, immutable replay/conflict handling, all-attempt pacing, lifetime budgets, revoked source/producer/member fences, worker leases, history and invitation lineage.
+- The actual GitHub collector exercised against controlled fictional GitHub responses, retained native basis and all four independent reports produces all five complete metric results with expected lead-time, failure and recovery values. This verifies application mapping, not live repository coverage or OEMS conformance.
+- Running local application: signed-in owner selected the existing Argo sandbox basis, queued an independent measurement without authorities, ran `worker:measurement --once`, refreshed success and read the same saved result in Overview. Both cutoffs and the original window/revision are preserved; all five metrics correctly remain provisional with missing-evidence reasons. Member reads and owner-only actions are verified against real PostgreSQL; no new real member was invited for this smoke test.
+- Claude independently reviewed Codex changes and final integration: no Critical, High or Medium findings. Request replay deliberately rechecks current authority/source eligibility; a retry after rotation can return 409, while recent-request discovery exposes the previously created run. The setup guide documents this fence.
+
+The local MVP acceptance scope is complete. GitHub App verification, real producer activation and complete live coverage remain operator-dependent. Hosted deployment, hosted onboarding, automatic scheduling, incremental GitHub acquisition and OEMS conformance are outside this local MVP scope.
+
 
 Each slice receives opposite-engine review and required checks before its Conventional Commit. Feature completion is established by verified acceptance, not by this plan or by source credentials being available.

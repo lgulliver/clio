@@ -9,6 +9,7 @@ import {
 } from '../github-collection/api';
 import { errorMessage, parseServices, parseWorkspaces } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MeasurementHistory } from '../measurement-evidence/measurement-history';
 import { MetricResults } from '../measurements/metric-results';
 import { type Run as MockRun, parseHistoryPage as parseMockPage } from '../mock-collection/api';
 import { HistoryBrowser, useStoredRead } from '../result-history/history-browser';
@@ -161,6 +162,7 @@ function StoredResults({ workspaceId, serviceId }: { workspaceId: string; servic
           renderResult={(newest, success) => <ResultHistory newest={newest} success={success} />}
         />
       ))}
+      <MeasurementHistory {...scope} onAccessLost={() => setBlocked(true)} />
     </div>
   );
 }

@@ -631,7 +631,9 @@ describe('owner workspace access', () => {
         if (path.endsWith('/members/bob%2Fid')) revoked = true;
         else if (path.endsWith(`/invitations/${serviceId}`)) cancelled = true;
         else throw new Error(path);
-        return new Response(null, { status: 204 });
+        return path.includes('/members/')
+          ? json({ cancelledInvitationIds: [], hasMore: false })
+          : new Response(null, { status: 204 });
       }
       if (path.endsWith('/members'))
         return json({
@@ -668,7 +670,7 @@ describe('owner workspace access', () => {
       2,
     );
   });
-  it.each(['bob@example.test', 'BOB@example.test', 'unrelated@example.test'])(
+  it.each(['changed@example.test', 'bob@example.test', 'unrelated@example.test'])(
     'clears only matching displayed invitation after revocation: %s',
     async (email) => {
       handler = accessHandler((path, options) => {
@@ -685,7 +687,11 @@ describe('owner workspace access', () => {
             },
             201,
           );
-        if (options?.method === 'DELETE') return new Response(null, { status: 204 });
+        if (options?.method === 'DELETE')
+          return json({
+            cancelledInvitationIds: email === 'changed@example.test' ? [serviceId] : [],
+            hasMore: false,
+          });
         if (path.endsWith('/members'))
           return json({ workspaceId: first, members: [accessMember], hasMore: false });
         return json({ workspaceId: first, invitations: [], hasMore: false });
@@ -702,7 +708,7 @@ describe('owner workspace access', () => {
         await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
       );
       await screen.findByText('Access revoked for Bob.');
-      if (email.toLowerCase() === 'bob@example.test')
+      if (email === 'changed@example.test')
         expect(
           screen.queryByLabelText('Invitation token — copy and share once'),
         ).not.toBeInTheDocument();
@@ -978,7 +984,10 @@ it('cancels/removes abandoned pages and drops late data when returning to first 
 it('retries page errors with focus and resets both cursors after successful revocation', async () => {
   let fail = true;
   handler = pagedAccessHandler((path, options) => {
-    if (options?.method === 'DELETE') return new Response(null, { status: 204 });
+    if (options?.method === 'DELETE')
+      return path.includes('/members/')
+        ? json({ cancelledInvitationIds: [], hasMore: false })
+        : new Response(null, { status: 204 });
     if (fail) return json({}, 503);
     return path.includes('/members')
       ? json({ workspaceId: first, members: [accessMember], hasMore: false, nextCursor: null })
@@ -1138,3 +1147,413 @@ it.each([true, false])(
     expect(screen.getByRole('heading', { name: 'Workspace access' })).toHaveFocus();
   },
 );
+
+it.each(['revoke', 'cancel'])(
+  'checks late invite response after %s and allows intentional re-invite',
+  async (action) => {
+    const late = deferred<Response>();
+    let creates = 0;
+    let statusReads = 0;
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'POST') {
+        creates += 1;
+        return creates === 1
+          ? late.promise
+          : json(
+              {
+                invitation: {
+                  id: second,
+                  workspaceId: first,
+                  email: 'changed@example.test',
+                  expiresAt: accessInvite.expiresAt,
+                  token,
+                },
+              },
+              201,
+            );
+      }
+      if (path.endsWith('/status')) {
+        statusReads += 1;
+        return json({ pending: false });
+      }
+      if (options?.method === 'DELETE')
+        return action === 'revoke'
+          ? json({ cancelledInvitationIds: [serviceId], hasMore: false })
+          : new Response(null, { status: 204 });
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [accessInvite], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name:
+          action === 'revoke'
+            ? 'Revoke access for Bob (bob@example.test)'
+            : `Cancel invitation for invited@example.test (${accessInvite.createdAt})`,
+      }),
+    );
+    await screen.findByText(
+      action === 'revoke'
+        ? 'Access revoked for Bob.'
+        : 'Invitation cancelled for invited@example.test.',
+    );
+    await act(async () => {
+      late.resolve(
+        json(
+          {
+            invitation: {
+              id: serviceId,
+              workspaceId: first,
+              email: 'changed@example.test',
+              expiresAt: accessInvite.expiresAt,
+              token,
+            },
+          },
+          201,
+        ),
+      );
+      await late.promise;
+    });
+    await waitFor(() => expect(statusReads).toBe(1));
+    expect(
+      screen.queryByLabelText('Invitation token — copy and share once'),
+    ).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    expect(await screen.findByLabelText('Invitation token — copy and share once')).toHaveValue(
+      token,
+    );
+    expect(statusReads).toBe(1);
+  },
+);
+it.each([true, false])(
+  'resolves bounded cancellation overflow without losing unrelated token: %s',
+  async (pending) => {
+    let fail = true;
+    const ids = Array.from(
+      { length: 100 },
+      (_, i) => `44444444-4444-4444-8444-${String(i).padStart(12, '0')}`,
+    );
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'POST')
+        return json(
+          {
+            invitation: {
+              id: serviceId,
+              workspaceId: first,
+              email: 'changed@example.test',
+              expiresAt: accessInvite.expiresAt,
+              token,
+            },
+          },
+          201,
+        );
+      if (options?.method === 'DELETE') return json({ cancelledInvitationIds: ids, hasMore: true });
+      if (path.endsWith('/status')) return fail ? json({}, 503) : json({ pending });
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    await screen.findByLabelText('Invitation token — copy and share once');
+    await user.click(
+      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    await screen.findByText('Invitation availability could not be checked. Retry before sharing.');
+    expect(
+      screen.queryByLabelText('Invitation token — copy and share once'),
+    ).not.toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Retry invitation check' }));
+    expect(screen.getByRole('heading', { name: 'Invite a member' })).toHaveFocus();
+    if (pending)
+      expect(await screen.findByLabelText('Invitation token — copy and share once')).toHaveValue(
+        token,
+      );
+    else
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: 'Retry invitation check' }),
+        ).not.toBeInTheDocument(),
+      );
+  },
+);
+
+it.each([true, false])(
+  'keeps keyboard focus when invitation status finishes with pending %s',
+  async (pending) => {
+    const late = deferred<Response>();
+    handler = accessHandler((path, options) => {
+      if (options?.method === 'POST')
+        return json(
+          {
+            invitation: {
+              id: serviceId,
+              workspaceId: first,
+              email: accessInvite.email,
+              expiresAt: accessInvite.expiresAt,
+              token,
+            },
+          },
+          201,
+        );
+      if (options?.method === 'DELETE') return json({}, 503);
+      if (path.endsWith('/status')) return late.promise;
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [accessInvite], hasMore: false });
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(screen.getByLabelText('Member email'), accessInvite.email);
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    await screen.findByLabelText('Invitation token — copy and share once');
+    await user.click(
+      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    await screen.findByText('Checking invitation availability…');
+    const dismiss = screen.getByRole('button', { name: 'Dismiss token' });
+    // Reach Dismiss through keyboard navigation without activating it.
+    for (let attempt = 0; attempt < 20 && document.activeElement !== dismiss; attempt += 1)
+      await user.tab();
+    expect(dismiss).toHaveFocus();
+    await act(async () => {
+      late.resolve(json({ pending }));
+      await late.promise;
+    });
+    expect(screen.getByRole('heading', { name: 'Invite a member' })).toHaveFocus();
+    expect(screen.queryByText('Checking invitation availability…')).not.toBeInTheDocument();
+    if (pending)
+      expect(screen.getByLabelText('Invitation token — copy and share once')).toHaveValue(token);
+    else
+      expect(
+        screen.queryByLabelText('Invitation token — copy and share once'),
+      ).not.toBeInTheDocument();
+  },
+);
+
+it.each(['workspace', 'session', 'new-invite'])(
+  'fences ignored-abort invitation status after %s changes',
+  async (scope) => {
+    const late = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    let expired = false;
+    let creates = 0;
+    const original = accessHandler((path, options) => {
+      if (options?.method === 'POST') {
+        creates += 1;
+        return json(
+          {
+            invitation: {
+              id: creates === 1 ? serviceId : second,
+              workspaceId: first,
+              email: 'changed@example.test',
+              expiresAt: accessInvite.expiresAt,
+              token,
+            },
+          },
+          201,
+        );
+      }
+      if (options?.method === 'DELETE')
+        return json({
+          cancelledInvitationIds: Array.from(
+            { length: 100 },
+            (_, i) => `44444444-4444-4444-8444-${String(i).padStart(12, '0')}`,
+          ),
+          hasMore: true,
+        });
+      if (path.endsWith('/status')) {
+        signal = options?.signal ?? undefined;
+        return late.promise;
+      }
+      if (path.endsWith('/members'))
+        return json({ workspaceId: first, members: [accessMember], hasMore: false });
+      return json({ workspaceId: first, invitations: [], hasMore: false });
+    });
+    handler = (path, options) =>
+      path === '/api/me' && expired ? json({}, 401) : original(path, options);
+    renderApp();
+    const user = userEvent.setup();
+    await openAccess(user);
+    await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+    await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+    await screen.findByLabelText('Invitation token — copy and share once');
+    await user.click(
+      await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+    );
+    await screen.findByText('Checking invitation availability…');
+    if (scope === 'workspace') await choose(user, second);
+    else if (scope === 'session') {
+      expired = true;
+      act(() => window.dispatchEvent(new Event('focus')));
+      await screen.findByRole('button', { name: 'Sign in with GitHub' });
+    } else {
+      await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+      await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+      await screen.findByLabelText('Invitation token — copy and share once');
+    }
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      late.resolve(json({ pending: scope !== 'new-invite' }));
+      await late.promise;
+    });
+    if (scope === 'new-invite')
+      expect(screen.getByLabelText('Invitation token — copy and share once')).toHaveValue(token);
+    else
+      expect(
+        screen.queryByLabelText('Invitation token — copy and share once'),
+      ).not.toBeInTheDocument();
+  },
+);
+
+it('records completed revocation after access panel closes while invite response is pending', async () => {
+  const create = deferred<Response>();
+  const remove = deferred<Response>();
+  let statusReads = 0;
+  handler = accessHandler((path, options) => {
+    if (options?.method === 'POST') return create.promise;
+    if (options?.method === 'DELETE') return remove.promise;
+    if (path.endsWith('/status')) {
+      statusReads += 1;
+      return json({ pending: false });
+    }
+    if (path.endsWith('/members'))
+      return json({ workspaceId: first, members: [accessMember], hasMore: false });
+    return json({ workspaceId: first, invitations: [], hasMore: false });
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.type(screen.getByLabelText('Member email'), 'changed@example.test');
+  await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Hide access management' }));
+  await act(async () => {
+    remove.resolve(json({ cancelledInvitationIds: [serviceId], hasMore: false }));
+    await remove.promise;
+  });
+  await act(async () => {
+    create.resolve(
+      json(
+        {
+          invitation: {
+            id: serviceId,
+            workspaceId: first,
+            email: 'changed@example.test',
+            expiresAt: accessInvite.expiresAt,
+            token,
+          },
+        },
+        201,
+      ),
+    );
+    await create.promise;
+  });
+  await waitFor(() => expect(statusReads).toBe(1));
+  expect(screen.queryByLabelText('Invitation token — copy and share once')).not.toBeInTheDocument();
+});
+
+it.each([400, 409])('keeps token usable after definite revocation failure %s', async (status) => {
+  let statusReads = 0;
+  handler = accessHandler((path, options) => {
+    if (options?.method === 'POST')
+      return json(
+        {
+          invitation: {
+            id: serviceId,
+            workspaceId: first,
+            email: accessInvite.email,
+            expiresAt: accessInvite.expiresAt,
+            token,
+          },
+        },
+        201,
+      );
+    if (options?.method === 'DELETE') return json({}, status);
+    if (path.endsWith('/status')) {
+      statusReads += 1;
+      return json({ pending: true });
+    }
+    if (path.endsWith('/members'))
+      return json({ workspaceId: first, members: [accessMember], hasMore: false });
+    return json({ workspaceId: first, invitations: [accessInvite], hasMore: false });
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.type(screen.getByLabelText('Member email'), accessInvite.email);
+  await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+  const sharing = await screen.findByLabelText('Invitation token — copy and share once');
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke access for Bob (bob@example.test)' }),
+  );
+  await screen.findByText(
+    status === 409
+      ? 'This change conflicts with an existing record.'
+      : 'Check the details and try again.',
+  );
+  expect(statusReads).toBe(0);
+  expect(sharing).toHaveValue(token);
+  expect(sharing).toBeVisible();
+  expect(screen.queryByText('Checking invitation availability…')).not.toBeInTheDocument();
+});
+
+it('rechecks token after ambiguous committed cancellation and keeps sharing hidden during retry', async () => {
+  let verifying = false;
+  const late = deferred<Response>();
+  handler = accessHandler((path, options) => {
+    if (options?.method === 'POST')
+      return json(
+        {
+          invitation: {
+            id: serviceId,
+            workspaceId: first,
+            email: accessInvite.email,
+            expiresAt: accessInvite.expiresAt,
+            token,
+          },
+        },
+        201,
+      );
+    if (options?.method === 'DELETE') return json({}, 503);
+    if (path.endsWith('/status')) {
+      verifying = true;
+      return late.promise;
+    }
+    if (path.endsWith('/members'))
+      return json({ workspaceId: first, members: [accessMember], hasMore: false });
+    return json({ workspaceId: first, invitations: [accessInvite], hasMore: false });
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await openAccess(user);
+  await user.type(screen.getByLabelText('Member email'), accessInvite.email);
+  await user.click(screen.getByRole('button', { name: 'Create invitation' }));
+  await screen.findByLabelText('Invitation token — copy and share once');
+  await user.click(
+    await screen.findByRole('button', { name: /Cancel invitation for invited@example.test/ }),
+  );
+  await screen.findByText('Checking invitation availability…');
+  expect(verifying).toBe(true);
+  expect(screen.queryByLabelText('Invitation token — copy and share once')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Dismiss token' }));
+  expect(screen.getByRole('heading', { name: 'Invite a member' })).toHaveFocus();
+  await act(async () => {
+    late.resolve(json({ pending: true }));
+    await late.promise;
+  });
+  expect(screen.queryByLabelText('Invitation token — copy and share once')).not.toBeInTheDocument();
+});

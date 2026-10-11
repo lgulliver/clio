@@ -2,11 +2,13 @@
 
 Clio is an engineering-delivery application built around traceable evidence and the [Open Engineering Metrics Standard](https://github.com/lgulliver/oems).
 
-Status: local backend foundation and browser shell. PostgreSQL workspace/service persistence, explicit migrations and health/readiness are implemented. Pinned OEMS snapshot validation and all five fixture-backed metric calculations are implemented. GitHub authentication, PostgreSQL sessions and workspace authorization are implemented in the API; browser login, workspace/service workflows and manual invitations are connected. Server-only GitHub and Argo CD adapter foundations are tested against fictional evidence with configurable service/source mappings and pinned OEMS reconciliation. Workspace service deployment settings persist as immutable mock-only revisions. Owners configure GitHub or Argo CD plus production environment, queue durable fictional collection runs, and inspect saved snapshots through safe results. Members can read history and run clearly labelled ephemeral previews. A separate PostgreSQL-backed mock worker processes leased jobs with bounded retries. Local workspace-bound GitHub App connections and a separate durable live GitHub worker with resumable traversal checkpoints are implemented. Owners select an explicitly granted repository and closed UTC period; members read immutable results with provisional counts and incomplete coverage. App signing keys and operator grants stay in private files outside Git; scoped native Argo notification ingestion, durable receipts/gaps and a separate snapshot worker are implemented locally; hosted credential storage remains pending. Native Argo consumer exposure remains unknown and all initial coverage stays incomplete. Overview reads stored service results with source, window, cutoff, provisional counts and unavailable metric labels. Liam Gulliver is the sole maintainer.
+Status: the scoped local MVP is implemented and verified. Clio provides GitHub sign-in, PostgreSQL sessions, workspace/service management, manual invitations and owner access controls. Separate GitHub Deployments, native Argo CD and fictional mock collectors retain immutable results through durable workers. Settings and Overview show all five pinned OEMS metrics, quality reasons, coverage and bounded saved-result history.
+
+Independent service-scoped population, change/history, classification and recovery evidence can produce a new immutable measurement from an exact successful GitHub or Argo collection. Private producer grants and reports stay server-side. Owners select received evidence and queue measurements; members read saved results. Missing evidence produces partial results, never invented zeroes or complete coverage. Native collection results remain unchanged. Real source access and independently supported producer evidence require deliberate operator configuration. Hosting, automatic scheduling and hosted credential storage remain undecided. Liam Gulliver is the sole maintainer.
 
 ## Quick start
 
-Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. Use [real-source preparation and access checks](docs/providers/real-sources.md) for GitHub App registration and scoped Argo access; use [local live GitHub connection](docs/providers/connect-github.md) to configure private operator grants and collect GitHub Deployments. Use [connecting Argo CD](docs/providers/connect-argocd.md) for explicit Application scope, operation info, notification authentication and immutable results. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
+Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. Use [real-source preparation and access checks](docs/providers/real-sources.md) for GitHub App registration and scoped Argo access; use [local live GitHub connection](docs/providers/connect-github.md) to configure private operator grants and collect GitHub Deployments. Use [connecting Argo CD](docs/providers/connect-argocd.md) for explicit Application scope, operation info, notification authentication and immutable results. Use [independent measurement evidence](docs/providers/connect-measurement-evidence.md) to configure private producer capabilities and save evidence-backed measurements. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
 
 Use Node 24 LTS (24.21.0 is pinned in .node-version) and pnpm 12.10.1:
 
@@ -39,6 +41,8 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 | pnpm worker:mock --once | Process at most one eligible fictional run, then exit |
 | pnpm worker:argo | Process eligible native Argo snapshot jobs from previously accepted receipts |
 | pnpm worker:github | Process eligible live GitHub collection jobs (private operator configuration required) |
+| pnpm worker:measurement | Process queued independent measurements against saved native collections |
+| pnpm worker:measurement --once | Process at most one eligible measurement job, then exit |
 | pnpm demo:providers | Run configurable fictional GitHub/Argo CD evidence through OEMS |
 
 ## Repository layout
@@ -67,7 +71,7 @@ Codex and Claude project specialists share [team guidance](docs/agents/team.md),
 
 ## OEMS and licensing
 
-The OEMS revision is explicitly pinned in packages/oems/src/contract.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. Do not duplicate metric semantics in application code.
+The OEMS revision is explicitly pinned in packages/oems/src/contract.ts. The package validates reconciled snapshots and calculates all five metrics against the pinned fixtures; read [its API and limits](packages/oems/README.md). Fixture parity does not establish a conformance designation or prove provider coverage. The [local MVP acceptance scope](docs/agents/feature-completion.md) records the verified local acceptance scope and operator-dependent limits; local feature completion does not imply hosted production readiness or complete live coverage. Do not duplicate metric semantics in application code.
 
 Clio's licence has not been selected. Public visibility does not grant an open licence; workspace packages are private and marked UNLICENSED. OEMS is separately licensed under Apache 2.0.
 

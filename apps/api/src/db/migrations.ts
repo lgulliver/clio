@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
-import { withTransaction } from './pool.ts';
+import { checkMeasurementColumns, withTransaction } from './pool.ts';
 
 export interface Migration {
   name: string;
@@ -89,6 +89,7 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   );
   checkApplied(result.rows, migrations, true);
   // Also detect missing tables/columns rather than trusting ledger alone.
+  await checkMeasurementColumns(pool);
   await pool.query(
     'SELECT source_id,journal_id,producer_id,policy_reference,startup_at,registered_at,last_sequence,last_digest,last_capture_at,sealed_sequence,sealed_end FROM argo_archive_journals LIMIT 0',
   );

@@ -1,12 +1,12 @@
 # Evidence-backed measurements
 
-Clio now has a strict server-only report parser and a pure reconciliation engine for independent population, changes/history, classification and recovery evidence. The private native-basis reader binds these facts to a saved GitHub or Argo collection snapshot. Durable authenticated report ingestion, measurement jobs and browser measurement controls are the next slice; this document does not provide an available HTTP ingress endpoint yet.
+Clio now has a strict server-only report parser and a pure reconciliation engine for independent population, changes/history, classification and recovery evidence. The private native-basis reader binds these facts to a saved GitHub or Argo collection snapshot. Authenticated private report ingestion and durable measurement jobs bind these reports to immutable saved results. Follow the [operator connection guide](connect-measurement-evidence.md) for grants, machine endpoints and calculation workflow.
 
 Native provider results retain their original cutoff, coverage and classifications. Later evidence produces a separate validated snapshot at a new measurement cutoff, then the existing pinned OEMS calculator produces all five metrics. No metric semantics change. A synthetic test exercises actual GitHub capture through the private basis and four independent reports; it establishes implementation behavior, not real-source completeness or conformance.
 
 ## Required authorities
 
-Configure each capability separately when durable ingress becomes available. Login OAuth credentials do not authorize evidence collection. An authority must have exact workspace/service/source scope, an explicit policy/version, allowed production paths and repositories, and a separate private producer credential. The API will supply receiver time and current grant eligibility; report claims cannot authenticate themselves.
+Configure each capability separately. Login OAuth credentials do not authorize evidence collection. An authority must have exact workspace/service/source scope, an explicit policy/version, allowed production paths and repositories, and a separate private producer credential. The API supplies database receiver time and current grant eligibility; report claims cannot authenticate themselves.
 
 | Capability | Evidence needed | Evidence that cannot substitute |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ Population is compared in both directions. An independent census finding a missi
 
 ## Report envelope
 
-`parseMeasurementReport(unknown)` accepts exactly the `clio.measurement.evidence.v1` envelope: `contract`, `eventId`, `producerId`, `workspaceId`, `serviceId`, `capability`, `policyRef`, `evidenceRef`, `basis` and `payload`. Extra fields are rejected. UUID identities, pinned OEMS revision, UTC timestamps, SHA-256 basis digests, repository allowlists and exact operation identities are checked at their respective boundaries. Payloads are bounded to 8 MiB and 5,000 records per category; durable ingress must additionally enforce stable source-lifetime budgets.
+`parseMeasurementReport(unknown)` accepts exactly the `clio.measurement.evidence.v1` envelope: `contract`, `eventId`, `producerId`, `workspaceId`, `serviceId`, `capability`, `policyRef`, `evidenceRef`, `basis` and `payload`. Extra fields are rejected. UUID identities, pinned OEMS revision, UTC timestamps, SHA-256 basis digests, repository allowlists and exact operation identities are checked at their respective boundaries. Payloads are bounded to 8 MiB and 5,000 records per category; durable ingress additionally enforces 5,000 total retained fact records and 8 MiB across the stable service/source lifetime, plus committed pacing for all authenticated requests.
 
 The server-derived basis includes provider/run, normalized native source identity, connection revision, pinned OEMS revision and snapshot/evidence/gap-manifest digests. The whole private capture digest binds the exact repository/Application, service and saved connection input. Native operations use normalized `sourceId` plus `sourceDeploymentId`; the server maps these to existing canonical deployment IDs. Never derive identity by parsing provenance URIs, matching SHAs or matching timestamps.
 
@@ -35,8 +35,8 @@ Select one immutable report per capability/basis. Exact replay is idempotent; co
 
 Pre-window deployments participate in first-deployment history. Redeploying the same commit creates no new lead-time observation. A configuration-only rollout may have an explicitly complete empty change set. Recovery onset selects the reporting window; a causal deployment may precede it, and restoration may follow it if known by the new cutoff. A nonempty recovery report arriving before its failure classification produces a recovery-classification blocker while unrelated population/history metrics remain usable. Open and approximate episodes follow pinned OEMS semantics and remain distinct from exact completed recoveries.
 
-## Verification and remaining integration
+## Verification and operation
 
 Adapter tests cover complete five-metric fixture parity, independent empty census, missing/extra native operations, exact gaps, unknown qualification, pre-window history, redeployments, configuration-only sets, classification conflicts, recovery/open/approximate cases, cutoff availability, replay, source/repository scope and immutable basis data. API tests cover actual capture identity/digest binding; PostgreSQL tests verify private Argo gap retention, public-result exclusion and preservation after later receipts.
 
-The next integration must authenticate machine credentials, recheck native and authority grants at admission/queue/completion, pin accepted report IDs/digests in durable jobs and retain immutable safe measurement results. Until that path exists and real operators supply valid authorities, native live coverage remains incomplete. Follow the [local feature-completion scope](../agents/feature-completion.md) for delivery status.
+The API authenticates machine credentials and rechecks native and authority grants at admission/queue/completion. Durable jobs pin accepted report IDs/digests; safe measurement results retain their original basis cutoff and later database cutoff. Native live results retain incomplete coverage; independent measurements establish only the coverage supported by the selected real evidence. Follow the [local feature-completion scope](../agents/feature-completion.md) for delivery status.

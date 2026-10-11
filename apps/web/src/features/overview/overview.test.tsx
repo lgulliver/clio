@@ -15,6 +15,11 @@ import {
   json,
   scope,
 } from '../github-collection/fixtures.test-support';
+import {
+  pageCursor as measurementCursor,
+  runFixture as measurementFixture,
+  page as measurementPage,
+} from '../measurement-evidence/fixtures.test-support';
 import { withMetric } from '../measurements/fixtures.test-support';
 import { completed as mockCompleted } from '../mock-collection/fixtures.test-support';
 import { Overview } from './overview';
@@ -64,7 +69,9 @@ function defaultRead(input: string | URL | Request) {
       ],
     });
   }
-  return json({ runs: [] });
+  return path.includes('/measurement-runs')
+    ? json({ runs: [], nextCursor: null })
+    : json({ runs: [] });
 }
 function mount(strict = false) {
   const client = createQueryClient();
@@ -672,3 +679,221 @@ it('returning to newest cancels pending older page without losing control focus'
     screen.queryByText('2025-12-01T00:00:00Z to 2025-12-03T00:00:00Z', { selector: 'dd' }),
   ).not.toBeInTheDocument();
 });
+
+describe('independent measurement history in Overview', () => {
+  it('member reads complete measurement separately from native cards, including both cutoffs and full metrics', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes('/measurement-runs'))
+        return json({ runs: [measurementFixture()], nextCursor: null });
+      if (path.includes('/github-collection-runs')) return json({ runs: [completed] });
+      return defaultRead(input);
+    });
+    mount();
+    await select();
+    const card = screen.getByRole('region', { name: 'Independent measurements stored results' });
+    expect(await within(card).findByText('Selected saved measurement')).toBeVisible();
+    expect(within(card).getByText('2026-01-04T00:00:30.000001Z', { selector: 'dd' })).toBeVisible();
+    expect(within(card).getByText('2026-01-04T00:01:00.000001Z', { selector: 'dd' })).toBeVisible();
+    expect(within(card).getByText(/Saved coverage/)).toHaveTextContent('collection complete');
+    expect(within(card).getByText(/0.5 deployments per day/)).toBeVisible();
+    expect(within(card).getByText(/86,400 seconds/)).toBeVisible();
+    const native = screen.getByRole('region', { name: 'Live GitHub stored results' });
+    expect(within(native).getByText(/Provisional deployment frequency count/)).toBeVisible();
+    expect(within(native).queryByText(/0.5 deployments per day/)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('measurement-authorities')),
+    ).toBe(false);
+  });
+  it.each([
+    [false, false],
+    [true, true],
+  ])(
+    'shows partial/qualified-empty metric status complete=%s empty=%s',
+    async (complete, empty) => {
+      fetchMock.mockImplementation(async (input) =>
+        String(input).includes('/measurement-runs')
+          ? json({ runs: [measurementFixture(complete, empty)], nextCursor: null })
+          : defaultRead(input),
+      );
+      mount();
+      await select();
+      const card = screen.getByRole('region', { name: 'Independent measurements stored results' });
+      await within(card).findByText('Selected saved measurement');
+      if (complete) {
+        expect(within(card).getByText(/0 deployments per day/)).toBeVisible();
+        expect(within(card).getAllByText('Status: no observations.')).toHaveLength(4);
+      } else {
+        expect(within(card).getByText('Deployment census missing')).toBeVisible();
+        expect(within(card).getAllByText('Status: provisional.')).toHaveLength(5);
+      }
+    },
+  );
+  it('finds success beyond failures, replaces older page and preserves navigation focus', async () => {
+    const late = deferred();
+    let olderReadComplete = false;
+    let signal: AbortSignal | null | undefined;
+    const older = { ...measurementFixture(false), id: '00000001-1111-4111-8111-111111111111' };
+    fetchMock.mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!path.includes('/measurement-runs')) return defaultRead(input);
+      if (path.includes('cursor=')) {
+        signal = options?.signal;
+        return olderReadComplete ? json({ runs: [older], nextCursor: null }) : late.promise;
+      }
+      if (path.includes('status=succeeded'))
+        return json({ runs: measurementPage, nextCursor: measurementCursor });
+      return json({
+        runs: Array.from({ length: 25 }, (_, index) => ({
+          ...measurementFixture(),
+          id: `${String(200 - index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+          status: 'failed',
+          result: null,
+          failureCode: 'measurement_processing_failed',
+          createdAt: '2026-01-05T00:00:00Z',
+          updatedAt: '2026-01-05T00:01:00Z',
+          completedAt: '2026-01-05T00:01:00Z',
+        })),
+        nextCursor: null,
+      });
+    });
+    mount();
+    await select();
+    const card = screen.getByRole('region', { name: 'Independent measurements stored results' });
+    await within(card).findByText('Selected saved measurement');
+    expect(within(card).getByText(/Newest measurement request/)).toHaveTextContent('failed');
+    const olderButton = within(card).getByRole('button', {
+      name: 'Older Independent measurements saved results',
+    });
+    olderButton.focus();
+    fireEvent.click(olderButton);
+    expect(olderButton).toHaveFocus();
+    expect(olderButton).toHaveAttribute('aria-disabled', 'true');
+    const count = fetchMock.mock.calls.length;
+    fireEvent.click(olderButton);
+    expect(fetchMock.mock.calls.length).toBe(count);
+    expect(signal?.aborted).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).endsWith(`cursor=${encodeURIComponent(measurementCursor)}`),
+      ),
+    ).toBe(true);
+    olderReadComplete = true;
+    await act(async () => late.resolve(json({ runs: [older], nextCursor: null })));
+    await within(card).findByText('Deployment census missing');
+    expect(olderButton).toHaveFocus();
+    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    const refresh = within(card).getByRole('button', {
+      name: 'Refresh Independent measurements history',
+    });
+    refresh.focus();
+    fireEvent.click(refresh);
+    expect(refresh).toHaveFocus();
+    await waitFor(() => expect(refresh).toHaveAttribute('aria-disabled', 'false'));
+    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    fireEvent.click(
+      within(card).getByRole('button', { name: 'Newest Independent measurements saved result' }),
+    );
+    await within(card).findByText(/0.5 deployments per day/);
+  });
+  it.each([401, 403, 404])(
+    'measurement history scope loss %s hides native siblings too',
+    async (status) => {
+      const late = deferred();
+      fetchMock.mockImplementation(async (input) =>
+        String(input).includes('/measurement-runs')
+          ? late.promise
+          : String(input).includes('/github-collection-runs')
+            ? json({ runs: [completed] })
+            : defaultRead(input),
+      );
+      mount();
+      await select();
+      await screen.findByText(/Provisional deployment frequency count/);
+      await act(async () => late.resolve(json({}, status)));
+      expect(await screen.findByRole('alert')).toHaveTextContent('no longer accessible');
+      expect(screen.queryByText(/Provisional deployment frequency count/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    },
+  );
+  it.each(['service', 'workspace', 'session'] as const)(
+    'abandons late measurement history after %s switch',
+    async (change) => {
+      const late = deferred();
+      let signal: AbortSignal | null | undefined;
+      fetchMock.mockImplementation(async (input, options) => {
+        if (
+          String(input).includes(scope.serviceId) &&
+          String(input).includes('/measurement-runs')
+        ) {
+          signal = options?.signal;
+          return late.promise;
+        }
+        return defaultRead(input);
+      });
+      const view = mount();
+      await select();
+      if (change === 'service')
+        fireEvent.change(screen.getByLabelText('Service'), { target: { value: otherService } });
+      if (change === 'workspace')
+        fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: otherWorkspace } });
+      if (change === 'session') {
+        identity.revision++;
+        view.refreshSession();
+      }
+      expect(signal?.aborted).toBe(true);
+      await act(async () => late.resolve(json({ runs: [measurementFixture()], nextCursor: null })));
+      expect(screen.queryByText('Selected saved measurement')).not.toBeInTheDocument();
+    },
+  );
+});
+
+it.each(['newest', 'service', 'workspace', 'session'] as const)(
+  'fences pending measurement page after %s change',
+  async (change) => {
+    const late = deferred();
+    let signal: AbortSignal | null | undefined;
+    const older = { ...measurementFixture(false), id: '00000001-1111-4111-8111-111111111111' };
+    fetchMock.mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!path.includes(scope.serviceId) || !path.includes('/measurement-runs'))
+        return defaultRead(input);
+      if (path.includes('cursor=')) {
+        signal = options?.signal;
+        return late.promise;
+      }
+      return json({ runs: measurementPage, nextCursor: measurementCursor });
+    });
+    const view = mount();
+    await select();
+    await screen.findByText('Selected saved measurement');
+    const button = screen.getByRole('button', {
+      name: 'Older Independent measurements saved results',
+    });
+    button.focus();
+    fireEvent.click(button);
+    expect(button).toHaveFocus();
+    expect(signal?.aborted).toBe(false);
+    if (change === 'newest') {
+      const newest = screen.getByRole('button', {
+        name: 'Newest Independent measurements saved result',
+      });
+      newest.focus();
+      fireEvent.click(newest);
+      expect(newest).toHaveFocus();
+      await screen.findByText(/0.5 deployments per day/);
+    }
+    if (change === 'service')
+      fireEvent.change(screen.getByLabelText('Service'), { target: { value: otherService } });
+    if (change === 'workspace')
+      fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: otherWorkspace } });
+    if (change === 'session') {
+      identity.revision++;
+      view.refreshSession();
+    }
+    expect(signal?.aborted).toBe(true);
+    await act(async () => late.resolve(json({ runs: [older], nextCursor: null })));
+    expect(screen.queryByText('Deployment census missing')).not.toBeInTheDocument();
+  },
+);

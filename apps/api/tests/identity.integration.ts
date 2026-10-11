@@ -444,7 +444,7 @@ describe('real identity/session/workspace boundary', () => {
           headers: headers(owner.cookie),
         })
       ).statusCode,
-    ).toBe(204);
+    ).toBe(200);
     expect(
       (
         await server.inject({
@@ -771,7 +771,7 @@ it('lists safe owner-only access, filters invitations, scopes writes and preserv
         headers: headers(owner.cookie),
       })
     ).statusCode,
-  ).toBe(204);
+  ).toBe(200);
   expect(
     (
       await server.inject({
@@ -908,4 +908,128 @@ it('traverses bounded access pages with immutable ordering and scoped cursor val
   await expect(repository.listInvitations(owner, id, invitationIds[0])).rejects.toMatchObject({
     status: 401,
   });
+});
+
+it('returns bounded exact current-email cancellations, scopes status and preserves other grants', async () => {
+  const owner = await login('7101', 'lineage-owner@example.com');
+  const member = await login('7102', 'lineage-old@example.com');
+  const other = await login('7103', 'lineage-other@example.com');
+  const id = await workspace(owner.cookie);
+  const foreign = await workspace(owner.cookie);
+  await accept(member.cookie, (await invite(owner.cookie, id, 'lineage-old@example.com')).token);
+  const old = await invite(owner.cookie, id, 'lineage-old@example.com');
+  const current = await invite(owner.cookie, id, 'lineage-new@example.com');
+  const cross = await invite(owner.cookie, foreign, 'lineage-new@example.com');
+  expect((await repository.invitationStatus(owner, id, current.id)).pending).toBe(true);
+  await expect(repository.invitationStatus(member, id, current.id)).rejects.toMatchObject({
+    status: 403,
+  });
+  await pool.query('UPDATE auth_users SET email = $1 WHERE id = $2', [
+    'lineage-new@example.com',
+    member.userId,
+  ]);
+  const response = await server.inject({
+    method: 'DELETE',
+    url: `/api/workspaces/${id}/members/${member.userId}`,
+    headers: headers(owner.cookie),
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ cancelledInvitationIds: [current.id], hasMore: false });
+  const status = (cookie: string, workspaceId: string, invitationId: string) =>
+    server.inject({
+      url: `/api/workspaces/${workspaceId}/invitations/${invitationId}/status`,
+      headers: headers(cookie),
+    });
+  expect((await status(owner.cookie, id, current.id)).json()).toEqual({ pending: false });
+  expect((await status(owner.cookie, id, old.id)).json()).toEqual({ pending: true });
+  expect((await status(owner.cookie, foreign, cross.id)).json()).toEqual({ pending: true });
+  expect((await status(owner.cookie, id, cross.id)).json()).toEqual({ pending: false });
+  expect((await status(member.cookie, id, old.id)).statusCode).toBe(404);
+  expect((await status(other.cookie, id, old.id)).statusCode).toBe(404);
+  const fresh = await invite(owner.cookie, id, 'lineage-new@example.com');
+  expect((await status(owner.cookie, id, fresh.id)).json()).toEqual({ pending: true });
+  expect((await accept(member.cookie, fresh.token)).statusCode).toBe(200);
+  expect((await status(owner.cookie, id, fresh.id)).json()).toEqual({ pending: false });
+  for (let i = 0; i < 105; i++) await invite(owner.cookie, id, 'lineage-new@example.com');
+  const bounded = await repository.revokeMember(owner, id, member.userId);
+  expect(bounded.cancelledInvitationIds).toHaveLength(100);
+  expect(bounded.hasMore).toBe(true);
+  expect(new Set(bounded.cancelledInvitationIds).size).toBe(100);
+  expect(
+    (await repository.listInvitations(owner, id)).invitations.map((entry) => entry.id),
+  ).toEqual([old.id]);
+  await pool.query('DELETE FROM auth_sessions WHERE id = $1', [owner.sessionId]);
+  expect((await status(owner.cookie, id, old.id)).statusCode).toBe(401);
+});
+
+it('registers measurement history under current authenticated workspace access and owner write Origin checks', async () => {
+  const owner = await login('8301', 'measurement-route-owner@example.com');
+  const member = await login('8302', 'measurement-route-member@example.com');
+  const outsider = await login('8303', 'measurement-route-outsider@example.com');
+  const wid = await workspace(owner.cookie, 'Measurement route boundaries');
+  const service = await repository.createService(owner, wid, 'Measured service');
+  const invitation = await invite(owner.cookie, wid, 'measurement-route-member@example.com');
+  expect((await accept(member.cookie, invitation.token)).statusCode).toBe(200);
+  const base = `/api/workspaces/${wid}/services/${service.id}`;
+  for (const actor of [owner, member]) {
+    const response = await server.inject({
+      url: `${base}/measurement-runs?status=succeeded`,
+      headers: { cookie: actor.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ runs: [], nextCursor: null });
+    expect(response.headers['cache-control']).toBe('no-store');
+  }
+  expect((await server.inject(`${base}/measurement-runs`)).statusCode).toBe(401);
+  expect(
+    (await server.inject({ url: `${base}/measurement-runs`, headers: { cookie: outsider.cookie } }))
+      .statusCode,
+  ).toBe(404);
+  expect(
+    (
+      await server.inject({
+        url: `${base}/measurement-runs?status=failed`,
+        headers: { cookie: owner.cookie },
+      })
+    ).statusCode,
+  ).toBe(400);
+  expect(
+    (
+      await server.inject({
+        url: `${base}/measurement-authorities?provider=github&basisRunId=${randomUUID()}`,
+        headers: { cookie: member.cookie },
+      })
+    ).statusCode,
+  ).toBe(403);
+  const payload = {
+    requestId: randomUUID(),
+    provider: 'github',
+    basisRunId: randomUUID(),
+    producerIds: [],
+  };
+  expect(
+    (
+      await server.inject({
+        method: 'POST',
+        url: `${base}/measurement-runs`,
+        headers: { cookie: owner.cookie },
+        payload,
+      })
+    ).statusCode,
+  ).toBe(403);
+  expect(
+    (
+      await server.inject({
+        method: 'POST',
+        url: `${base}/measurement-runs`,
+        headers: headers(member.cookie),
+        payload,
+      })
+    ).statusCode,
+  ).toBe(403);
+  await pool.query('DELETE FROM auth_sessions WHERE id=$1', [member.sessionId]);
+  expect(
+    (await server.inject({ url: `${base}/measurement-runs`, headers: { cookie: member.cookie } }))
+      .statusCode,
+  ).toBe(401);
 });

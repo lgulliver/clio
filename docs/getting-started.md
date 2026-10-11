@@ -1,6 +1,6 @@
 # Getting started locally
 
-This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; deployment previews and collection runs use fictional evidence only. Mock setup does not connect a live provider. Overview keeps saved fictional results separate from live-source histories. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md).
+This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; mock deployment previews and mock collection runs use fictional evidence only. Mock setup does not connect a live provider. Overview keeps saved fictional results separate from live-source histories. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md). The separate [measurement producer guide](providers/connect-measurement-evidence.md) covers evidence for all five metrics; it does not modify native collection results.
 
 ## Prerequisites and clone
 
@@ -50,7 +50,7 @@ The browser defaults to `http://localhost:3000`; no browser environment file is 
 
 ## Migrate and start
 
-Apply migrations explicitly before starting API or worker. The mock queue/snapshots require `0004_mock_collection_runs.sql`, in addition to the identity and deployment-mapping migrations:
+Apply all committed migrations explicitly before starting API or workers. These include the identity, native/mock collection and evidence tables; independent measurements require `0011_measurement_evidence.sql`. Do not apply selected migration files manually:
 
 ```sh
 pnpm db:migrate
@@ -139,21 +139,44 @@ For a reproducible independent Argo evidence path, use the [local artifact demo]
 
 After a worker succeeds, open **Overview**, select a workspace, then select a service. Workspace and service selections remain in memory and reset on navigation, identity changes or session rechecks, including when the browser tab is hidden. Owners and members can read authorized stored results; this page never starts collection.
 
-**Live GitHub**, **Live Argo CD** and **Mock — fictional evidence** have separate histories. Each card reads a bounded recent-request page and independently finds successful saved results. Newer pending, running or failed requests cannot hide an older success. Choose a saved window, use **Older saved results** to fetch the next successful page, and use **Newest saved result** to return to the first page. Each page replaces the previous page; requests stay bounded and evidence is not accumulated indefinitely. Use each card's **Refresh history** control to check progress; Overview does not poll automatically.
+**Live GitHub**, **Live Argo CD**, **Mock — fictional evidence** and **Independent measurements** have separate histories. Each card reads a bounded recent-request page and independently finds successful saved results. Newer pending, running or failed requests cannot hide an older success. Choose a saved window, use **Older saved results** to fetch the next successful page, and use **Newest saved result** to return to the first page. Each page replaces the previous page; requests stay bounded and evidence is not accumulated indefinitely. Use each card's **Refresh history** control to check progress; Overview does not poll automatically.
 
 Saved results retain their original UTC window (end exclusive), evidence cutoff, completion time, connection or mapping revision, and OEMS revision. These can differ from current settings. Provider labels identify GitHub or Argo CD; historical repository/Application names are not included in the safe result contract. Do not add counts across sources: evidence may overlap.
 
 Live deployment counts are provisional. Unknown qualification and incomplete collection, deployment history and recovery coverage remain visible. Argo cards also show receipt observation periods, recorded gaps, rejected receipts and scope drift; observation does not establish continuous coverage. A recorded count of zero does not establish that no production deployments occurred. New saved GitHub and Argo results show all five metric statuses, quality reasons and evidence counts. Ratios show their bounds and population scope; lead time distinguishes confirmed observations from observed candidates, and recovery distinguishes exact, approximate and open episodes. Deployment rates and unsupported metrics stay unavailable. Older saved results retain their original summaries without recomputation. Fictional mock results never measure live delivery. Expired sessions or revoked service access hide stored results; select another accessible service or refresh your session before retrying.
+
+## Save an independent measurement
+
+First configure a real native source using [GitHub Deployments](providers/connect-github.md) or [Argo CD](providers/connect-argocd.md), then save a successful collection for a closed UTC reporting window. A fictional mock run cannot serve as the measurement basis.
+
+For independently supported evidence, follow [connect measurement evidence](providers/connect-measurement-evidence.md). Configure private capability grants outside Git, supply producer reports against the exact authenticated native basis, and restart API and measurement worker together after configuration changes. Login credentials and native provider credentials do not authorize these reports. Complete coverage needs actual exhaustive population, change/history, classification and recovery evidence under reviewed policies; submitting a report alone is insufficient.
+
+Start the separate worker in another root terminal:
+
+```sh
+pnpm worker:measurement
+# Alternatively, after enqueueing a job:
+pnpm worker:measurement --once
+```
+
+The worker loads the ignored API configuration and checks current migrations. Keep the same current native source and measurement grant configuration in API and worker. No measurement grants or received reports are required to save a partial measurement, but the successful native basis and its current source access are still required. Run workers under an operator-selected supervisor when ongoing availability matters; an infrastructure error stops the process and requires recovery/restart.
+
+As workspace owner, select a service in Settings and open **Independent measurement evidence**. Choose GitHub or Argo CD and a successful saved collection, refresh received evidence, then select at most one received authority per capability. Choose **Calculate saved measurement**. With no selected reports, the saved result retains missing-evidence blockers and incomplete coverage. **Refresh measurement requests** finds recent requests after a lost response or selection change; **Refresh measurement status** checks a selected request. API startup does not process the queue, and the browser does not poll automatically.
+
+Jobs pin the basis and selected report receipts, use 120-second leases and allow three attempts. Later reports cannot alter a queued or completed result. A changed native source, producer grant or report eligibility can invalidate work; correct configuration and collect a fresh basis where required. A conflict can also mean another measurement for that source is active, so inspect recent requests before retrying.
+
+Owners and members read **Independent measurements** in Overview, including older saved windows. Results show both the original native basis cutoff and the later database measurement cutoff, all five metric statuses/quality reasons, coverage and missing-evidence blockers. Original native results and their coverage stay unchanged. Current workspace access is required even when the measurement predates source or producer revocation.
 
 ## Source support and future setup
 
 | Source/workflow | Available locally | Future live requirements |
 | --- | --- | --- |
 | GitHub OAuth | Real sign-in and database sessions | Separate from collection credentials |
-| GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow, broader metric evidence and scheduling |
-| Argo CD operations | Scoped native notifications, opt-in scoped list/watch capture, durable source journal/historical import, immutable receipt/gap history, closed UTC snapshots and browser reporting bounds | Production installation/supervision, automatic operation UUIDs, independent exposure/provenance producers and complete coverage |
+| GitHub deployments | Mock workflows plus separate operator-granted live connection and worker | Hosted self-service installation flow and scheduling; independent metric evidence uses separate producers |
+| Argo CD operations | Scoped native notifications, opt-in scoped list/watch capture, durable source journal/historical import, immutable receipt/gap history, closed UTC snapshots and browser reporting bounds | Production installation/supervision, automatic operation UUIDs and actual independent producers; complete coverage requires reviewed exhaustive evidence |
 | Optional Kind/Argo sandbox | Independent controller and native producer verification environment | Requires deliberate private grant/producer setup to connect; never supplies mock runs |
-| Live GitHub results | Scoped stored results, provisional deployment count, incomplete coverage | Complete metric evidence and historical repository labels |
+| Live GitHub results | Scoped stored all-five results, provisional deployment count, incomplete native coverage | Actual independent evidence and historical repository labels |
+| Independent measurements | Private four-capability report ingress, durable worker, owner queue and member-readable all-five history | Operator-built real producers and exhaustive supported evidence; no fixture establishes live completeness |
 
 For live GitHub access, select only intended repositories for a separate GitHub App. Initial permission design is **Deployments read-only**, with mandatory **Metadata read-only**; no source-code or commit-history access is assumed. Record stable repository IDs and explicit production environment names. A successful GitHub deployment status or `production_environment` flag alone cannot establish consumer exposure: choose and verify an exposure policy for the service. App signing keys and installation tokens stay server-side; use the [live connection guide](providers/connect-github.md) for operator grants and worker configuration.
 
@@ -177,6 +200,8 @@ For native Argo evidence, identify Argo instance, destination cluster and applic
 | Run remains pending / no jobs processed | Start `pnpm worker:mock` separately with database configuration and current migrations. `--once` before enqueue handles no future job. Check lease expiry/backoff before retrying. |
 | Run remains running after worker interruption | Restart worker and allow lease expiry/reclaim. Three exhausted attempts produce terminal failure; inspect the redacted status and enqueue a new run after correcting local setup. |
 | Exposure unknown / metric unavailable | Use fixture environment `production` and decide whether to attest to mock exposure. False coverage and missing evidence remain; this never verifies real exposure. |
+| Measurement remains pending | Start `pnpm worker:measurement` separately with current migrations and the same native/measurement grants as API; check active leases and retry backoff. |
+| Measurement evidence unavailable or conflict | Check current native source and producer eligibility; refresh recent requests and received evidence. Corrections to immutable reports require a fresh basis. |
 | Argo sandbox fails | Follow its context-bound diagnostics; it is independent of Clio/PostgreSQL. |
 
 For repository verification, `pnpm check` runs lint, types, behavior tests and build. Database integration tests are separate and require `CLIO_TEST_DATABASE_URL`; see [API verification](../apps/api/README.md#verification). These checks do not collect live provider evidence.

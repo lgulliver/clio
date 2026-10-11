@@ -9,6 +9,8 @@ import { previewMapping } from '../deployment-mappings/preview.ts';
 import { createMappingRepository } from '../deployment-mappings/repository.ts';
 import type { GitHubConfig } from '../github-collection/config.ts';
 import { registerGitHubRoutes } from '../github-collection/routes.ts';
+import type { MeasurementConfig } from '../measurements/config.ts';
+import { registerMeasurementRoutes } from '../measurements/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
@@ -21,6 +23,7 @@ export interface IdentityDependencies {
   pool: Pool;
   github?: GitHubConfig | null;
   argo?: ArgoConfig | null;
+  measurement?: MeasurementConfig | null;
 }
 
 function clientError(status: number) {
@@ -113,6 +116,13 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
     if (identity) {
       registerGitHubRoutes(routes, { pool: identity.pool, github: identity.github ?? null, actor });
       registerArgoRoutes(routes, { pool: identity.pool, argo: identity.argo ?? null, actor });
+      registerMeasurementRoutes(routes, {
+        pool: identity.pool,
+        configNow: () => identity.measurement ?? null,
+        githubNow: () => identity.github ?? null,
+        argoNow: () => identity.argo ?? null,
+        actor,
+      });
     } else {
       const base = '/api/workspaces/:workspaceId/services/:serviceId';
       for (const path of [
@@ -124,13 +134,17 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         '/argo-connection/disconnect',
         '/argo-collection-runs',
         '/argo-collection-runs/:runId',
+        '/measurement-runs',
+        '/measurement-runs/:runId',
+        '/measurement-authorities',
       ]) {
         routes.route({
           method:
             path === '/github-connection' ||
             path === '/github-collection-runs' ||
             path === '/argo-connection' ||
-            path === '/argo-collection-runs'
+            path === '/argo-collection-runs' ||
+            path === '/measurement-runs'
               ? ['GET', 'POST']
               : path.endsWith('/disconnect')
                 ? 'POST'
@@ -341,6 +355,20 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       reply.header('cache-control', 'no-store');
       return reply.code(201).send({ invitation: await repository.invite(current, id, body.email) });
     });
+    routes.get(
+      '/api/workspaces/:workspaceId/invitations/:invitationId/status',
+      async (request, reply) => {
+        const current = await actor(request, reply, false);
+        const values = params(request, ['workspaceId', 'invitationId']);
+        if (!repository) throw new IdentityError(503, 'unavailable');
+        reply.header('cache-control', 'no-store');
+        return repository.invitationStatus(
+          current,
+          uuid(values.workspaceId),
+          uuid(values.invitationId),
+        );
+      },
+    );
     routes.delete(
       '/api/workspaces/:workspaceId/invitations/:invitationId',
       async (request, reply) => {
@@ -365,8 +393,8 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       const current = await actor(request, reply, true);
       const values = params(request, ['workspaceId', 'userId']);
       if (!repository) throw new IdentityError(503, 'unavailable');
-      await repository.revokeMember(current, uuid(values.workspaceId), opaqueId(values.userId));
-      return reply.code(204).send();
+      reply.header('cache-control', 'no-store');
+      return repository.revokeMember(current, uuid(values.workspaceId), opaqueId(values.userId));
     });
   });
 }

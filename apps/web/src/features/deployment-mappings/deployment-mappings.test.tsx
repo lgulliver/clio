@@ -95,6 +95,12 @@ const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestI
       ],
     });
   if (path.endsWith('/mock-collection-runs')) return json({ runs: [] });
+  if (
+    path.endsWith('/github-collection-runs') ||
+    path.endsWith('/argo-collection-runs') ||
+    path.endsWith('/measurement-runs')
+  )
+    return json({ runs: [], nextCursor: null });
   return mappingHandler(path, options);
 });
 function mount(strict = false) {

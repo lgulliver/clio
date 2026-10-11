@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArgoCollection } from '../argo-collection/argo-collection';
 import { DeploymentMappings } from '../deployment-mappings/deployment-mappings';
 import { GitHubCollection } from '../github-collection/github-collection';
@@ -9,6 +9,7 @@ import {
   type Invitation,
   parseAcceptance,
   parseInvitation,
+  parseInvitationStatus,
   parseService,
   parseServices,
   parseWorkspace,
@@ -17,6 +18,7 @@ import {
   type Workspace,
 } from '../identity/api';
 import { useSession } from '../identity/session';
+import { MeasurementEvidence } from '../measurement-evidence/measurement-evidence';
 import { WorkspaceAccess } from './workspace-access';
 
 export function WorkspacePage({ authError }: { authError: boolean }) {
@@ -148,6 +150,28 @@ function WorkspaceScope({
   const client = useQueryClient();
   const mounted = useRef(true);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
+  const invitationRef = useRef<Invitation | null>(null);
+  const statusRequest = useRef<AbortController | null>(null);
+  // One marker fences all pending creates without retaining cancelled IDs indefinitely.
+  const cancellationRevision = useRef<object>({});
+  const invitationHeading = useRef<HTMLHeadingElement>(null);
+  const invitationArea = useRef<HTMLDivElement>(null);
+  const [invitationStatus, setInvitationStatus] = useState<'ready' | 'checking' | 'error'>('ready');
+  const statusRef = useRef<'ready' | 'checking' | 'error'>('ready');
+  const storeInvitation = useCallback((value: Invitation | null) => {
+    if (!value && invitationArea.current?.contains(document.activeElement))
+      invitationHeading.current?.focus();
+    statusRequest.current?.abort();
+    statusRequest.current = null;
+    invitationRef.current = value;
+    setInvitation(value);
+  }, []);
+  function tokenStatus(value: 'ready' | 'checking' | 'error') {
+    if (value !== statusRef.current && invitationArea.current?.contains(document.activeElement))
+      invitationHeading.current?.focus();
+    statusRef.current = value;
+    setInvitationStatus(value);
+  }
   const [denied, setDenied] = useState('');
   const [showAccess, setShowAccess] = useState(false);
   const [selectedService, setSelectedService] = useState('');
@@ -160,10 +184,18 @@ function WorkspaceScope({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      statusRequest.current?.abort();
     };
   }, []);
   const workspacesKey = ['identity', userId, revision, 'workspaces'];
   const workspaceId = workspace?.id;
+  const measurementAccessLost = useCallback(() => {
+    if (!mounted.current || !session.current(revision) || !validSelection()) return;
+    mutationEpoch.current += 1;
+    storeInvitation(null);
+    setDenied('Workspace access changed. Refresh your workspace access.');
+    void client.invalidateQueries({ queryKey: ['identity', userId, revision, 'workspaces'] });
+  }, [client, revision, session.current, userId, validSelection, storeInvitation]);
   const servicesKey = useMemo(
     () => ['identity', userId, revision, 'workspace', workspaceId, 'services'],
     [userId, revision, workspaceId],
@@ -218,12 +250,64 @@ function WorkspaceScope({
         (error.status === 403 || error.status === 404)
       ) {
         mutationEpoch.current += 1;
-        setInvitation(null);
+        storeInvitation(null);
         setDenied(errorMessage(error));
         void client.invalidateQueries({ queryKey: workspacesKey });
       }
       throw error;
     }
+  }
+  async function verifyInvitation(current: Invitation) {
+    const cancellation = cancellationRevision.current;
+    const ticket = mutationEpoch.current;
+    statusRequest.current?.abort();
+    const controller = new AbortController();
+    statusRequest.current = controller;
+    tokenStatus('checking');
+    try {
+      const pending = await request(
+        `/api/workspaces/${current.workspaceId}/invitations/${current.id}/status`,
+        parseInvitationStatus,
+        { signal: controller.signal },
+      );
+      if (
+        !valid() ||
+        controller.signal.aborted ||
+        statusRequest.current !== controller ||
+        ticket !== mutationEpoch.current ||
+        cancellation !== cancellationRevision.current ||
+        invitationRef.current !== current
+      )
+        return;
+      if (!pending) storeInvitation(null);
+      tokenStatus('ready');
+    } catch (error) {
+      if (
+        !valid() ||
+        controller.signal.aborted ||
+        statusRequest.current !== controller ||
+        ticket !== mutationEpoch.current ||
+        cancellation !== cancellationRevision.current ||
+        invitationRef.current !== current
+      )
+        return;
+      if (error instanceof ApiError && error.status === 401) session.expire(revision);
+      else if (error instanceof ApiError && [403, 404].includes(error.status)) {
+        mutationEpoch.current += 1;
+        storeInvitation(null);
+        setDenied(errorMessage(error));
+        void client.invalidateQueries({ queryKey: workspacesKey });
+      } else tokenStatus('error');
+    }
+  }
+  function cancelledInvitations(ids: string[], hasMore: boolean) {
+    if (!valid()) return;
+    cancellationRevision.current = {};
+    const current = invitationRef.current;
+    if (!current) return;
+    if (ids.includes(current.id.toLowerCase())) storeInvitation(null);
+    // Omitted IDs are uncertain on overflow; recheck rather than discard another grant.
+    else if (hasMore || statusRef.current !== 'ready') void verifyInvitation(current);
   }
   const activeService = services.data?.find((item) => item.id === selectedService);
   return (
@@ -369,6 +453,14 @@ function WorkspaceScope({
               )}
               {workspace.role === 'owner' ? (
                 <>
+                  {activeService && (
+                    <MeasurementEvidence
+                      workspaceId={workspace.id}
+                      serviceId={activeService.id}
+                      serviceName={activeService.name}
+                      onAccessLost={measurementAccessLost}
+                    />
+                  )}
                   <ActionForm
                     label="Service name"
                     action="Create service"
@@ -398,22 +490,27 @@ function WorkspaceScope({
                       userId={userId}
                       validSelection={valid}
                       onInvitationCancelled={(id) =>
-                        setInvitation((current) => (current?.id === id ? null : current))
+                        cancelledInvitations([id.toLowerCase()], false)
                       }
-                      onMemberRevoked={(email) =>
-                        setInvitation((current) =>
-                          current?.email.toLowerCase() === email.toLowerCase() ? null : current,
-                        )
+                      onCancellationUncertain={() => cancelledInvitations([], true)}
+                      onMemberRevoked={(result) =>
+                        cancelledInvitations(result.cancelledInvitationIds, result.hasMore)
                       }
                       onDenied={(error) => {
                         mutationEpoch.current += 1;
-                        setInvitation(null);
+                        storeInvitation(null);
                         setDenied(errorMessage(error));
                         void client.invalidateQueries({ queryKey: workspacesKey });
                       }}
                     />
                   )}
-                  <h3 className="mt-8 font-semibold">Invite a member</h3>
+                  <h3
+                    ref={invitationHeading}
+                    tabIndex={-1}
+                    className="mt-8 font-semibold focus-visible:outline focus-visible:outline-2"
+                  >
+                    Invite a member
+                  </h3>
                   <p className="mt-2 text-slate-600">
                     Share the token manually. Acceptance requires the member’s matching verified
                     email. Invitations expire after seven days.
@@ -424,13 +521,17 @@ function WorkspaceScope({
                     type="email"
                     valid={valid}
                     submit={(email) => {
-                      setInvitation(null);
+                      storeInvitation(null);
+                      tokenStatus('ready');
+                      const cancellation = cancellationRevision.current;
                       return mutate(
                         `/api/workspaces/${workspace.id}/invitations`,
                         { email },
                         (value) => parseInvitation(value, workspace.id),
                         (created) => {
-                          setInvitation(created);
+                          storeInvitation(created);
+                          if (cancellation !== cancellationRevision.current)
+                            void verifyInvitation(created);
                           void client.invalidateQueries({
                             queryKey: [
                               'identity',
@@ -445,8 +546,39 @@ function WorkspaceScope({
                       );
                     }}
                   />
-                  {invitation && (
-                    <div className="mt-4">
+                  {invitation && invitationStatus !== 'ready' && (
+                    <div ref={invitationArea} className="mt-4">
+                      <p role={invitationStatus === 'error' ? 'alert' : 'status'}>
+                        {invitationStatus === 'checking'
+                          ? 'Checking invitation availability…'
+                          : 'Invitation availability could not be checked. Retry before sharing.'}
+                      </p>
+                      {invitationStatus === 'error' && (
+                        <button
+                          type="button"
+                          className="control mt-3"
+                          onClick={() => {
+                            invitationHeading.current?.focus();
+                            void verifyInvitation(invitation);
+                          }}
+                        >
+                          Retry invitation check
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="control mt-3"
+                        onClick={() => {
+                          invitationHeading.current?.focus();
+                          storeInvitation(null);
+                        }}
+                      >
+                        Dismiss token
+                      </button>
+                    </div>
+                  )}
+                  {invitation && invitationStatus === 'ready' && (
+                    <div ref={invitationArea} className="mt-4">
                       <label htmlFor="created-invitation">
                         Invitation token — copy and share once
                       </label>
@@ -463,7 +595,10 @@ function WorkspaceScope({
                       <button
                         type="button"
                         className="control mt-3"
-                        onClick={() => setInvitation(null)}
+                        onClick={() => {
+                          invitationHeading.current?.focus();
+                          storeInvitation(null);
+                        }}
                       >
                         Dismiss token
                       </button>

@@ -251,6 +251,17 @@ export function createIdentityRepository(pool: Pool) {
         return { workspaceId };
       });
     },
+    async invitationStatus(actor: Actor, workspaceId: string, invitationId: string) {
+      const id = uuid(invitationId);
+      return scoped(actor, workspaceId, true, async (client) => {
+        const result = await client.query<{ pending: boolean }>(
+          `SELECT consumed_at IS NULL AND cancelled_at IS NULL AND expires_at > clock_timestamp() AS pending
+           FROM workspace_invitations WHERE workspace_id = $1 AND id = $2`,
+          [workspaceId, id],
+        );
+        return { pending: result.rows[0]?.pending ?? false };
+      });
+    },
     async revokeMember(actor: Actor, workspaceId: string, suppliedUserId: unknown) {
       const userId = opaqueId(suppliedUserId);
       return scoped(actor, workspaceId, true, async (client) => {
@@ -271,16 +282,25 @@ export function createIdentityRepository(pool: Pool) {
         // An earlier invitation must not undo revocation. A later explicit
         // invitation can grant access again; cancellation is scoped to this
         // workspace and the target's current email.
-        await client.query(
-          `UPDATE workspace_invitations SET cancelled_at = clock_timestamp()
-          WHERE workspace_id = $1 AND email = (SELECT lower(email) FROM auth_users WHERE id = $2)
-            AND consumed_at IS NULL AND cancelled_at IS NULL`,
+        const cancelled = await client.query<{ ids: string[]; has_more: boolean }>(
+          `WITH cancelled AS (
+            UPDATE workspace_invitations SET cancelled_at = clock_timestamp()
+            WHERE workspace_id = $1 AND email = (SELECT lower(email) FROM auth_users WHERE id = $2)
+              AND consumed_at IS NULL AND cancelled_at IS NULL
+            RETURNING id
+          )
+          SELECT ARRAY(SELECT id FROM cancelled ORDER BY id LIMIT 100) AS ids,
+                 (SELECT count(*) > 100 FROM cancelled) AS has_more`,
           [workspaceId, userId],
         );
         await client.query(
           'DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2',
           [workspaceId, userId],
         );
+        return {
+          cancelledInvitationIds: cancelled.rows[0]?.ids ?? [],
+          hasMore: cancelled.rows[0]?.has_more ?? false,
+        };
       });
     },
   };

@@ -1,12 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   apiOrigin,
   parseInvitation,
+  parseInvitationStatus,
+  parseMemberRevocation,
   parseMembers,
   parsePendingInvitations,
   parseRedirect,
   parseServices,
   parseUser,
+  request,
 } from './api';
 
 describe('browser trust boundary', () => {
@@ -144,4 +147,58 @@ it('validates page cursors against bounded last items while retaining legacy res
       workspaceId,
     ),
   ).toThrow();
+});
+
+it('bounds exact revocation IDs and rejects private or malformed cancellation responses', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  expect(parseMemberRevocation({ cancelledInvitationIds: [id], hasMore: false })).toEqual({
+    cancelledInvitationIds: [id],
+    hasMore: false,
+  });
+  for (const value of [
+    undefined,
+    { cancelledInvitationIds: ['invalid'], hasMore: false },
+    { cancelledInvitationIds: [id, id], hasMore: false },
+    { cancelledInvitationIds: [id], hasMore: true },
+    { cancelledInvitationIds: Array(101).fill(id), hasMore: false },
+    { cancelledInvitationIds: [], hasMore: false, token: 'private' },
+  ])
+    expect(() => parseMemberRevocation(value)).toThrow();
+  expect(parseInvitationStatus({ pending: false })).toBe(false);
+  for (const value of [{ pending: 'true' }, { pending: true, token: 'private' }, {}])
+    expect(() => parseInvitationStatus(value)).toThrow();
+});
+
+it('requires verified JSON revocation and preserves empty invitation cancellation responses', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch');
+  try {
+    fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ cancelledInvitationIds: [], hasMore: false }), { status: 200 }),
+    );
+    await expect(
+      request('/members/member', parseMemberRevocation, { method: 'DELETE' }),
+    ).resolves.toEqual({ cancelledInvitationIds: [], hasMore: false });
+    fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(
+      request('/members/member', parseMemberRevocation, { method: 'DELETE' }),
+    ).rejects.toThrow();
+    fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(
+      request(
+        '/invitations/id',
+        (value) => {
+          expect(value).toBeUndefined();
+        },
+        { method: 'DELETE' },
+      ),
+    ).resolves.toBeUndefined();
+    fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ cancelledInvitationIds: [], hasMore: false }), { status: 201 }),
+    );
+    await expect(
+      request('/members/member', parseMemberRevocation, { method: 'DELETE' }),
+    ).rejects.toThrow();
+  } finally {
+    fetch.mockRestore();
+  }
 });

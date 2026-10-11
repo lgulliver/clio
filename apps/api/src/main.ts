@@ -5,6 +5,7 @@ import { readArgoConfig } from './features/argo-collection/config.ts';
 import { readGitHubConfig } from './features/github-collection/config.ts';
 import { createAuth } from './features/identity/auth.ts';
 import { readAuthConfig } from './features/identity/config.ts';
+import { readMeasurementConfig } from './features/measurements/config.ts';
 import { createServer } from './server.ts';
 
 async function main() {
@@ -12,7 +13,8 @@ async function main() {
   const authConfig = readAuthConfig(process.env);
   const github = await readGitHubConfig(process.env);
   const argo = await readArgoConfig(process.env);
-  if ((github || argo) && !authConfig)
+  const measurement = await readMeasurementConfig(process.env);
+  if ((github || argo || measurement) && !authConfig)
     throw new Error('Live connections require identity configuration');
   const migrations = await loadMigrations();
   const pool = createPool(config.databaseUrl);
@@ -22,7 +24,7 @@ async function main() {
       close: () => pool.end(),
     },
     authConfig
-      ? { auth: createAuth(pool, authConfig), config: authConfig, pool, github, argo }
+      ? { auth: createAuth(pool, authConfig), config: authConfig, pool, github, argo, measurement }
       : undefined,
   );
   let closing = false;

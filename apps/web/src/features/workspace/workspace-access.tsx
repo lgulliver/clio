@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
   errorMessage,
+  type MemberRevocation,
+  parseMemberRevocation,
   parseMembers,
   parsePendingInvitations,
   request,
@@ -16,13 +18,15 @@ export function WorkspaceAccess({
   onDenied,
   onInvitationCancelled,
   onMemberRevoked,
+  onCancellationUncertain,
 }: {
   workspaceId: string;
   userId: string;
   validSelection: () => boolean;
   onDenied: (error: unknown) => void;
   onInvitationCancelled: (id: string) => void;
-  onMemberRevoked: (email: string) => void;
+  onMemberRevoked: (result: MemberRevocation) => void;
+  onCancellationUncertain: () => void;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -174,7 +178,7 @@ export function WorkspaceAccess({
     else if (query.error instanceof ApiError && [403, 404].includes(query.error.status))
       onDenied(query.error);
   });
-  async function remove(kind: 'members' | 'invitations', id: string, label: string, email: string) {
+  async function remove(kind: 'members' | 'invitations', id: string, label: string) {
     if (pending.current || !valid()) return;
     pending.current = true;
     heading.current?.focus();
@@ -185,14 +189,26 @@ export function WorkspaceAccess({
     try {
       await client.cancelQueries({ queryKey: key });
       if (!valid()) return;
-      await request(
-        `/api/workspaces/${workspaceId}/${kind}/${encodeURIComponent(id)}`,
-        () => undefined,
-        { method: 'DELETE' },
-      );
-      if (!valid()) return;
-      if (kind === 'invitations') onInvitationCancelled(id);
-      else onMemberRevoked(email);
+      if (kind === 'members') {
+        const result = await request(
+          `/api/workspaces/${workspaceId}/members/${encodeURIComponent(id)}`,
+          parseMemberRevocation,
+          { method: 'DELETE' },
+        );
+        // The panel can close while its write commits; the parent still owns token lineage.
+        if (session.current(revision) && validSelection()) onMemberRevoked(result);
+        if (!valid()) return;
+      } else {
+        await request(
+          `/api/workspaces/${workspaceId}/invitations/${encodeURIComponent(id)}`,
+          (value) => {
+            if (value !== undefined) throw new ApiError(0);
+          },
+          { method: 'DELETE' },
+        );
+        if (session.current(revision) && validSelection()) onInvitationCancelled(id);
+        if (!valid()) return;
+      }
       client.removeQueries({ queryKey: key });
       setMembersCursor(null);
       setInvitationsCursor(null);
@@ -201,6 +217,12 @@ export function WorkspaceAccess({
       setNotice(label);
       setPageRevision((previous) => previous + 1);
     } catch (failure) {
+      if (
+        (!(failure instanceof ApiError) || failure.status === 0 || failure.status >= 500) &&
+        session.current(revision) &&
+        validSelection()
+      )
+        onCancellationUncertain();
       if (!valid()) return;
       if (failure instanceof ApiError && failure.status === 401) session.expire(revision);
       else if (failure instanceof ApiError && [403, 404].includes(failure.status))
@@ -277,7 +299,6 @@ export function WorkspaceAccess({
                             'members',
                             member.userId,
                             `Access revoked for ${member.name}.`,
-                            member.email,
                           )
                         }
                       >
@@ -314,7 +335,6 @@ export function WorkspaceAccess({
                           'invitations',
                           invitation.id,
                           `Invitation cancelled for ${invitation.email}.`,
-                          invitation.email,
                         )
                       }
                     >
