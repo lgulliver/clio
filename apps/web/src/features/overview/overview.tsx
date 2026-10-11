@@ -11,6 +11,7 @@ import { errorMessage, parseServices, parseWorkspaces } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MeasurementHistory } from '../measurement-evidence/measurement-history';
 import { MetricResults } from '../measurements/metric-results';
+import { comparableSamples, MetricTrends } from '../measurements/metric-trends';
 import { type Run as MockRun, parseHistoryPage as parseMockPage } from '../mock-collection/api';
 import { HistoryBrowser, useStoredRead } from '../result-history/history-browser';
 
@@ -19,7 +20,7 @@ type StoredRun = GitHubRun | ArgoRun | MockRun;
 export function Overview() {
   const session = useSession();
   return (
-    <section>
+    <section className="delivery-dashboard">
       <header className="page-header">
         <h1>Delivery overview</h1>
         <p>Understand service delivery through saved measurements and their evidence.</p>
@@ -196,7 +197,7 @@ function StoredResults({
       {[
         { title: 'Live GitHub', provider: 'github', parse: parseGitHubPage },
         { title: 'Live Argo CD', provider: 'argo', parse: parseArgoPage },
-        { title: 'Mock — fictional evidence', provider: 'mock', parse: parseMockPage },
+        { title: 'Demo data', provider: 'mock', parse: parseMockPage },
       ].map(({ title, provider, parse }) => (
         <HistoryBrowser<StoredRun>
           key={title}
@@ -204,7 +205,9 @@ function StoredResults({
           path={`${path}/${provider}-collection-runs`}
           parse={(value, options) => parse(value, scope, options)}
           onAccessLost={() => setBlocked(true)}
-          renderResult={(newest, success) => <ResultHistory newest={newest} success={success} />}
+          renderResult={(newest, success, page) => (
+            <ResultHistory newest={newest} success={success} page={page} />
+          )}
         />
       ))}
     </div>
@@ -214,11 +217,38 @@ function StoredResults({
 function ResultHistory({
   newest,
   success,
+  page,
 }: {
+  page: StoredRun[];
   newest: StoredRun | undefined;
   success: StoredRun | undefined;
 }) {
   const result = success?.result;
+  const capture = (run: StoredRun) =>
+    run.result?.metricResult
+      ? {
+          id: run.id,
+          result: run.result.metricResult,
+          source:
+            run.mode === 'mock'
+              ? `demo:${run.primaryProvider}`
+              : 'provider' in run.result && run.result.provider === 'argocd'
+                ? 'argocd'
+                : 'github',
+          revision: run.mode === 'mock' ? run.mappingRevision : run.connectionRevision,
+          oemsRevision: run.result.oemsRevision,
+        }
+      : null;
+  const selectedCapture = success ? capture(success) : null;
+  const samples = selectedCapture
+    ? comparableSamples(
+        page.flatMap((run) => {
+          const row = capture(run);
+          return row ? [row] : [];
+        }),
+        selectedCapture,
+      )
+    : [];
   return (
     <div className="mt-3 space-y-3">
       {newest ? (
@@ -239,93 +269,87 @@ function ResultHistory({
           {success.id !== newest?.id && (
             <p>This older saved result does not describe the newest request.</p>
           )}
-          {success.mode === 'mock' && (
-            <p>
-              Fictional {success.primaryProvider === 'github' ? 'GitHub' : 'Argo CD'} sample. Does
-              not measure this service's live delivery.{' '}
-              {success.scenario === 'complete-lifecycle'
-                ? 'Complete lifecycle — fictional.'
-                : 'Partial — fictional.'}
-            </p>
-          )}
-          <dl className="space-y-2 break-words">
-            <div>
-              <dt className="font-medium">Window (UTC, end exclusive)</dt>
-              <dd>
-                {result.window.start} to {result.window.end}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium">Evidence cutoff</dt>
-              <dd>{result.evidenceCutoff}</dd>
-            </div>
-            <div>
-              <dt className="font-medium">Saved result completed</dt>
-              <dd>{success.completedAt}</dd>
-            </div>
-            <div>
-              <dt className="font-medium">
-                {success.mode === 'mock' ? 'Mapping revision' : 'Connection revision'}
-              </dt>
-              <dd>
-                {success.mode === 'mock' ? success.mappingRevision : success.connectionRevision}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium">OEMS revision</dt>
-              <dd>{result.oemsRevision}</dd>
-            </div>
-          </dl>
-          {result.mode === 'live' ? (
-            <>
-              <p>
-                Provisional deployment frequency count:{' '}
-                <strong>{result.deploymentFrequency.count}</strong>. Not a complete deployment
-                measurement.
-              </p>
-              <p>
-                Retained deployments: {result.deploymentCount}. Qualifying classifications:{' '}
-                {result.qualifyingCount}. Unknown qualification: {result.unknownCount}.
-              </p>
-              <p>
-                {result.transportComplete
-                  ? 'GitHub history retrieval complete for this capture; metric coverage remains incomplete.'
-                  : 'Source transport coverage is incomplete.'}
-              </p>
-            </>
-          ) : (
-            <p>Fictional sample qualification: {result.qualification}. No live measurement.</p>
-          )}
-          {'provider' in result && result.provider === 'argocd' && (
-            <>
-              {result.archiveSummary && <ArchiveHistory summary={result.archiveSummary} />}
-              <CoverageAssessment assessment={result.coverageAssessment} />
-              <p>
-                Receipt observation period: {result.observationPeriod.start ?? 'Unknown start'} to{' '}
-                {result.observationPeriod.end}. Receipt observation does not prove continuous
-                coverage of this reporting window.
-              </p>
-              <p>
-                Recorded gaps: {result.recordedGapCount}. Rejected receipts: {result.rejectionCount}
-                . Scope drift: {result.scopeDriftCount}. Zero recorded gaps does not prove complete
-                operation history.
-              </p>
-            </>
-          )}
-          {result.mode === 'mock' && result.scenario === 'complete-lifecycle' ? (
-            <p>
-              Complete within fictional fixture. No live source coverage or native measurement
-              basis.
-            </p>
-          ) : (
-            <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
-          )}
+          {success.mode === 'mock' && <span className="demo-badge">Demo data</span>}
+          <details className="saved-context">
+            <summary>Evidence and reporting context</summary>
+            <dl className="space-y-2 break-words">
+              <div>
+                <dt className="font-medium">Window (UTC, end exclusive)</dt>
+                <dd>
+                  {result.window.start} to {result.window.end}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">Evidence cutoff</dt>
+                <dd>{result.evidenceCutoff}</dd>
+              </div>
+              <div>
+                <dt className="font-medium">Saved result completed</dt>
+                <dd>{success.completedAt}</dd>
+              </div>
+              <div>
+                <dt className="font-medium">
+                  {success.mode === 'mock' ? 'Mapping revision' : 'Connection revision'}
+                </dt>
+                <dd>
+                  {success.mode === 'mock' ? success.mappingRevision : success.connectionRevision}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">OEMS revision</dt>
+                <dd>{result.oemsRevision}</dd>
+              </div>
+            </dl>
+            {result.mode === 'live' ? (
+              <>
+                <p>
+                  Provisional deployment frequency count:{' '}
+                  <strong>{result.deploymentFrequency.count}</strong>. Not a complete deployment
+                  measurement.
+                </p>
+                <p>
+                  Retained deployments: {result.deploymentCount}. Qualifying classifications:{' '}
+                  {result.qualifyingCount}. Unknown qualification: {result.unknownCount}.
+                </p>
+                <p>
+                  {result.transportComplete
+                    ? 'GitHub history retrieval complete for this capture; metric coverage remains incomplete.'
+                    : 'Source transport coverage is incomplete.'}
+                </p>
+              </>
+            ) : (
+              <p>Sample qualification: {result.qualification}.</p>
+            )}
+            {'provider' in result && result.provider === 'argocd' && (
+              <>
+                {result.archiveSummary && <ArchiveHistory summary={result.archiveSummary} />}
+                <CoverageAssessment assessment={result.coverageAssessment} />
+                <p>
+                  Receipt observation period: {result.observationPeriod.start ?? 'Unknown start'} to{' '}
+                  {result.observationPeriod.end}. Receipt observation does not prove continuous
+                  coverage of this reporting window.
+                </p>
+                <p>
+                  Recorded gaps: {result.recordedGapCount}. Rejected receipts:{' '}
+                  {result.rejectionCount}. Scope drift: {result.scopeDriftCount}. Zero recorded gaps
+                  does not prove complete operation history.
+                </p>
+              </>
+            )}
+            {result.mode === 'mock' && result.scenario === 'complete-lifecycle' ? (
+              <p>Complete demo scenario.</p>
+            ) : (
+              <p>Coverage incomplete: collection, deployment history and recovery evidence.</p>
+            )}
+          </details>
           {result.mode === 'live' || result.metricResult ? (
             <MetricResults
+              compact
+              history={samples}
               result={result.metricResult}
               sourceLabel={
                 result.mode === 'mock'
-                  ? 'Fictional lifecycle'
+                  ? 'Demo'
                   : 'provider' in result && result.provider === 'argocd'
                     ? 'Argo CD'
                     : 'GitHub'
@@ -337,6 +361,16 @@ function ResultHistory({
               Change lead time and deployment rework rate: unavailable from these stored results.
             </p>
           )}
+          <MetricTrends
+            samples={samples}
+            sourceLabel={
+              success.mode === 'mock'
+                ? 'Demo'
+                : selectedCapture?.source === 'argocd'
+                  ? 'Argo CD'
+                  : 'GitHub'
+            }
+          />
         </>
       ) : (
         <p>No successful saved result found.</p>

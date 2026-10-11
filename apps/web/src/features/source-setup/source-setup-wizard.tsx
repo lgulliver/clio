@@ -27,7 +27,7 @@ const sources: { id: Source; name: string; description: string; guide: string }[
   {
     id: 'mock',
     name: 'Fictional demo',
-    description: 'Try the collection workflow with mock deployments. No live provider access.',
+    description: 'Try the collection workflow with sample deployments. No live provider access.',
     guide: 'synthetic-lifecycle-demo.md',
   },
 ];
@@ -254,7 +254,7 @@ export function SourceSetupWizard({
             <div className="setup-help">
               <p>
                 {source === 'mock'
-                  ? 'Save fictional mapping settings before collecting. No live provider access is needed.'
+                  ? 'Save demo settings before collecting. No live provider access is needed.'
                   : 'Save the source scope before collecting. Provider credentials stay with your Clio operator.'}
               </p>
               {selectedSource.guide && (
@@ -272,7 +272,7 @@ export function SourceSetupWizard({
           {step === 3 && (
             <p className="setup-help">
               {source === 'mock'
-                ? 'Collect saved fictional settings, or review a successful saved demo result.'
+                ? 'Collect saved demo settings, or review a successful saved demo result.'
                 : 'Choose a closed reporting window and collect it.'}{' '}
               Continue once a saved result exists for this configuration revision. A queued request
               is still waiting for its worker.
@@ -321,9 +321,9 @@ export function SourceSetupWizard({
               </p>
               {source === 'mock' ? (
                 <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  This demo uses fictional evidence. Choose Partial or Complete lifecycle —
-                  fictional. Complete coverage applies only within the fictional fixture; neither
-                  scenario establishes live source coverage or a native measurement basis.
+                  This demo uses sample data. Choose Partial or Complete lifecycle. Complete
+                  coverage applies only within this demo scenario; neither scenario establishes live
+                  source coverage or a native measurement basis.
                 </p>
               ) : (
                 <>

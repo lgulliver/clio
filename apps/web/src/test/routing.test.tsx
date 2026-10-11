@@ -43,7 +43,7 @@ describe('application routing', () => {
     expect(await screen.findByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
     expect(
       screen.getByText(
-        'Select a workspace and service to manage live GitHub or Argo connections, or separate mock deployment settings.',
+        'Select a workspace and service to manage live GitHub or Argo connections, or demo deployment settings.',
       ),
     ).toBeVisible();
   });

@@ -109,7 +109,7 @@ describe('browser identity and workspace', () => {
       screen.queryByRole('region', { name: 'Data source setup wizard' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Mock settings for Readable service' }),
+      screen.getByRole('button', { name: 'Demo settings for Readable service' }),
     ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Live GitHub for Readable service' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Live Argo for Readable service' })).toBeVisible();

@@ -61,18 +61,18 @@ beforeEach(() => {
   fetchMock.mockResolvedValue(json({ runs: [] }));
   vi.stubGlobal('fetch', fetchMock);
 });
-describe('mock collection history', () => {
-  it('member reads stored fictional result, quality and gaps without queue control', async () => {
+describe('demo collection history', () => {
+  it('member reads stored result, quality and gaps without queue control', async () => {
     fetchMock.mockResolvedValue(json({ runs: [completed] }));
     mount(false);
     expect(
-      await screen.findByText('Stored fictional result · Provisional · Qualification: unknown'),
+      await screen.findByText('Saved result · Provisional · Qualification: unknown'),
     ).toBeVisible();
     expect(screen.getByText(/Quality reasons: incomplete_coverage/)).toBeVisible();
     expect(screen.getByText(/Sample window: 2026-01-01/)).toBeVisible();
     expect(screen.getByText(/Evidence cutoff:.*OEMS revision:/)).toBeVisible();
     expect(screen.getByText(/recovery evidence incomplete/)).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Queue mock collection' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Queue demo collection' })).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh runs' }));
     expect(fetchMock.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
   });
@@ -82,9 +82,9 @@ describe('mock collection history', () => {
       options?.method === 'POST' ? late.promise : json({ runs: [] }),
     );
     mount();
-    await screen.findByText('No mock collection runs yet.');
+    await screen.findByText('No demo collection runs yet.');
     const user = userEvent.setup();
-    const button = screen.getByRole('button', { name: 'Queue mock collection' });
+    const button = screen.getByRole('button', { name: 'Queue demo collection' });
     await user.click(button);
     await user.click(button);
     const posts = fetchMock.mock.calls.filter(([, options]) => options?.method === 'POST');
@@ -98,7 +98,7 @@ describe('mock collection history', () => {
       late.resolve(json({ run: queued }, 202));
       await late.promise;
     });
-    expect(await screen.findByText('Saved mock revision 1 · pending')).toBeVisible();
+    expect(await screen.findByText('Saved settings revision 1 · pending')).toBeVisible();
     expect(screen.getByText(/If processing is paused, runs stay pending/)).toBeVisible();
     expect(button).toBeDisabled();
   });
@@ -118,15 +118,15 @@ describe('mock collection history', () => {
         return json({ run: completed }, 202);
       });
       mount();
-      await screen.findByText('Saved mock revision 1 · succeeded');
+      await screen.findByText('Saved settings revision 1 · succeeded');
       const user = userEvent.setup();
-      const button = screen.getByRole('button', { name: 'Queue mock collection' });
+      const button = screen.getByRole('button', { name: 'Queue demo collection' });
       await user.click(button);
       expect(await screen.findByRole('alert')).toHaveTextContent(
         'Retry queueing to confirm the same request',
       );
       await user.click(button);
-      await screen.findByText('Mock collection queued for saved revision 1.');
+      await screen.findByText('Demo collection queued for saved revision 1.');
       await waitFor(() => expect(button).toBeEnabled());
       await user.click(button);
       const bodies = fetchMock.mock.calls
@@ -142,14 +142,14 @@ describe('mock collection history', () => {
       return json({ runs: [completed] });
     });
     const view = mount();
-    await screen.findByText('Saved mock revision 1 · succeeded');
+    await screen.findByText('Saved settings revision 1 · succeeded');
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await user.click(screen.getByRole('button', { name: 'Queue demo collection' }));
     await screen.findByRole('alert');
     view.switchScope(scope.serviceId, 'alice', 2);
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    expect(screen.getByText('Saved mock revision 1 · succeeded')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    expect(screen.getByText('Saved settings revision 1 · succeeded')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Queue demo collection' }));
     const bodies = fetchMock.mock.calls
       .filter(([, options]) => options?.method === 'POST')
       .map(([, options]) => JSON.parse(String(options?.body)));
@@ -162,14 +162,14 @@ describe('mock collection history', () => {
       options?.method === 'POST' ? json({}, 409) : json({ runs: [] }),
     );
     mount();
-    await screen.findByText('No mock collection runs yet.');
+    await screen.findByText('No demo collection runs yet.');
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Queue mock collection' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('another mock collection is active');
-    expect(screen.getByRole('button', { name: 'Queue mock collection' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Queue demo collection' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('another demo collection is active');
+    expect(screen.getByRole('button', { name: 'Queue demo collection' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Refresh saved settings' }));
     expect(reload).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await user.click(screen.getByRole('button', { name: 'Queue demo collection' }));
     const bodies = fetchMock.mock.calls
       .filter(([, options]) => options?.method === 'POST')
       .map(([, options]) => JSON.parse(String(options?.body)));
@@ -180,11 +180,11 @@ describe('mock collection history', () => {
       options?.method === 'POST' ? json({}, 403) : json({ runs: [completed] }),
     );
     mount();
-    await screen.findByText('Saved mock revision 1 · succeeded');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await screen.findByText('Saved settings revision 1 · succeeded');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue demo collection' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('You can still read run history');
-    expect(screen.queryByRole('button', { name: 'Queue mock collection' })).not.toBeInTheDocument();
-    expect(screen.getByText('Saved mock revision 1 · succeeded')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Queue demo collection' })).not.toBeInTheDocument();
+    expect(screen.getByText('Saved settings revision 1 · succeeded')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Refresh runs' })).toBeEnabled();
   });
   it.each(['read', 'queue'])(
@@ -198,23 +198,23 @@ describe('mock collection history', () => {
       );
       const view = mount();
       if (operation === 'queue') {
-        await screen.findByText('Saved mock revision 1 · succeeded');
+        await screen.findByText('Saved settings revision 1 · succeeded');
         await userEvent
           .setup()
-          .click(screen.getByRole('button', { name: 'Queue mock collection' }));
+          .click(screen.getByRole('button', { name: 'Queue demo collection' }));
       }
       expect(await screen.findByRole('alert')).toHaveTextContent(
         'Run history is no longer available',
       );
-      expect(screen.queryByText('Saved mock revision 1 · succeeded')).not.toBeInTheDocument();
+      expect(screen.queryByText('Saved settings revision 1 · succeeded')).not.toBeInTheDocument();
       view.unmount();
       status = 401;
       mount();
       if (operation === 'queue') {
-        await screen.findByText('Saved mock revision 1 · succeeded');
+        await screen.findByText('Saved settings revision 1 · succeeded');
         await userEvent
           .setup()
-          .click(screen.getByRole('button', { name: 'Queue mock collection' }));
+          .click(screen.getByRole('button', { name: 'Queue demo collection' }));
       }
       await waitFor(() => expect(identity.expire).toHaveBeenCalledWith(1));
     },
@@ -232,19 +232,19 @@ describe('mock collection history', () => {
       });
       const view = mount();
       if (operation === 'queue') {
-        await screen.findByText('No mock collection runs yet.');
+        await screen.findByText('No demo collection runs yet.');
         await userEvent
           .setup()
-          .click(screen.getByRole('button', { name: 'Queue mock collection' }));
+          .click(screen.getByRole('button', { name: 'Queue demo collection' }));
       }
       view.switchScope(otherService);
-      await screen.findByText('No mock collection runs yet.');
+      await screen.findByText('No demo collection runs yet.');
       await act(async () => {
         late.resolve(operation === 'queue' ? json({}, 401) : json({ runs: [completed] }));
         await late.promise;
       });
       expect(identity.expire).not.toHaveBeenCalled();
-      expect(screen.queryByText('Saved mock revision 1 · succeeded')).not.toBeInTheDocument();
+      expect(screen.queryByText('Saved settings revision 1 · succeeded')).not.toBeInTheDocument();
       expect(
         view.client
           .getQueryCache()
@@ -268,16 +268,16 @@ describe('mock collection history', () => {
       options?.method === 'POST' ? late.promise : json({ runs: [] }),
     );
     const view = mount();
-    await screen.findByText('No mock collection runs yet.');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await screen.findByText('No demo collection runs yet.');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue demo collection' }));
     identity.revision = 2;
     view.switchScope(scope.serviceId, 'bob');
-    await screen.findByText('No mock collection runs yet.');
+    await screen.findByText('No demo collection runs yet.');
     await act(async () => {
       late.resolve(json({ run: queued }, 202));
       await late.promise;
     });
-    expect(screen.queryByText(/Mock collection queued/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Demo collection queued/)).not.toBeInTheDocument();
     expect(
       JSON.stringify(
         view.client
@@ -304,14 +304,14 @@ describe('mock collection history', () => {
         />{' '}
       </QueryClientProvider>,
     );
-    await screen.findByText('Saved mock revision 1 · succeeded');
+    await screen.findByText('Saved settings revision 1 · succeeded');
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Production environment (mock)'), '-eu');
-    expect(screen.getByText('Saved mock revision 1 · succeeded')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
-    await screen.findByText(/Saved mock revision 2. Observed at/);
-    expect(screen.getByText('Saved mock revision 1 · succeeded')).toBeVisible();
-    expect(screen.getByText(/Stored fictional result/)).toBeVisible();
+    await user.type(screen.getByLabelText('Production environment'), '-eu');
+    expect(screen.getByText('Saved settings revision 1 · succeeded')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
+    await screen.findByText(/Saved settings revision 2. Observed at/);
+    expect(screen.getByText('Saved settings revision 1 · succeeded')).toBeVisible();
+    expect(screen.getByText(/Saved result/)).toBeVisible();
   });
   it('shows redacted failed run and retries history errors', async () => {
     fetchMock.mockResolvedValueOnce(json({ private: 'secret' }, 503)).mockResolvedValue(
@@ -360,11 +360,11 @@ describe('mock collection history', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2100);
       });
-      expect(screen.getByText('Saved mock revision 1 · running')).toBeVisible();
+      expect(screen.getByText('Saved settings revision 1 · running')).toBeVisible();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2100);
       });
-      expect(screen.getByText('Saved mock revision 1 · succeeded')).toBeVisible();
+      expect(screen.getByText('Saved settings revision 1 · succeeded')).toBeVisible();
       const count = fetchMock.mock.calls.length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10000);
@@ -456,7 +456,7 @@ describe('mock setup collection status', () => {
         hasSavedResult: false,
       }),
     );
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue mock collection' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue demo collection' }));
     await screen.findByText(/Retry queueing to confirm the same request/);
     await waitFor(() =>
       expect(onStatus).toHaveBeenLastCalledWith({ ready: true, busy: true, hasSavedResult: false }),

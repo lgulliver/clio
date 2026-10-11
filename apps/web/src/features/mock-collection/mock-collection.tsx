@@ -198,7 +198,7 @@ export function MockCollectionHistory({
         replay.current = null;
         setConfirmation(false);
       }
-      setNotice(`Mock collection queued for saved revision ${run.mappingRevision}.`);
+      setNotice(`Demo collection queued for saved revision ${run.mappingRevision}.`);
       setConflict(false);
       polls.current = 0;
       setPollLimit(false);
@@ -225,11 +225,11 @@ export function MockCollectionHistory({
       if (failure instanceof ApiError && failure.status === 409) {
         setConflict(true);
         setError(
-          'Saved settings changed or another mock collection is active. Refresh runs and saved settings before trying again.',
+          'Saved settings changed or another demo collection is active. Refresh runs and saved settings before trying again.',
         );
       } else if (failure instanceof ApiError && failure.status === 403) {
         setError(
-          'Only workspace owners can queue mock collection. You can still read run history.',
+          'Only workspace owners can queue demo collection. You can still read run history.',
         );
       } else setError(`${errorMessage(failure)} Retry queueing to confirm the same request.`);
     } finally {
@@ -263,19 +263,20 @@ export function MockCollectionHistory({
     }
   }
   return (
-    <section className="mt-6 border-t border-slate-200 pt-6" aria-label="Mock collection history">
+    <section className="mt-6 border-t border-slate-200 pt-6" aria-label="Demo collection history">
       <div hidden={setup?.step === 'configure'}>
-        <h4 className="text-lg font-semibold">Mock collection history</h4>
+        <h4 className="text-lg font-semibold">Demo collection history</h4>
         <p>
           {mapping.scenario === 'complete-lifecycle'
-            ? 'Complete lifecycle — fictional. Complete within fictional fixture only.'
-            : 'Partial — fictional.'}
+            ? 'Complete lifecycle. Demo data.'
+            : 'Partial lifecycle.'}
         </p>
         <p className="mt-2">
           Fictional data only. These runs do not change your workspace metrics.
         </p>
         <p className="mt-2">
-          Queueing uses saved mock revision {mapping.revision}. Save edits first to include them.
+          Queueing uses saved settings revision {mapping.revision}. Save edits first to include
+          them.
         </p>
       </div>
       {unavailable || (query.error instanceof ApiError && query.error.status === 404) ? (
@@ -290,10 +291,10 @@ export function MockCollectionHistory({
                 disabled={busy || conflict || (active && replay.current === null)}
                 onClick={() => void queue()}
               >
-                Queue mock collection
+                Queue demo collection
               </button>
             ) : (
-              <p className="mt-2">Only workspace owners can queue mock collection.</p>
+              <p className="mt-2">Only workspace owners can queue demo collection.</p>
             )}
           </span>
           <button
@@ -316,7 +317,7 @@ export function MockCollectionHistory({
           )}
           {busy && (
             <p role="status" className="mt-2">
-              Confirming mock collection request…
+              Confirming demo collection request…
             </p>
           )}
           {notice && (
@@ -331,7 +332,7 @@ export function MockCollectionHistory({
           )}
           {query.isPending ? (
             <p role="status" className="mt-2">
-              Loading mock collection history…
+              Loading demo collection history…
             </p>
           ) : query.isError ? (
             <p role="alert" className="mt-2">
@@ -340,9 +341,9 @@ export function MockCollectionHistory({
           ) : (
             <div hidden={setup?.step === 'configure'}>
               {query.data.length === 0 ? (
-                <p className="mt-2">No mock collection runs yet.</p>
+                <p className="mt-2">No demo collection runs yet.</p>
               ) : (
-                <ol className="mt-4 space-y-4" aria-label="Latest 25 mock collection runs">
+                <ol className="mt-4 space-y-4" aria-label="Latest 25 demo collection runs">
                   {query.data.map((run) => (
                     <RunSummary key={run.id} run={run} />
                   ))}
@@ -352,8 +353,8 @@ export function MockCollectionHistory({
           )}
           {active && (
             <p className="mt-3">
-              Pending runs wait for local mock processing. If processing is paused, runs stay
-              pending; resume local mock processing, then refresh runs.
+              Pending runs wait for local demo processing. If processing is paused, runs stay
+              pending; resume local demo processing, then refresh runs.
             </p>
           )}
           {pollLimit && (
@@ -370,16 +371,11 @@ function RunSummary({ run }: { run: Run }) {
   return (
     <li className="rounded border border-slate-200 p-4">
       <h5 className="font-semibold">
-        Saved mock revision {run.mappingRevision} · {run.status}
+        Saved settings revision {run.mappingRevision} · {run.status}
       </h5>
+      <p>{run.scenario === 'complete-lifecycle' ? 'Complete lifecycle' : 'Partial lifecycle'}</p>
       <p>
-        {run.scenario === 'complete-lifecycle'
-          ? 'Complete lifecycle — fictional'
-          : 'Partial — fictional'}
-      </p>
-      <p>
-        {run.primaryProvider === 'github' ? 'GitHub (mock)' : 'Argo CD (mock)'} · Attempts:{' '}
-        {run.attempts} of 3
+        {run.primaryProvider === 'github' ? 'GitHub' : 'Argo CD'} · Attempts: {run.attempts} of 3
       </p>
       <p>
         Settings observed at {run.mappingObservedAt}. Queued at {run.createdAt}.
@@ -398,11 +394,9 @@ function StoredResult({ result }: { result: Preview }) {
   return (
     <div className="mt-3">
       <p>
-        Stored fictional result ·{' '}
-        {result.scenario === 'complete-lifecycle'
-          ? 'Complete lifecycle — fictional'
-          : 'Provisional'}{' '}
-        · Qualification: {result.qualification}
+        Saved result ·{' '}
+        {result.scenario === 'complete-lifecycle' ? 'Complete lifecycle' : 'Provisional'} ·
+        Qualification: {result.qualification}
       </p>
       <p>
         Sample window: {result.window.start} to {result.window.end} (UTC,{' '}
@@ -412,13 +406,11 @@ function StoredResult({ result }: { result: Preview }) {
         Evidence cutoff: {result.evidenceCutoff}. OEMS revision: {result.oemsRevision}.
       </p>
       <p>
-        Fictional rollouts: {result.rolloutCount}. Qualifying fictional deployments:{' '}
+        Rollouts: {result.rolloutCount}. Qualifying sample deployments:{' '}
         {result.deploymentFrequency.count}.
       </p>
       {result.metricResult ? (
-        <p>
-          Complete within fictional fixture. No live source coverage or native measurement basis.
-        </p>
+        <p>Complete demo scenario.</p>
       ) : (
         <p>
           Coverage incomplete: collection{' '}
@@ -431,16 +423,12 @@ function StoredResult({ result }: { result: Preview }) {
         Quality reasons: {result.deploymentFrequency.qualityReasons.join(', ') || 'None reported'}.
       </p>
       {result.metricResult ? (
-        <MetricResults
-          result={result.metricResult}
-          sourceLabel="Fictional lifecycle"
-          headingLevel={6}
-        />
+        <MetricResults result={result.metricResult} sourceLabel="Demo" headingLevel={6} />
       ) : (
         <p>Deployments per day, change failure rate and recovery time are unavailable.</p>
       )}
       {result.qualification === 'unknown' && (
-        <p>Production exposure is unconfirmed for this fictional result.</p>
+        <p>Production exposure is unconfirmed for this result.</p>
       )}
     </div>
   );

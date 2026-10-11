@@ -166,7 +166,7 @@ describe('source setup wizard', () => {
     await user.click(screen.getByRole('button', { name: 'Next: Collection' }));
     await user.click(screen.getByRole('button', { name: 'Complete collection' }));
     await user.click(screen.getByRole('button', { name: 'Next: Evidence' }));
-    expect(screen.getByText(/This demo uses fictional evidence/)).toBeVisible();
+    expect(screen.getByText(/This demo uses sample data/)).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Evidence checklist' })).not.toBeInTheDocument();
   });
   it('allows closing accepted jobs with no worker while preserving queued-not-success distinction', async () => {

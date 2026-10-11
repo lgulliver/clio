@@ -96,6 +96,12 @@ async function select() {
   });
   fireEvent.change(await screen.findByLabelText('Service'), { target: { value: scope.serviceId } });
 }
+async function revealContext(card: HTMLElement) {
+  const summary = await within(card).findByText('Evidence and reporting context', {
+    selector: 'summary',
+  });
+  if (!summary.parentElement?.hasAttribute('open')) fireEvent.click(summary);
+}
 function deferred() {
   let resolve: (value: Response) => void = () => {
     throw new Error('Missing resolver');
@@ -136,6 +142,13 @@ describe('stored results overview', () => {
         'Observed candidates: 1',
       );
     }
+    const argoChart = await within(argo).findByRole('region', { name: 'Argo CD: Delivery trends' });
+    expect(
+      await within(github).findByRole('region', { name: 'GitHub: Delivery trends' }),
+    ).toBeVisible();
+    fireEvent.click(within(argoChart).getByText('Chart data and quality', { selector: 'summary' }));
+    expect(within(argoChart).getByRole('table')).toBeVisible();
+    expect(within(argoChart).getAllByRole('row')).toHaveLength(2);
   });
 
   it('signed-out/checking/error states make no evidence absence claim or protected reads', () => {
@@ -222,6 +235,7 @@ describe('stored results overview', () => {
       expect(within(card).getByText(/Provisional deployment frequency count:/)).toHaveTextContent(
         '0. Not a complete deployment measurement.',
       );
+      await revealContext(card);
       expect(within(card).getByText(/Unknown qualification: 2/)).toBeVisible();
       expect(within(card).getByText('2026-01-04T00:01:00.000001Z')).toBeVisible();
       expect(
@@ -247,16 +261,17 @@ describe('stored results overview', () => {
     });
     mount(true);
     await select();
-    const mock = screen.getByRole('region', { name: 'Mock — fictional evidence stored results' });
-    expect(await within(mock).findByText(/Fictional GitHub sample/)).toHaveTextContent(
-      "Does not measure this service's live delivery",
-    );
+    const mock = screen.getByRole('region', { name: 'Demo data stored results' });
+    expect(await within(mock).findByText('Demo data', { selector: 'span' })).toBeVisible();
+    await revealContext(mock);
     expect(
       within(mock).queryByText(/Provisional deployment frequency count/),
     ).not.toBeInTheDocument();
     expect(within(mock).getByText('Mapping revision')).toBeVisible();
     const github = screen.getByRole('region', { name: 'Live GitHub stored results' });
     const argo = screen.getByRole('region', { name: 'Live Argo CD stored results' });
+    await revealContext(github);
+    await revealContext(argo);
     expect(await within(github).findByText(/GitHub history retrieval complete/)).toBeVisible();
     expect(await within(argo).findByText('Source transport coverage is incomplete.')).toBeVisible();
     expect(
@@ -279,6 +294,8 @@ describe('stored results overview', () => {
     mount();
     await select();
     const card = screen.getByRole('region', { name: 'Live Argo CD stored results' });
+    await revealContext(card);
+    await revealContext(card);
     expect(
       await within(card).findByText(/Sealed capture interval: 2026-01-01T01:00:00Z/),
     ).toBeVisible();
@@ -368,6 +385,7 @@ describe('stored results overview', () => {
     expect(
       within(github).queryByText(/Provisional deployment frequency count/),
     ).not.toBeInTheDocument();
+    await revealContext(screen.getByRole('region', { name: 'Live Argo CD stored results' }));
     expect(
       await within(screen.getByRole('region', { name: 'Live Argo CD stored results' })).findByText(
         /Provisional deployment frequency count/,
@@ -524,7 +542,9 @@ describe('saved result navigation', () => {
     expect(within(selector).getAllByRole('option')).toHaveLength(25);
     fireEvent.change(selector, { target: { value: savedPage[1]?.id } });
     expect(selector).toHaveValue(savedPage[1]?.id);
+    await revealContext(card);
     fireEvent.click(within(card).getByRole('button', { name: 'Older Live GitHub saved results' }));
+    await revealContext(card);
     expect(
       await within(card).findByText('2025-12-01T00:00:00Z to 2025-12-03T00:00:00Z', {
         selector: 'dd',
@@ -542,8 +562,13 @@ describe('saved result navigation', () => {
       ).toHaveAttribute('aria-disabled', 'false'),
     );
     expect(fetchMock.mock.calls.length - before).toBe(3);
-    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    expect(
+      within(within(card).getByRole('combobox', { name: /saved reporting window/ })).getAllByRole(
+        'option',
+      ),
+    ).toHaveLength(1);
     fireEvent.click(within(card).getByRole('button', { name: 'Newest Live GitHub saved result' }));
+    await revealContext(card);
     expect(
       await within(card).findByText('2026-01-01T00:00:00Z to 2026-01-03T00:00:00Z', {
         selector: 'dd',
@@ -578,6 +603,7 @@ describe('saved result navigation', () => {
       fireEvent.click(
         within(card).getByRole('button', { name: 'Newest Live GitHub saved result' }),
       );
+      await revealContext(card);
       expect(await within(card).findByText(/Provisional deployment frequency count/)).toBeVisible();
     },
   );
@@ -712,6 +738,7 @@ describe('independent measurement history in Overview', () => {
     expect(within(card).getByText(/0.5 deployments per day/)).toBeVisible();
     expect(within(card).getByText(/86,400 seconds/)).toBeVisible();
     const native = screen.getByRole('region', { name: 'Live GitHub stored results' });
+    await revealContext(native);
     expect(within(native).getByText(/Provisional deployment frequency count/)).toBeVisible();
     expect(within(native).queryByText(/0.5 deployments per day/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
@@ -803,7 +830,11 @@ describe('independent measurement history in Overview', () => {
     await act(async () => late.resolve(json({ runs: [older], nextCursor: null })));
     await within(card).findByText('Deployment census missing');
     expect(olderButton).toHaveFocus();
-    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    expect(
+      within(within(card).getByRole('combobox', { name: /saved reporting window/ })).getAllByRole(
+        'option',
+      ),
+    ).toHaveLength(1);
     const refresh = within(card).getByRole('button', {
       name: 'Refresh Independent measurements history',
     });
@@ -811,7 +842,11 @@ describe('independent measurement history in Overview', () => {
     fireEvent.click(refresh);
     expect(refresh).toHaveFocus();
     await waitFor(() => expect(refresh).toHaveAttribute('aria-disabled', 'false'));
-    expect(within(within(card).getByRole('combobox')).getAllByRole('option')).toHaveLength(1);
+    expect(
+      within(within(card).getByRole('combobox', { name: /saved reporting window/ })).getAllByRole(
+        'option',
+      ),
+    ).toHaveLength(1);
     fireEvent.click(
       within(card).getByRole('button', { name: 'Newest Independent measurements saved result' }),
     );
@@ -948,11 +983,11 @@ it('shows five server metrics for saved fictional lifecycle separately from live
     'Deployment rework rate',
     'Failed deployment recovery time',
   ])
-    expect(
-      await screen.findByRole('region', { name: `Fictional lifecycle: ${name}` }),
-    ).toBeVisible();
-  expect(screen.getByText(/Complete lifecycle — fictional/)).toBeVisible();
-  expect(screen.getByText(/Complete within fictional fixture/)).toBeVisible();
+    expect(await screen.findByRole('region', { name: `Demo: ${name}` })).toBeVisible();
+  const demo = screen.getByRole('region', { name: 'Demo data stored results' });
+  expect(within(demo).getByText('Complete demo scenario.')).not.toBeVisible();
+  await revealContext(demo);
+  expect(within(demo).getByText('Complete demo scenario.')).toBeVisible();
   expect(screen.getByRole('heading', { name: 'Live GitHub' })).toBeVisible();
   expect(screen.getByRole('heading', { name: 'Live Argo CD' })).toBeVisible();
 });

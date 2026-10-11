@@ -204,3 +204,18 @@ describe('five engineering metrics', () => {
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });
+
+it('keeps compact values readable and evidence available through disclosure', async () => {
+  const user = userEvent.setup();
+  const result = metricFixture(true);
+  render(<MetricResults result={result} compact history={[{ id: 'saved', result }]} />);
+  const lead = screen.getByRole('region', { name: 'Change lead time' });
+  expect(within(lead).getByText('24 h')).toBeVisible();
+  expect(
+    within(lead).getByText('Confirmed observations: 1; observed candidates: 0.'),
+  ).not.toBeVisible();
+  await user.click(within(lead).getByText('Evidence details', { selector: 'summary' }));
+  expect(
+    within(lead).getByText('Confirmed observations: 1; observed candidates: 0.'),
+  ).toBeVisible();
+});

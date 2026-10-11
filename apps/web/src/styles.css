@@ -193,3 +193,197 @@ body {
     @apply cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-clio-blue;
   }
 }
+
+/* Delivery dashboard keeps operational context available without competing with metrics. */
+.demo-badge {
+  display: inline-block;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: #23354d;
+  color: #bfdbfe;
+  font-size: 12px;
+}
+.metric-trends {
+  margin-top: 24px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  padding: 20px;
+}
+.trend-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.trend-heading h4 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.trend-heading label {
+  font-size: 12px;
+}
+.trend-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0;
+}
+.trend-controls button {
+  padding: 7px 12px;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.trend-controls button[aria-pressed="true"] {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+.trend-controls button:focus-visible,
+.metric-trends summary:focus-visible,
+.metric-card summary:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 3px;
+}
+.metric-trends svg {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  color: #94a3b8;
+}
+.metric-trends svg text {
+  fill: currentColor;
+  font-size: 11px;
+}
+.metric-trends p {
+  font-size: 13px;
+  margin: 12px 0;
+}
+.metric-trends details {
+  margin-top: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+.metric-trends th,
+.metric-trends td {
+  padding: 8px 12px;
+  text-align: left;
+}
+.metric-trends caption {
+  text-align: left;
+  padding: 12px;
+}
+.delivery-dashboard .saved-context {
+  background: transparent;
+  border-color: #42546b;
+}
+
+.delivery-dashboard {
+  background: #0c1422;
+  color: #e2e8f0;
+  border-radius: 18px;
+  padding: clamp(16px, 2vw, 28px);
+}
+.delivery-dashboard .panel,
+.delivery-dashboard .metric-card,
+.delivery-dashboard .metric-trends {
+  background: #111e30;
+  border-color: #29384c;
+  color: #e2e8f0;
+}
+.delivery-dashboard .text-clio-muted,
+.delivery-dashboard .text-slate-600,
+.delivery-dashboard .text-slate-700 {
+  color: #a8b8cd;
+}
+.delivery-dashboard .text-slate-900,
+.delivery-dashboard .service-heading h2,
+.delivery-dashboard .page-header h1 {
+  color: #f1f5f9;
+}
+.delivery-dashboard .text-blue-700,
+.delivery-dashboard .text-action {
+  color: #93c5fd;
+}
+.delivery-dashboard .field {
+  background: #17263b;
+  color: #e2e8f0;
+  border-color: #42546b;
+}
+.delivery-dashboard .metric-card {
+  padding: 16px;
+}
+.delivery-dashboard .metric-card h4 {
+  font-size: 13px;
+  min-height: 36px;
+}
+.delivery-dashboard .metric-card .text-3xl {
+  font-size: 27px;
+}
+.delivery-dashboard .metric-card .mt-5 {
+  margin-top: 12px;
+}
+.metric-sparkline {
+  width: 100%;
+  height: 42px;
+  margin-top: 12px;
+}
+.delivery-dashboard .page-header p,
+.delivery-dashboard .scope-filter,
+.delivery-dashboard .service-heading p,
+.delivery-dashboard .measurement-context dd {
+  color: #a8b8cd;
+}
+.app-frame:has(.delivery-dashboard) {
+  background: #0c1422;
+  color: #e2e8f0;
+}
+.app-frame:has(.delivery-dashboard) .app-sidebar,
+.app-frame:has(.delivery-dashboard) .app-topbar {
+  background: #0f1a2a;
+  border-color: #29384c;
+}
+.app-frame:has(.delivery-dashboard) .app-brand {
+  color: #f1f5f9;
+}
+.app-frame:has(.delivery-dashboard) .navigation-link,
+.app-frame:has(.delivery-dashboard) .sidebar-note,
+.app-frame:has(.delivery-dashboard) .topbar-title {
+  color: #a8b8cd;
+}
+.app-frame:has(.delivery-dashboard) .navigation-link:hover,
+.app-frame:has(.delivery-dashboard) .navigation-link-active {
+  background: #193864;
+  color: #bfdbfe;
+}
+.delivery-dashboard .bg-slate-100 {
+  background: #23354d;
+  color: #dbeafe;
+}
+.delivery-dashboard .text-amber-900 {
+  color: #fde68a;
+}
+.delivery-dashboard .bg-amber-50,
+.delivery-dashboard .coverage-incomplete,
+.delivery-dashboard .evidence-needed {
+  background: #38291c;
+  color: #fde68a;
+  border-color: #795f36;
+}
+.delivery-dashboard .coverage-complete {
+  background: #15382e;
+  color: #a7f3d0;
+  border-color: #356650;
+}
+.delivery-dashboard .measurement-context dt {
+  color: #a8b8cd;
+}
+.delivery-dashboard .history-browser .history-controls .control {
+  background: #17263b;
+  color: #cbd5e1;
+  border-color: #42546b;
+}
+.delivery-dashboard .history-browser .history-controls .control:first-child {
+  color: #93c5fd;
+}

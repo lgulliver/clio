@@ -120,7 +120,7 @@ function mount(strict = false) {
 }
 async function select(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(await screen.findByLabelText('Workspace'), workspaceId);
-  await user.click(await screen.findByRole('button', { name: 'Mock settings for Delivery' }));
+  await user.click(await screen.findByRole('button', { name: 'Demo settings for Delivery' }));
 }
 function deferred() {
   let resolve: (response: Response) => void = () => {
@@ -166,17 +166,17 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    expect(await screen.findByText('No mock settings saved for this service.')).toBeVisible();
-    expect(screen.getByText('Mock data · No live provider connected')).toBeVisible();
+    expect(await screen.findByText('No demo settings saved for this service.')).toBeVisible();
+    expect(screen.getByText('Demo data')).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: 'Preview saved mock settings' }),
+      screen.queryByRole('button', { name: 'Preview saved demo settings' }),
     ).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Mock primary provider'), 'argocd');
-    await user.clear(screen.getByLabelText('Production environment (mock)'));
-    await user.type(screen.getByLabelText('Production environment (mock)'), ' prod-eu ');
+    await user.clear(screen.getByLabelText('Production environment'));
+    await user.type(screen.getByLabelText('Production environment'), ' prod-eu ');
     await user.click(screen.getByRole('checkbox'));
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
-    expect(await screen.findByText('Mock settings saved.')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
+    expect(await screen.findByText('Demo settings saved.')).toBeVisible();
     expect(stored).toBe(true);
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
@@ -196,7 +196,7 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     expect(
       await screen.findByRole('region', { name: 'Fictional deployment preview' }),
     ).toHaveTextContent('Coverage is incomplete');
@@ -206,26 +206,26 @@ describe('mock deployment settings', () => {
     expect(
       screen.queryByRole('region', { name: 'Fictional deployment preview' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
-    expect(await screen.findByText('Mock settings saved.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
+    expect(await screen.findByText('Demo settings saved.')).toBeVisible();
     expect(
       screen.queryByRole('region', { name: 'Fictional deployment preview' }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Preview saved mock settings' }));
-    expect(await screen.findByText('Fictional preview · Saved mock revision 2')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Preview saved demo settings' }));
+    expect(await screen.findByText('Preview · Saved settings revision 2')).toBeVisible();
   });
   it('allows member read/preview, with no editable controls or save request', async () => {
     role = 'member';
     mount();
     const user = userEvent.setup();
     await select(user);
-    expect(await screen.findByText('Only workspace owners can edit mock settings.')).toBeVisible();
+    expect(await screen.findByText('Only workspace owners can edit demo settings.')).toBeVisible();
     expect(screen.getByText('Not attested')).toBeVisible();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Save mock settings' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Preview saved mock settings' }));
+    expect(screen.queryByRole('button', { name: 'Save demo settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Preview saved demo settings' }));
     expect(
       await screen.findByRole('region', { name: 'Fictional deployment preview' }),
     ).toBeVisible();
@@ -248,18 +248,18 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    const environment = await screen.findByLabelText('Production environment (mock)');
+    const environment = await screen.findByLabelText('Production environment');
     await user.clear(environment);
     await user.type(environment, 'unsaved-production');
-    await user.click(await screen.findByRole('button', { name: 'Save mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Save demo settings' }));
     expect(
       await screen.findByText(
         'You can no longer edit these settings. Saved settings remain available.',
       ),
     ).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Save mock settings' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Preview saved mock settings' }));
+    expect(screen.queryByRole('button', { name: 'Save demo settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Preview saved demo settings' }));
     expect(
       await screen.findByRole('region', { name: 'Fictional deployment preview' }),
     ).toBeVisible();
@@ -271,7 +271,7 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Reload saved settings before previewing',
     );
@@ -290,19 +290,19 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    const environment = await screen.findByLabelText('Production environment (mock)');
+    const environment = await screen.findByLabelText('Production environment');
     await user.clear(environment);
     await user.type(environment, 'my-draft');
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Your draft is kept');
     expect(environment).toHaveValue('my-draft');
-    expect(screen.getByRole('button', { name: 'Save mock settings' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save demo settings' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Reload saved settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Clio is unavailable');
     expect(environment).toHaveValue('my-draft');
     await user.click(screen.getByRole('button', { name: 'Reload saved settings' }));
     expect(await screen.findByText('Saved settings reloaded.')).toBeVisible();
-    expect(screen.getByLabelText('Production environment (mock)')).toHaveValue('saved-prod');
+    expect(screen.getByLabelText('Production environment')).toHaveValue('saved-prod');
   });
   it('shows loading and retries failed reads without exposing response details', async () => {
     const late = deferred();
@@ -335,12 +335,12 @@ describe('mock deployment settings', () => {
     if (operation !== 'read')
       await user.click(
         await screen.findByRole('button', {
-          name: operation === 'save' ? 'Save mock settings' : 'Preview saved mock settings',
+          name: operation === 'save' ? 'Save demo settings' : 'Preview saved demo settings',
         }),
       );
     expect(await screen.findByRole('button', { name: 'Sign in with GitHub' })).toBeVisible();
     expect(
-      screen.queryByRole('region', { name: 'Mock deployment settings' }),
+      screen.queryByRole('region', { name: 'Demo deployment settings' }),
     ).not.toBeInTheDocument();
     expect(client.getQueryCache().getAll()).toHaveLength(0);
   });
@@ -359,7 +359,7 @@ describe('mock deployment settings', () => {
       if (operation !== 'read')
         await user.click(
           await screen.findByRole('button', {
-            name: operation === 'save' ? 'Save mock settings' : 'Preview saved mock settings',
+            name: operation === 'save' ? 'Save demo settings' : 'Preview saved demo settings',
           }),
         );
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -391,13 +391,11 @@ describe('mock deployment settings', () => {
       if (operation !== 'read')
         await user.click(
           await screen.findByRole('button', {
-            name: operation === 'save' ? 'Save mock settings' : 'Preview saved mock settings',
+            name: operation === 'save' ? 'Save demo settings' : 'Preview saved demo settings',
           }),
         );
-      await user.click(screen.getByRole('button', { name: 'Mock settings for Billing' }));
-      expect(await screen.findByLabelText('Production environment (mock)')).toHaveValue(
-        'billing-prod',
-      );
+      await user.click(screen.getByRole('button', { name: 'Demo settings for Billing' }));
+      expect(await screen.findByLabelText('Production environment')).toHaveValue('billing-prod');
       await act(async () => {
         late.resolve(
           operation === 'preview'
@@ -406,7 +404,7 @@ describe('mock deployment settings', () => {
         );
         await late.promise;
       });
-      expect(screen.getByLabelText('Production environment (mock)')).toHaveValue('billing-prod');
+      expect(screen.getByLabelText('Production environment')).toHaveValue('billing-prod');
       expect(
         screen.queryByRole('region', { name: 'Fictional deployment preview' }),
       ).not.toBeInTheDocument();
@@ -437,7 +435,7 @@ describe('mock deployment settings', () => {
     const { client } = mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Save mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Save demo settings' }));
     identity = 'bob';
     act(() => window.dispatchEvent(new Event('focus')));
     expect(await screen.findByText('Signed in as bob')).toBeVisible();
@@ -445,7 +443,7 @@ describe('mock deployment settings', () => {
       late.resolve(json({ mapping: { ...initial, revision: 2 } }));
       await late.promise;
     });
-    expect(screen.queryByText('Mock settings saved.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Demo settings saved.')).not.toBeInTheDocument();
     expect(
       JSON.stringify(
         client
@@ -459,11 +457,11 @@ describe('mock deployment settings', () => {
     const { client } = mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     await screen.findByRole('region', { name: 'Fictional deployment preview' });
     await user.selectOptions(screen.getByLabelText('Workspace'), otherWorkspace);
     expect(
-      screen.queryByRole('region', { name: 'Mock deployment settings' }),
+      screen.queryByRole('region', { name: 'Demo deployment settings' }),
     ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
@@ -482,14 +480,14 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The response could not be verified',
     );
     expect(
       screen.queryByRole('region', { name: 'Fictional deployment preview' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeEnabled();
   });
   it('keeps draft after a failed save and retries with unattested exposure', async () => {
     let attempts = 0;
@@ -509,23 +507,23 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    const environment = await screen.findByLabelText('Production environment (mock)');
+    const environment = await screen.findByLabelText('Production environment');
     await user.clear(environment);
     await user.type(environment, 'prod-eu');
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Clio is unavailable');
     expect(environment).toHaveValue('prod-eu');
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
-    expect(await screen.findByText('Mock settings saved.')).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
+    expect(await screen.findByText('Demo settings saved.')).toHaveFocus();
   });
   it('rejects overlong environment before request and associates validation error', async () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    const environment = await screen.findByLabelText('Production environment (mock)');
+    const environment = await screen.findByLabelText('Production environment');
     await user.clear(environment);
     await user.paste('😀'.repeat(201));
-    await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
+    await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('between 1 and 200 characters');
     expect(environment).toHaveAttribute('aria-invalid', 'true');
     expect(
@@ -535,19 +533,19 @@ describe('mock deployment settings', () => {
       ),
     ).toHaveLength(0);
   });
-  it.each(['provider', 'environment'])('clears fictional preview on %s edit', async (field) => {
+  it.each(['provider', 'environment'])('clears preview on %s edit', async (field) => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     await screen.findByRole('region', { name: 'Fictional deployment preview' });
     if (field === 'provider')
       await user.selectOptions(screen.getByLabelText('Mock primary provider'), 'argocd');
-    else await user.type(screen.getByLabelText('Production environment (mock)'), '-eu');
+    else await user.type(screen.getByLabelText('Production environment'), '-eu');
     expect(
       screen.queryByRole('region', { name: 'Fictional deployment preview' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeDisabled();
   });
   it('clears existing preview immediately when saving starts and prevents duplicate saves', async () => {
     const late = deferred();
@@ -560,15 +558,15 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     await screen.findByRole('region', { name: 'Fictional deployment preview' });
-    const button = screen.getByRole('button', { name: 'Save mock settings' });
+    const button = screen.getByRole('button', { name: 'Save demo settings' });
     await user.click(button);
     await user.click(button);
     expect(
       screen.queryByRole('region', { name: 'Fictional deployment preview' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Saving mock settings…')).toBeVisible();
+    expect(screen.getByText('Saving demo settings…')).toBeVisible();
     expect(
       fetchMock.mock.calls.filter(
         ([url, options]) =>
@@ -579,7 +577,7 @@ describe('mock deployment settings', () => {
       late.resolve(json({ mapping: { ...initial, revision: 2 } }));
       await late.promise;
     });
-    expect(await screen.findByText('Mock settings saved.')).toBeVisible();
+    expect(await screen.findByText('Demo settings saved.')).toBeVisible();
   });
   it('handles preview revision conflict with explicit reload', async () => {
     mappingHandler = (path) =>
@@ -587,11 +585,11 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Saved settings changed');
     await user.click(screen.getByRole('button', { name: 'Reload saved settings' }));
     expect(await screen.findByText('Saved settings reloaded.')).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Preview saved mock settings' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Preview saved demo settings' })).toBeEnabled();
   });
   it('shows member unconfigured state without mutation or preview controls', async () => {
     role = 'member';
@@ -599,17 +597,17 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    expect(await screen.findByText('No mock settings saved for this service.')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Save mock settings' })).not.toBeInTheDocument();
+    expect(await screen.findByText('No demo settings saved for this service.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Save demo settings' })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Preview saved mock settings' }),
+      screen.queryByRole('button', { name: 'Preview saved demo settings' }),
     ).not.toBeInTheDocument();
   });
   it('supports StrictMode query/effect replay and clears mapping cache on unmount', async () => {
     const { client, unmount } = mount(true);
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
     expect(
       await screen.findByRole('region', { name: 'Fictional deployment preview' }),
     ).toBeVisible();
@@ -627,8 +625,8 @@ describe('mock deployment settings', () => {
     mount();
     const user = userEvent.setup();
     await select(user);
-    await user.click(await screen.findByRole('button', { name: 'Preview saved mock settings' }));
-    await user.click(screen.getByRole('button', { name: 'Mock settings for Billing' }));
+    await user.click(await screen.findByRole('button', { name: 'Preview saved demo settings' }));
+    await user.click(screen.getByRole('button', { name: 'Demo settings for Billing' }));
     await screen.findByLabelText('Mock primary provider');
     await act(async () => {
       late.resolve(json({}, 401));
@@ -636,7 +634,7 @@ describe('mock deployment settings', () => {
     });
     expect(screen.getByText('Signed in as alice')).toBeVisible();
     expect(
-      screen.getByRole('heading', { name: 'Mock deployment settings for Billing' }),
+      screen.getByRole('heading', { name: 'Demo deployment settings for Billing' }),
     ).toBeVisible();
   });
 });
@@ -674,8 +672,8 @@ describe('mock setup presentation', () => {
         hasSavedResult: false,
       }),
     );
-    const field = screen.getByLabelText('Production environment (mock)');
-    const queue = screen.getByRole('button', { name: 'Queue mock collection', hidden: true });
+    const field = screen.getByLabelText('Production environment');
+    const queue = screen.getByRole('button', { name: 'Queue demo collection', hidden: true });
     expect(queue).not.toBeVisible();
     fireEvent.change(field, { target: { value: 'other' } });
     await waitFor(() => expect(onStatus.mock.lastCall?.[0].ready).toBe(false));
@@ -683,7 +681,7 @@ describe('mock setup presentation', () => {
     expect(field).not.toBeVisible();
     expect(queue).toBeVisible();
     view.rerender(content('configure'));
-    expect(screen.getByLabelText('Production environment (mock)')).toBe(field);
+    expect(screen.getByLabelText('Production environment')).toBe(field);
     expect(field).toHaveValue('other');
     fireEvent.change(field, { target: { value: 'production' } });
     await waitFor(() =>
@@ -696,7 +694,7 @@ describe('mock setup presentation', () => {
     view.unmount();
     expect(onStatus).toHaveBeenLastCalledWith({ ready: false, busy: false, hasSavedResult: false });
   });
-  it('cannot advance until mock settings are saved and propagates denied configuration reads', async () => {
+  it('cannot advance until demo settings are saved and propagates denied configuration reads', async () => {
     mappingHandler = () => json({ mapping: null });
     const client = createQueryClient(),
       onStatus = vi.fn(),
@@ -708,7 +706,7 @@ describe('mock setup presentation', () => {
         </SessionProvider>
       </QueryClientProvider>,
     );
-    await screen.findByText('No mock settings saved for this service.');
+    await screen.findByText('No demo settings saved for this service.');
     await waitFor(() =>
       expect(onStatus).toHaveBeenLastCalledWith({
         ready: false,
@@ -754,16 +752,13 @@ it('selects complete fictional scenario, fixes its profile and previews all five
   mount();
   const user = userEvent.setup();
   await select(user);
-  await user.selectOptions(
-    await screen.findByLabelText('Fictional scenario'),
-    'complete-lifecycle',
-  );
-  expect(screen.getByLabelText('Production environment (mock)')).toBeDisabled();
+  await user.selectOptions(await screen.findByLabelText('Demo scenario'), 'complete-lifecycle');
+  expect(screen.getByLabelText('Production environment')).toBeDisabled();
   expect(screen.getByRole('checkbox')).toBeChecked();
   expect(screen.getByRole('checkbox')).toBeDisabled();
-  await user.click(screen.getByRole('button', { name: 'Save mock settings' }));
-  await screen.findByText('Mock settings saved.');
-  await user.click(screen.getByRole('button', { name: 'Preview saved mock settings' }));
+  await user.click(screen.getByRole('button', { name: 'Save demo settings' }));
+  await screen.findByText('Demo settings saved.');
+  await user.click(screen.getByRole('button', { name: 'Preview saved demo settings' }));
   for (const name of [
     'Deployment frequency',
     'Change lead time',
@@ -771,10 +766,6 @@ it('selects complete fictional scenario, fixes its profile and previews all five
     'Deployment rework rate',
     'Failed deployment recovery time',
   ])
-    expect(
-      await screen.findByRole('region', { name: `Fictional lifecycle: ${name}` }),
-    ).toBeVisible();
-  expect(
-    screen.getByText(/Complete within fictional fixture\. No live source coverage/),
-  ).toBeVisible();
+    expect(await screen.findByRole('region', { name: `Demo: ${name}` })).toBeVisible();
+  expect(screen.getByText(/Complete demo scenario/)).toBeVisible();
 });

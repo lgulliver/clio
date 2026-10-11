@@ -49,7 +49,7 @@ export function WorkspacePage({ authError }: { authError: boolean }) {
       <div className="panel">
         <h2 className="text-xl font-semibold">Connections</h2>
         <p className="mt-3 text-slate-600">
-          Select a workspace and service to manage live GitHub or Argo connections, or separate mock
+          Select a workspace and service to manage live GitHub or Argo connections, or demo
           deployment settings.
         </p>
       </div>
@@ -438,7 +438,7 @@ function WorkspaceScope({
                         <button
                           type="button"
                           className="control ml-2"
-                          aria-label={`Mock settings for ${item.name}`}
+                          aria-label={`Demo settings for ${item.name}`}
                           aria-pressed={selectedService === item.id && sourceMode === 'mock'}
                           onClick={() => {
                             serviceSelection.current = `mock:${item.id}`;
@@ -446,7 +446,7 @@ function WorkspaceScope({
                             setSelectedService(item.id);
                           }}
                         >
-                          Mock settings
+                          Demo settings
                         </button>
                         <button
                           type="button"

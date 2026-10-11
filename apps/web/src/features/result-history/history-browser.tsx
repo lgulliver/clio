@@ -64,7 +64,7 @@ export function HistoryBrowser<
     options: { cursor?: string; succeeded?: boolean },
   ) => { runs: R[]; nextCursor: string | null };
   onAccessLost: () => void;
-  renderResult: (newest: R | undefined, selected: R | undefined) => ReactNode;
+  renderResult: (newest: R | undefined, selected: R | undefined, page: R[]) => ReactNode;
 }) {
   const [cursor, setCursor] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState('');
@@ -157,7 +157,7 @@ export function HistoryBrowser<
           {cursor !== undefined && page.data.runs.length === 0 && (
             <p>No saved results on this older page.</p>
           )}
-          {renderResult(recent.data.runs[0], selected)}
+          {renderResult(recent.data.runs[0], selected, page.data.runs)}
         </>
       )}
     </section>

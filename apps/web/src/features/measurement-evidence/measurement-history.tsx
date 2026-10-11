@@ -1,4 +1,5 @@
 import { MetricResults } from '../measurements/metric-results';
+import { comparableSamples, MetricTrends } from '../measurements/metric-trends';
 import { HistoryBrowser } from '../result-history/history-browser';
 import {
   blockerLabels,
@@ -105,7 +106,7 @@ export function MeasurementHistory({
       path={`/api/workspaces/${workspaceId}/services/${serviceId}/measurement-runs`}
       parse={(value, options) => parseHistoryPage(value, { workspaceId, serviceId }, options)}
       onAccessLost={onAccessLost}
-      renderResult={(newest, selected) => (
+      renderResult={(newest, selected, page) => (
         <>
           {newest ? (
             <p className="mt-3">
@@ -124,6 +125,31 @@ export function MeasurementHistory({
                 <p>This saved measurement does not describe the newest request.</p>
               )}
               <MeasurementDetails result={selected.result} />
+              <MetricTrends
+                sourceLabel="Independent measurements"
+                samples={comparableSamples(
+                  page.flatMap((run) =>
+                    run.result
+                      ? [
+                          {
+                            id: run.id,
+                            result: run.result.metricResult,
+                            source: run.provider,
+                            revision: run.result.connectionRevision,
+                            oemsRevision: run.result.oemsRevision,
+                          },
+                        ]
+                      : [],
+                  ),
+                  {
+                    id: selected.id,
+                    result: selected.result.metricResult,
+                    source: selected.provider,
+                    revision: selected.result.connectionRevision,
+                    oemsRevision: selected.result.oemsRevision,
+                  },
+                )}
+              />
             </>
           ) : (
             <p>No successful saved measurement found.</p>

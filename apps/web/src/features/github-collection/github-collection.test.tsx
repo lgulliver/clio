@@ -510,9 +510,9 @@ describe('live GitHub workflow', () => {
     await user.selectOptions(await screen.findByLabelText('Workspace'), scope.workspaceId);
     await user.click(await screen.findByRole('button', { name: 'Live GitHub for Delivery' }));
     expect(await screen.findByRole('heading', { name: 'Live GitHub · Delivery' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Save mock settings' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Mock settings for Delivery' }));
-    expect(await screen.findByRole('button', { name: 'Save mock settings' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Save demo settings' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Demo settings for Delivery' }));
+    expect(await screen.findByRole('button', { name: 'Save demo settings' })).toBeVisible();
     expect(
       screen.queryByRole('heading', { name: 'Live GitHub · Delivery' }),
     ).not.toBeInTheDocument();

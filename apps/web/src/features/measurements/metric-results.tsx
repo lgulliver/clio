@@ -1,6 +1,18 @@
 import type { MetricResult } from '@clio/oems';
-import type { ReactNode } from 'react';
+import { createContext, type ReactNode, useContext } from 'react';
 
+import { MetricSparkline, type TrendSample } from './metric-trends';
+
+const CompactMetrics = createContext<{ compact: boolean; history: TrendSample[] }>({
+  compact: false,
+  history: [],
+});
+
+function durationText(seconds: number): string {
+  if (seconds >= 3600) return `${numberText(seconds / 3600, 1)} h`;
+  if (seconds >= 60) return `${numberText(seconds / 60, 1)} min`;
+  return `${numberText(seconds, 1)} s`;
+}
 function numberText(number: number, maximumFractionDigits = 6): string {
   return number.toLocaleString('en-GB', { maximumFractionDigits });
 }
@@ -39,12 +51,13 @@ function MetricCard({
   children: ReactNode;
   evidence: ReactNode;
 }) {
+  const { compact, history } = useContext(CompactMetrics);
   const Heading = headingLevel === 6 ? 'h6' : headingLevel === 5 ? 'h5' : 'h4';
   const provisional = metric.status === 'provisional';
   return (
     <section
       aria-label={sourceLabel ? `${sourceLabel}: ${name}` : name}
-      className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
+      className="metric-card flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
     >
       <Heading className="text-base font-semibold text-slate-900">{name}</Heading>
       <p
@@ -67,14 +80,19 @@ function MetricCard({
           <span className="text-sm text-slate-600">{unit}</span>
         )}
       </p>
-      <div className="mt-4 space-y-1 text-sm leading-6 text-slate-700">{children}</div>
-      <p className="mt-4 text-xs leading-5 text-slate-600">
-        Quality:{' '}
-        {metric.quality_reasons.length
-          ? metric.quality_reasons.map((reason) => reason.replaceAll('_', ' ')).join(', ')
-          : 'No recorded quality issues'}
-        .
-      </p>
+      {compact && <MetricSparkline name={name} samples={history} />}
+      {!compact && (
+        <>
+          <div className="mt-4 space-y-1 text-sm leading-6 text-slate-700">{children}</div>
+          <p className="mt-4 text-xs leading-5 text-slate-600">
+            Quality:{' '}
+            {metric.quality_reasons.length
+              ? metric.quality_reasons.map((reason) => reason.replaceAll('_', ' ')).join(', ')
+              : 'No recorded quality issues'}
+            .
+          </p>
+        </>
+      )}
       {provisional && (
         <p className="mt-2 text-xs leading-5 text-amber-900">
           Observed evidence only; incomplete quality keeps this metric provisional.
@@ -84,7 +102,21 @@ function MetricCard({
         <summary className="cursor-pointer rounded-sm font-medium text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
           Evidence details
         </summary>
-        <div className="mt-3 space-y-2 leading-6">{evidence}</div>
+        <div className="mt-3 space-y-2 leading-6">
+          {compact && (
+            <>
+              {children}
+              <p className="mt-4 text-xs leading-5 text-slate-600">
+                Quality:{' '}
+                {metric.quality_reasons.length
+                  ? metric.quality_reasons.map((reason) => reason.replaceAll('_', ' ')).join(', ')
+                  : 'No recorded quality issues'}
+                .
+              </p>
+            </>
+          )}
+          {evidence}
+        </div>
       </details>
     </section>
   );
@@ -138,10 +170,14 @@ function Ratio({
 }
 export function MetricResults({
   result,
+  compact = false,
+  history = [],
   sourceLabel,
   headingLevel = 4,
 }: {
   result: MetricResult | undefined;
+  compact?: boolean;
+  history?: TrendSample[];
   sourceLabel?: string | undefined;
   headingLevel?: 4 | 5 | 6;
 }) {
@@ -157,111 +193,123 @@ export function MetricResults({
     lead = result.change_lead_time,
     recovery = result.failed_deployment_recovery_time;
   return (
-    <section
-      className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 lg:grid-cols-3"
-      aria-label={label('Engineering metrics')}
-    >
-      <MetricCard
-        name="Deployment frequency"
-        sourceLabel={sourceLabel}
-        headingLevel={headingLevel}
-        metric={frequency}
-        primary={
-          frequency.deployments_per_day === null
-            ? 'Unavailable'
-            : numberText(frequency.deployments_per_day)
-        }
-        unit="deployments per day"
-        primaryLabel="Deployment rate"
-        evidence={
+    <CompactMetrics value={{ compact, history }}>
+      <section
+        className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 lg:grid-cols-5"
+        aria-label={label('Engineering metrics')}
+      >
+        <MetricCard
+          name="Deployment frequency"
+          sourceLabel={sourceLabel}
+          headingLevel={headingLevel}
+          metric={frequency}
+          primary={
+            frequency.deployments_per_day === null
+              ? 'Unavailable'
+              : numberText(frequency.deployments_per_day)
+          }
+          unit="deployments per day"
+          primaryLabel="Deployment rate"
+          evidence={
+            <p>
+              Observed deployment count: {frequency.count}. Rate:{' '}
+              {value(frequency.deployments_per_day, 'deployments per day')}. Unknown qualification
+              in window: {result.qualification_unknown_count}.
+            </p>
+          }
+        >
+          <p>Observed deployment count: {frequency.count}.</p>
+          <p>Unknown qualification in window: {result.qualification_unknown_count}.</p>
+        </MetricCard>
+        <MetricCard
+          name="Change lead time"
+          sourceLabel={sourceLabel}
+          headingLevel={headingLevel}
+          metric={lead}
+          primary={
+            lead.median_seconds === null
+              ? 'Unavailable'
+              : compact
+                ? durationText(lead.median_seconds)
+                : numberText(lead.median_seconds)
+          }
+          unit={compact ? '' : 'seconds'}
+          primaryLabel="Confirmed median"
+          evidence={
+            <>
+              <p>
+                Confirmed median: {value(lead.median_seconds, 'seconds')}. Confirmed observations:{' '}
+                {lead.observation_count}. Observed candidates: {lead.candidate_count}.
+              </p>
+              <p>
+                Unresolved changes: {lead.unresolved_change_count}. Unknown linkage:{' '}
+                {lead.linkage_unknown_count}.
+              </p>
+            </>
+          }
+        >
           <p>
-            Observed deployment count: {frequency.count}. Rate:{' '}
-            {value(frequency.deployments_per_day, 'deployments per day')}. Unknown qualification in
-            window: {result.qualification_unknown_count}.
+            Confirmed observations: {lead.observation_count}; observed candidates:{' '}
+            {lead.candidate_count}.
           </p>
-        }
-      >
-        <p>Observed deployment count: {frequency.count}.</p>
-        <p>Unknown qualification in window: {result.qualification_unknown_count}.</p>
-      </MetricCard>
-      <MetricCard
-        name="Change lead time"
-        sourceLabel={sourceLabel}
-        headingLevel={headingLevel}
-        metric={lead}
-        primary={lead.median_seconds === null ? 'Unavailable' : numberText(lead.median_seconds)}
-        unit="seconds"
-        primaryLabel="Confirmed median"
-        evidence={
-          <>
-            <p>
-              Confirmed median: {value(lead.median_seconds, 'seconds')}. Confirmed observations:{' '}
-              {lead.observation_count}. Observed candidates: {lead.candidate_count}.
-            </p>
-            <p>
-              Unresolved changes: {lead.unresolved_change_count}. Unknown linkage:{' '}
-              {lead.linkage_unknown_count}.
-            </p>
-          </>
-        }
-      >
-        <p>
-          Confirmed observations: {lead.observation_count}; observed candidates:{' '}
-          {lead.candidate_count}.
-        </p>
-        <p>
-          Unresolved changes: {lead.unresolved_change_count}; unknown linkage:{' '}
-          {lead.linkage_unknown_count}.
-        </p>
-      </MetricCard>
-      <Ratio
-        label="Change failure rate"
-        sourceLabel={sourceLabel}
-        headingLevel={headingLevel}
-        metric={result.change_fail_rate}
-      />
-      <Ratio
-        label="Deployment rework rate"
-        sourceLabel={sourceLabel}
-        headingLevel={headingLevel}
-        metric={result.deployment_rework_rate}
-      />
-      <MetricCard
-        name="Failed deployment recovery time"
-        sourceLabel={sourceLabel}
-        headingLevel={headingLevel}
-        metric={recovery}
-        primary={
-          recovery.median_seconds === null ? 'Unavailable' : numberText(recovery.median_seconds)
-        }
-        unit="seconds"
-        primaryLabel="Observed exact recovery median"
-        evidence={
-          <>
-            <p>
-              Observed exact recovery median: {value(recovery.median_seconds, 'seconds')}. Exact
-              completed observations: {recovery.observation_count}.
-            </p>
-            <p>
-              Observed approximate recovery median:{' '}
-              {value(recovery.approximate_median_seconds, 'seconds')}. Approximate episodes:{' '}
-              {recovery.approximate_count}. Open episodes: {recovery.open_count}. Unresolved
-              episodes: {recovery.unresolved_count}. Unknown failure classification:{' '}
-              {recovery.unknown_failure_count}.
-            </p>
-          </>
-        }
-      >
-        <p>Exact completed observations: {recovery.observation_count}.</p>
-        <p>
-          Approximate episodes: {recovery.approximate_count}; median:{' '}
-          {value(recovery.approximate_median_seconds, 'seconds')}.
-        </p>
-        <p>
-          Open episodes: {recovery.open_count}; unresolved episodes: {recovery.unresolved_count}.
-        </p>
-        <p>Unknown failure classification: {recovery.unknown_failure_count}.</p>
-      </MetricCard>
-    </section>
+          <p>
+            Unresolved changes: {lead.unresolved_change_count}; unknown linkage:{' '}
+            {lead.linkage_unknown_count}.
+          </p>
+        </MetricCard>
+        <Ratio
+          label="Change failure rate"
+          sourceLabel={sourceLabel}
+          headingLevel={headingLevel}
+          metric={result.change_fail_rate}
+        />
+        <Ratio
+          label="Deployment rework rate"
+          sourceLabel={sourceLabel}
+          headingLevel={headingLevel}
+          metric={result.deployment_rework_rate}
+        />
+        <MetricCard
+          name="Failed deployment recovery time"
+          sourceLabel={sourceLabel}
+          headingLevel={headingLevel}
+          metric={recovery}
+          primary={
+            recovery.median_seconds === null
+              ? 'Unavailable'
+              : compact
+                ? durationText(recovery.median_seconds)
+                : numberText(recovery.median_seconds)
+          }
+          unit={compact ? '' : 'seconds'}
+          primaryLabel="Observed exact recovery median"
+          evidence={
+            <>
+              <p>
+                Observed exact recovery median: {value(recovery.median_seconds, 'seconds')}. Exact
+                completed observations: {recovery.observation_count}.
+              </p>
+              <p>
+                Observed approximate recovery median:{' '}
+                {value(recovery.approximate_median_seconds, 'seconds')}. Approximate episodes:{' '}
+                {recovery.approximate_count}. Open episodes: {recovery.open_count}. Unresolved
+                episodes: {recovery.unresolved_count}. Unknown failure classification:{' '}
+                {recovery.unknown_failure_count}.
+              </p>
+            </>
+          }
+        >
+          <p>Exact completed observations: {recovery.observation_count}.</p>
+          <p>
+            Approximate episodes: {recovery.approximate_count}; median:{' '}
+            {value(recovery.approximate_median_seconds, 'seconds')}.
+          </p>
+          <p>
+            Open episodes: {recovery.open_count}; unresolved episodes: {recovery.unresolved_count}.
+          </p>
+          <p>Unknown failure classification: {recovery.unknown_failure_count}.</p>
+        </MetricCard>
+      </section>
+    </CompactMetrics>
   );
 }

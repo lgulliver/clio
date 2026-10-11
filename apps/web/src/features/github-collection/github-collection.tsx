@@ -289,7 +289,7 @@ function LiveScope({ workspace, serviceId, serviceName, userId, validSelection, 
     >
       <h3 className="text-xl font-semibold">Live GitHub · {serviceName}</h3>
       <p className="mt-2">
-        Collect real GitHub deployment evidence. Mock settings and attestations remain separate.
+        Collect real GitHub deployment evidence. Demo settings and attestations remain separate.
         Saved results are available separately in Overview with incomplete coverage.
       </p>
       {unavailable ? (
