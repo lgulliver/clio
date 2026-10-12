@@ -11,6 +11,7 @@ import {
 import { runFixture } from '../measurement-evidence/fixtures.test-support';
 import { withMetric } from '../measurements/fixtures.test-support';
 import { parseOrganization } from './api';
+import { windowKey } from './comparison-data';
 import { OrganizationBrowser } from './organization-browser';
 import { OrganizationSettings } from './organization-settings';
 
@@ -61,17 +62,22 @@ function read(input: string | URL | Request) {
     : json({ runs: [], nextCursor: null });
 }
 function mountBrowser() {
-  return render(
-    <QueryClientProvider client={createQueryClient()}>
+  const client = createQueryClient();
+  const content = () => (
+    <QueryClientProvider client={client}>
       <OrganizationBrowser
+        key={session.revision}
         workspaceId={scope.workspaceId}
         renderService={(service) => (
           <section aria-label="Selected service evidence">Evidence for {service.name}</section>
         )}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(content());
+  return { ...view, client, refreshSession: () => view.rerender(content()) };
 }
+
 async function openSettings(role: 'owner' | 'member' = 'owner', onAccessLost = vi.fn()) {
   const view = render(
     <QueryClientProvider client={createQueryClient()}>
@@ -368,4 +374,237 @@ describe('organization owner setup', () => {
       fetchMock.mock.calls.filter(([path]) => String(path).endsWith('/organization')),
     ).toHaveLength(1);
   });
+});
+
+function savedPeriod(id: number, serviceId: string, month: string, leadHours: number) {
+  const run = runFixture();
+  if (!run.result) throw new Error('Missing measurement fixture');
+  const window = { start: `2025-${month}-01T00:00:00Z`, end: `2025-${month}-03T00:00:00Z` };
+  return {
+    ...run,
+    id: `77777777-7777-4777-8777-${String(id).padStart(12, '0')}`,
+    serviceId,
+    result: {
+      ...run.result,
+      serviceId,
+      window: { ...run.result.window, ...window },
+      metricResult: {
+        ...run.result.metricResult,
+        service_id: serviceId,
+        window: { ...run.result.metricResult.window, ...window },
+        change_lead_time: {
+          ...run.result.metricResult.change_lead_time,
+          median_seconds: leadHours * 3600,
+        },
+      },
+    },
+  };
+}
+function installPeriods() {
+  fetchMock.mockImplementation(async (input) => {
+    const path = String(input);
+    if (path.includes('/measurement-runs') && path.includes(scope.serviceId))
+      return json({
+        runs: [
+          savedPeriod(30, scope.serviceId, '12', 12),
+          savedPeriod(20, scope.serviceId, '11', 2),
+          savedPeriod(10, scope.serviceId, '10', 1),
+        ],
+        nextCursor: null,
+      });
+    if (path.includes('/measurement-runs') && path.includes(otherService))
+      return json({
+        runs: [savedPeriod(20, otherService, '11', 7), savedPeriod(10, otherService, '10', 3)],
+        nextCursor: null,
+      });
+    return read(input);
+  });
+}
+const october = windowKey({ start: '2025-10-01T00:00:00Z', end: '2025-10-03T00:00:00Z' });
+
+describe('group reporting-window controls', () => {
+  it('aligns exact older periods without extra requests and keeps absent matches explicit', async () => {
+    installPeriods();
+    mountBrowser();
+    await screen.findByRole('option', { name: '2025-10-01 to 2025-10-03 (UTC, end exclusive)' });
+    const reads = fetchMock.mock.calls.length;
+    const filter = screen.getByLabelText('Reporting window');
+    filter.focus();
+    fireEvent.change(filter, { target: { value: october } });
+    expect(filter).toHaveFocus();
+    const table = screen.getByRole('table');
+    const payments = within(table).getByRole('button', { name: 'Payments API' }).closest('tr');
+    const customers = within(table).getByRole('button', { name: 'Customer API' }).closest('tr');
+    expect(payments).toHaveTextContent('2025-10-01 to 2025-10-03');
+    expect(payments).toHaveTextContent('1 h');
+    expect(payments).not.toHaveTextContent('12 h');
+    expect(customers).toHaveTextContent('2025-10-01 to 2025-10-03');
+    expect(customers).toHaveTextContent('3 h');
+    expect(
+      within(table).getByText('No saved result for selected reporting window in loaded history.'),
+    ).toBeVisible();
+    expect(fetchMock.mock.calls.length).toBe(reads);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh comparisons' }));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(reads + 3));
+    expect(screen.getByLabelText('Reporting window')).toHaveValue(october);
+  });
+  it('retains period through team/product/service navigation, then resets it when source changes', async () => {
+    installPeriods();
+    mountBrowser();
+    await screen.findByRole('option', { name: '2025-10-01 to 2025-10-03 (UTC, end exclusive)' });
+    fireEvent.change(screen.getByLabelText('Reporting window'), { target: { value: october } });
+    fireEvent.click(screen.getByRole('button', { name: 'Commerce 1 products' }));
+    expect(screen.getByLabelText('Reporting window')).toHaveValue(october);
+    fireEvent.click(screen.getByRole('button', { name: 'Payments 1 services' }));
+    expect(screen.getByLabelText('Reporting window')).toHaveValue(october);
+    fireEvent.click(screen.getByRole('button', { name: 'Payments API' }));
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Engineering drill-down' })).getByRole(
+        'button',
+        { name: 'Engineering' },
+      ),
+    );
+    expect(screen.getByLabelText('Reporting window')).toHaveValue(october);
+    fireEvent.change(screen.getByLabelText('Result source'), { target: { value: 'argo' } });
+    expect(screen.getByLabelText('Reporting window')).toHaveValue('latest');
+    await waitFor(() =>
+      expect(screen.getAllByText('No successful saved result for this source.')).toHaveLength(3),
+    );
+  });
+  it('aborts abandoned history and excludes late values after switching source', async () => {
+    let resolve: (value: Response) => void = () => {
+      throw new Error('Missing resolver');
+    };
+    const pending = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes('/measurement-runs') && String(input).includes(scope.serviceId)
+        ? pending
+        : read(input),
+    );
+    mountBrowser();
+    await screen.findByLabelText('Result source');
+    const abandoned = fetchMock.mock.calls.find(
+      ([path]) =>
+        String(path).includes(scope.serviceId) && String(path).includes('/measurement-runs'),
+    );
+    fireEvent.change(screen.getByLabelText('Result source'), { target: { value: 'argo' } });
+    await waitFor(() => expect(abandoned?.[1]?.signal?.aborted).toBe(true));
+    await act(async () =>
+      resolve(json({ runs: [savedPeriod(10, scope.serviceId, '10', 99)], nextCursor: null })),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText('No successful saved result for this source.')).toHaveLength(3),
+    );
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: '2025-10-01 to 2025-10-03 (UTC, end exclusive)' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+it('retains exact reporting-window selection on a service page without matching history', async () => {
+  const many = Array.from({ length: 11 }, (_, i) => ({
+    id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    workspaceId: scope.workspaceId,
+    name: `Service ${i}`,
+  }));
+  const first = many[0];
+  if (!first) throw new Error('Missing first service');
+  fetchMock.mockImplementation(async (input) => {
+    const path = String(input);
+    if (path.endsWith('/organization'))
+      return json({
+        workspaceId: scope.workspaceId,
+        teams: [],
+        products: [],
+        services: many,
+        assignments: many.map((service) => ({ serviceId: service.id, productId: null })),
+      });
+    return path.includes(first.id)
+      ? json({ runs: [savedPeriod(10, first.id, '10', 1)], nextCursor: null })
+      : json({ runs: [], nextCursor: null });
+  });
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <OrganizationBrowser workspaceId={scope.workspaceId} renderService={() => null} />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole('option', { name: '2025-10-01 to 2025-10-03 (UTC, end exclusive)' });
+  fireEvent.change(screen.getByLabelText('Reporting window'), { target: { value: october } });
+  fireEvent.click(screen.getByRole('button', { name: 'Next services' }));
+  expect(screen.getByLabelText('Reporting window')).toHaveValue(october);
+  await screen.findByText('No saved result for selected reporting window in loaded history.');
+  expect(screen.getByRole('option', { name: /not in loaded history/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Service 10' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Service 0' })).not.toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.filter(([path]) => String(path).includes('/measurement-runs')),
+  ).toHaveLength(11);
+});
+
+it.each(['scope', 'session'] as const)(
+  'drops late history after %s changes and fetches a fresh result on return',
+  async (change) => {
+    let resolve: (value: Response) => void = () => {
+      throw new Error('Missing resolver');
+    };
+    const pending = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    let reads = 0;
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes('/measurement-runs') && path.includes(scope.serviceId))
+        return ++reads === 1
+          ? pending
+          : json({ runs: [savedPeriod(10, scope.serviceId, '10', 1)], nextCursor: null });
+      return read(input);
+    });
+    const view = mountBrowser();
+    await screen.findByLabelText('Result source');
+    const abandoned = fetchMock.mock.calls.find(
+      ([path]) =>
+        String(path).includes(scope.serviceId) && String(path).includes('/measurement-runs'),
+    );
+    if (change === 'scope') {
+      fireEvent.click(screen.getByRole('button', { name: 'Experience 1 products' }));
+      await screen.findByRole('heading', { name: 'Experience' });
+      fireEvent.click(
+        within(screen.getByRole('navigation', { name: 'Engineering drill-down' })).getByRole(
+          'button',
+          { name: 'Engineering' },
+        ),
+      );
+    } else {
+      session.revision += 1;
+      view.refreshSession();
+    }
+    await screen.findByText('1 h');
+    expect(abandoned?.[1]?.signal?.aborted).toBe(true);
+    await act(async () =>
+      resolve(json({ runs: [savedPeriod(10, scope.serviceId, '10', 99)], nextCursor: null })),
+    );
+    expect(screen.queryByText('99 h')).not.toBeInTheDocument();
+    expect(screen.getByText('1 h')).toBeVisible();
+    if (change === 'session')
+      expect(
+        view.client
+          .getQueryCache()
+          .getAll()
+          .some((query) => query.queryKey[0] === 'identity' && query.queryKey[2] === 1),
+      ).toBe(false);
+  },
+);
+
+it('expires identity and hides group charts after a dynamic history read returns401', async () => {
+  fetchMock.mockImplementation(async (input) =>
+    String(input).includes('/measurement-runs') ? json({}, 401) : read(input),
+  );
+  mountBrowser();
+  expect(await screen.findByRole('alert')).toHaveTextContent('no longer accessible');
+  expect(session.expire).toHaveBeenCalledWith(1);
+  expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
 });

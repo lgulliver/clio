@@ -1,75 +1,20 @@
 import type { MetricResult } from '@clio/oems';
-import { useLayoutEffect, useState } from 'react';
-import { parseHistoryPage as parseArgoPage } from '../argo-collection/api';
-import { parseHistoryPage as parseGitHubPage } from '../github-collection/api';
-import { ApiError, errorMessage, type Service } from '../identity/api';
-import { parseHistoryPage as parseMeasurementPage } from '../measurement-evidence/api';
-import { comparableSamples, type TrendCapture } from '../measurements/metric-trends';
-import { parseHistoryPage as parseMockPage } from '../mock-collection/api';
-import { useStoredRead } from '../result-history/history-browser';
+import type { UseQueryResult } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { errorMessage, type Service } from '../identity/api';
+import {
+  type ComparisonSource,
+  comparisonSeries,
+  reportingWindows,
+  type SavedCapture,
+  selectedCapture,
+  sourceLabel,
+  windowLabel,
+} from './comparison-data';
+import { useComparisonHistories } from './comparison-history';
+import { GroupTrends, type ServiceSeries } from './group-trends';
 
-export type ComparisonSource = 'measurement' | 'github' | 'argo' | 'mock';
-type Saved = TrendCapture & {
-  completedAt: string | null;
-  evidenceCutoff: string;
-  coverage: {
-    collectionComplete: boolean;
-    deploymentHistoryComplete: boolean;
-    recoveryEvidenceComplete: boolean;
-  };
-};
-export function parseComparison(
-  value: unknown,
-  scope: { workspaceId: string; serviceId: string },
-  source: ComparisonSource,
-) {
-  const options = { succeeded: true };
-  if (source === 'measurement') {
-    const page = parseMeasurementPage(value, scope, options);
-    return page.runs.flatMap((run): Saved[] =>
-      run.result
-        ? [
-            {
-              id: run.id,
-              result: run.result.metricResult,
-              source: run.provider,
-              revision: run.result.connectionRevision,
-              oemsRevision: run.result.oemsRevision,
-              completedAt: run.completedAt,
-              evidenceCutoff: run.result.evidenceCutoff,
-              coverage: run.result.coverage,
-            },
-          ]
-        : [],
-    );
-  }
-  const page =
-    source === 'github'
-      ? parseGitHubPage(value, scope, options)
-      : source === 'argo'
-        ? parseArgoPage(value, scope, options)
-        : parseMockPage(value, scope, options);
-  return page.runs
-    .map((run) => {
-      const result = run.result;
-      if (!result) throw new ApiError(0);
-      return {
-        capture: result.metricResult
-          ? {
-              id: run.id,
-              result: result.metricResult,
-              source: run.mode === 'mock' ? `demo:${run.primaryProvider}` : source,
-              revision: run.mode === 'mock' ? run.mappingRevision : run.connectionRevision,
-              oemsRevision: result.oemsRevision,
-              completedAt: run.completedAt,
-              evidenceCutoff: result.evidenceCutoff,
-              coverage: result.coverage,
-            }
-          : null,
-      };
-    })
-    .map((row) => row.capture);
-}
+export type { ComparisonSource } from './comparison-data';
 
 function text(value: number | null, unit = '') {
   return value === null
@@ -126,32 +71,19 @@ function metrics(result: MetricResult) {
 
 function ServiceRow({
   service,
-  source,
   ownership,
   select,
-  onAccessLost,
+  query,
+  period,
 }: {
-  onAccessLost: () => void;
   service: Service;
-  source: ComparisonSource;
   ownership: string;
   select: () => void;
+  query: UseQueryResult<SavedCapture[], Error>;
+  period: string;
 }) {
-  const scope = { workspaceId: service.workspaceId, serviceId: service.id };
-  const path = `/api/workspaces/${service.workspaceId}/services/${service.id}/${source === 'measurement' ? 'measurement' : `${source}-collection`}-runs?status=succeeded`;
-  const query = useStoredRead(path, path, (value) => parseComparison(value, scope, source));
-  const denied = query.error instanceof ApiError && [401, 403, 404].includes(query.error.status);
-  useLayoutEffect(() => {
-    if (denied) onAccessLost();
-  }, [denied, onAccessLost]);
-  const selected = query.data?.[0];
-  const values = selected ? metrics(selected.result) : [];
-  const samples = selected
-    ? comparableSamples(
-        (query.data ?? []).flatMap((sample) => (sample ? [sample] : [])),
-        selected,
-      )
-    : [];
+  const selected = selectedCapture(query.data ?? [], period);
+  const values = selected?.result ? metrics(selected.result) : [];
   return (
     <tr>
       <th scope="row">
@@ -171,27 +103,22 @@ function ServiceRow({
             Retry {service.name}
           </button>
         </td>
-      ) : !selected ? (
+      ) : !selected?.result ? (
         <td colSpan={7}>
-          {query.data?.length
-            ? 'Metric details unavailable for latest saved result.'
-            : 'No successful saved result for this source.'}
+          {selected
+            ? 'Metric details unavailable for this saved result.'
+            : period !== 'latest'
+              ? 'No saved result for selected reporting window in loaded history.'
+              : 'No successful saved result for this source.'}
         </td>
       ) : (
         <>
           <td>
             <span>
-              {selected.result.window.start.slice(0, 10)} to{' '}
-              {selected.result.window.end.slice(0, 10)}
+              {selected.window.start.slice(0, 10)} to {selected.window.end.slice(0, 10)}
             </span>
             <span className="comparison-meta">UTC · end exclusive</span>
-            <span className="comparison-meta">
-              {selected.source.startsWith('demo:')
-                ? 'Demo data'
-                : selected.source === 'argocd' || selected.source === 'argo'
-                  ? 'Argo CD'
-                  : 'GitHub'}
-            </span>
+            <span className="comparison-meta">{sourceLabel(selected.source)}</span>
             <details>
               <summary>Saved context</summary>
               <p>
@@ -201,10 +128,7 @@ function ServiceRow({
               <p>
                 Revision: {selected.revision}. OEMS: {selected.oemsRevision}.
               </p>
-              <p>
-                {samples.length} comparable saved reporting periods on this page. Open service for
-                trends and evidence.
-              </p>
+              <p>Open service for full trends and evidence.</p>
             </details>
           </td>
           {values.map(({ label, metric, value }) => (
@@ -237,7 +161,6 @@ function ServiceRow({
     </tr>
   );
 }
-
 export function ServiceComparison({
   services,
   ownership,
@@ -245,8 +168,12 @@ export function ServiceComparison({
   source,
   onSourceChange,
   onAccessLost,
+  period,
+  onPeriodChange,
 }: {
   onAccessLost: () => void;
+  period: string;
+  onPeriodChange: (period: string) => void;
   source: ComparisonSource;
   onSourceChange: (source: ComparisonSource) => void;
   services: Service[];
@@ -256,7 +183,25 @@ export function ServiceComparison({
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(services.length / 10);
   const activePage = Math.min(page, Math.max(0, totalPages - 1));
-  const visible = services.slice(activePage * 10, (activePage + 1) * 10);
+  const visible = useMemo(
+    () => services.slice(activePage * 10, (activePage + 1) * 10),
+    [services, activePage],
+  );
+  const queries = useComparisonHistories(visible, source, onAccessLost);
+  const windows = reportingWindows(queries.map((query) => query.data ?? []));
+  const series: ServiceSeries[] = visible.map((service, index) => {
+    const query = queries[index];
+    const selected = selectedCapture(query?.data ?? [], period);
+    return {
+      id: service.id,
+      name: service.name,
+      state: !query || query.isPending ? 'loading' : query.isError ? 'error' : 'ready',
+      selected,
+      samples:
+        selected && !query?.isError ? comparisonSeries(query?.data ?? [], selected, period) : [],
+    };
+  });
+  const refreshing = queries.some((query) => query.isFetching);
   return (
     <section className="panel service-comparison" aria-label="Service comparisons">
       <div className="comparison-heading">
@@ -283,10 +228,41 @@ export function ServiceComparison({
             <option value="mock">Demo data</option>
           </select>
         </label>
+        <label>
+          Reporting window
+          <select
+            className="field"
+            value={period}
+            onChange={(event) => onPeriodChange(event.target.value)}
+          >
+            <option value="latest">Latest per service</option>
+            {period !== 'latest' && !windows.includes(period) && (
+              <option value={period}>{windowLabel(period)} · not in loaded history</option>
+            )}
+            {windows.map((window) => (
+              <option key={window} value={window}>
+                {windowLabel(window)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="control comparison-refresh"
+          type="button"
+          aria-disabled={refreshing}
+          onClick={() => {
+            if (!refreshing) void Promise.allSettled(queries.map((query) => query.refetch()));
+          }}
+        >
+          {refreshing ? 'Refreshing comparisons…' : 'Refresh comparisons'}
+        </button>
       </div>
       <p className="text-clio-muted">
-        Latest saved result per service. Windows and revisions may differ. Metrics are
-        service-level; open a service to inspect trends and evidence.
+        {period === 'latest'
+          ? 'Latest saved result per service; windows may differ.'
+          : 'Matching exact reporting window across services; missing matches remain unavailable.'}{' '}
+        Options come from up to 25 saved results per service on this page. Revisions may differ;
+        open a service to inspect full evidence.
       </p>
       {services.length ? (
         <>
@@ -314,19 +290,23 @@ export function ServiceComparison({
                 </tr>
               </thead>
               <tbody>
-                {visible.map((service) => (
-                  <ServiceRow
-                    key={`${service.id}/${source}`}
-                    service={service}
-                    source={source}
-                    ownership={ownership(service.id)}
-                    select={() => select(service.id)}
-                    onAccessLost={onAccessLost}
-                  />
-                ))}
+                {visible.map((service, index) => {
+                  const query = queries[index];
+                  return query ? (
+                    <ServiceRow
+                      key={service.id}
+                      service={service}
+                      query={query}
+                      period={period}
+                      ownership={ownership(service.id)}
+                      select={() => select(service.id)}
+                    />
+                  ) : null;
+                })}
               </tbody>
             </table>
           </section>
+          <GroupTrends series={series} period={period} />
           {totalPages > 1 && (
             <div className="history-controls mt-3 flex flex-wrap gap-3">
               <button

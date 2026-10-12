@@ -41,6 +41,8 @@ const metrics = [
   },
 ] as const;
 
+export const trendMetrics = metrics;
+
 export type TrendCapture = TrendSample & { source: string; revision: number; oemsRevision: string };
 export function comparableSamples(captures: TrendCapture[], selected: TrendCapture): TrendSample[] {
   const matching = captures.filter(

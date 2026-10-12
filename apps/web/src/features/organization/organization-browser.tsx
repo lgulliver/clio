@@ -14,6 +14,7 @@ export function OrganizationBrowser({
   const [blocked, setBlocked] = useState(false);
   const accessLost = useCallback(() => setBlocked(true), []);
   const [source, setSource] = useState<ComparisonSource>('measurement');
+  const [period, setPeriod] = useState('latest');
   const [teamId, setTeamId] = useState('');
   const [productId, setProductId] = useState('');
   const [serviceId, setServiceId] = useState('');
@@ -255,7 +256,12 @@ export function OrganizationBrowser({
                 selectService(id);
               }}
               source={source}
-              onSourceChange={setSource}
+              onSourceChange={(value) => {
+                setSource(value);
+                setPeriod('latest');
+              }}
+              period={period}
+              onPeriodChange={setPeriod}
               onAccessLost={accessLost}
             />
           )}
