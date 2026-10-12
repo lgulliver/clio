@@ -14,6 +14,7 @@ import {
 import { useComparisonHistories } from './comparison-history';
 import { CoverageSummary } from './coverage-summary';
 import { GroupTrends, type ServiceSeries } from './group-trends';
+import { PeriodComparison } from './period-comparison';
 
 export type { ComparisonSource } from './comparison-data';
 
@@ -171,7 +172,13 @@ export function ServiceComparison({
   onAccessLost,
   period,
   onPeriodChange,
+  previousPeriod,
+  onPreviousPeriodChange,
+  compact = false,
 }: {
+  previousPeriod: string;
+  onPreviousPeriodChange: (period: string) => void;
+  compact?: boolean;
   onAccessLost: () => void;
   period: string;
   onPeriodChange: (period: string) => void;
@@ -247,6 +254,27 @@ export function ServiceComparison({
             ))}
           </select>
         </label>
+        <label>
+          Previous reporting window
+          <select
+            className="field"
+            value={previousPeriod}
+            disabled={period === 'latest'}
+            onChange={(event) => onPreviousPeriodChange(event.target.value)}
+          >
+            <option value="">No comparison</option>
+            {previousPeriod && !windows.includes(previousPeriod) && (
+              <option value={previousPeriod}>
+                {windowLabel(previousPeriod)} · not in loaded history
+              </option>
+            )}
+            {(period === 'latest' ? [] : windows).map((window) => (
+              <option key={window} value={window}>
+                {windowLabel(window)}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           className="control comparison-refresh"
           type="button"
@@ -267,62 +295,86 @@ export function ServiceComparison({
       </p>
       {services.length ? (
         <>
-          <CoverageSummary
-            rows={series}
-            totalServices={services.length}
-            page={activePage}
-            period={period}
-            source={
-              source === 'measurement'
-                ? 'Independent measurements'
-                : source === 'mock'
-                  ? 'Demo data'
-                  : source === 'argo'
-                    ? 'Argo CD'
-                    : 'GitHub Deployments'
-            }
-            select={select}
-          />
-          <section className="comparison-scroll" aria-label="Scrollable service comparison table">
-            <table>
-              <caption>
-                Current service ownership · {services.length} services in this scope
-              </caption>
-              <thead>
-                <tr>
-                  {[
-                    'Service',
-                    'Reporting window',
-                    'Deployments',
-                    'Lead time',
-                    'Failure rate',
-                    'Rework rate',
-                    'Recovery time',
-                    'Coverage',
-                  ].map((heading) => (
-                    <th key={heading} scope="col">
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((service, index) => {
-                  const query = queries[index];
-                  return query ? (
-                    <ServiceRow
-                      key={service.id}
-                      service={service}
-                      query={query}
-                      period={period}
-                      ownership={ownership(service.id)}
-                      select={() => select(service.id)}
-                    />
-                  ) : null;
-                })}
-              </tbody>
-            </table>
-          </section>
+          {!compact && (
+            <CoverageSummary
+              rows={series}
+              totalServices={services.length}
+              page={activePage}
+              period={period}
+              source={
+                source === 'measurement'
+                  ? 'Independent measurements'
+                  : source === 'mock'
+                    ? 'Demo data'
+                    : source === 'argo'
+                      ? 'Argo CD'
+                      : 'GitHub Deployments'
+              }
+              select={select}
+            />
+          )}
+          {previousPeriod && period !== 'latest' && (
+            <PeriodComparison
+              rows={series.map((row, index) => ({
+                ...row,
+                previous: selectedCapture(queries[index]?.data ?? [], previousPeriod),
+                ...(queries[index]?.isError ? { error: errorMessage(queries[index].error) } : {}),
+                retry: () => {
+                  void queries[index]?.refetch();
+                },
+              }))}
+              currentPeriod={period}
+              previousPeriod={previousPeriod}
+              select={select}
+            />
+          )}
+          {!previousPeriod && !compact && (
+            <section className="comparison-scroll" aria-label="Scrollable service comparison table">
+              <table>
+                <caption>
+                  Current service ownership · {services.length} services in this scope
+                </caption>
+                <thead>
+                  <tr>
+                    {[
+                      'Service',
+                      'Reporting window',
+                      'Deployments',
+                      'Lead time',
+                      'Failure rate',
+                      'Rework rate',
+                      'Recovery time',
+                      'Coverage',
+                    ].map((heading) => (
+                      <th key={heading} scope="col">
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((service, index) => {
+                    const query = queries[index];
+                    return query ? (
+                      <ServiceRow
+                        key={service.id}
+                        service={service}
+                        query={query}
+                        period={period}
+                        ownership={ownership(service.id)}
+                        select={() => select(service.id)}
+                      />
+                    ) : null;
+                  })}
+                </tbody>
+              </table>
+            </section>
+          )}
+          {period === 'latest' && (
+            <p className="mt-3 text-clio-muted">
+              Choose an exact reporting window to compare with a previous window.
+            </p>
+          )}
           <GroupTrends series={series} period={period} />
           {totalPages > 1 && (
             <div className="history-controls mt-3 flex flex-wrap gap-3">

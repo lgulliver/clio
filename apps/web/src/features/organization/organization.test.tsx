@@ -546,6 +546,27 @@ it('retains exact reporting-window selection on a service page without matching 
   expect(
     fetchMock.mock.calls.filter(([path]) => String(path).includes('/measurement-runs')),
   ).toHaveLength(11);
+  fireEvent.click(screen.getByRole('button', { name: 'Previous services' }));
+  await within(screen.getByLabelText('Previous reporting window')).findByRole('option', {
+    name: '2025-10-01 to 2025-10-03 (UTC, end exclusive)',
+  });
+  fireEvent.change(screen.getByLabelText('Previous reporting window'), {
+    target: { value: october },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Next services' }));
+  expect(screen.getByLabelText('Previous reporting window')).toHaveValue(october);
+  expect(
+    within(screen.getByLabelText('Previous reporting window')).getByRole('option', {
+      name: /not in loaded history/,
+    }),
+  ).toBeVisible();
+  const comparison = await screen.findByRole('region', { name: 'Reporting window comparison' });
+  expect(
+    (await within(comparison).findAllByText('Missing exact window in loaded history.'))[0],
+  ).toBeVisible();
+  expect(
+    within(comparison).getByRole('button', { name: 'Inspect Service 10: window comparison' }),
+  ).toBeVisible();
 });
 
 it.each(['scope', 'session'] as const)(
@@ -944,4 +965,113 @@ it('keeps visible team when clearing Product after a move, and Engineering after
   fireEvent.change(screen.getByLabelText('Product'), { target: { value: '' } });
   expect(screen.getByRole('heading', { name: 'Engineering' })).toBeVisible();
   expect(screen.getByLabelText('Team')).toHaveValue('');
+});
+
+describe('previous reporting-window comparisons', () => {
+  it('compares exact periods without extra reads, keeps missing pairs and service-level links explicit', async () => {
+    installPeriods();
+    mountBrowser();
+    const current = await screen.findByLabelText('Reporting window');
+    await within(current).findByRole('option', {
+      name: '2025-11-01 to 2025-11-03 (UTC, end exclusive)',
+    });
+    expect(screen.getByLabelText('Previous reporting window')).toBeDisabled();
+    fireEvent.change(current, {
+      target: { value: windowKey({ start: '2025-11-01T00:00:00Z', end: '2025-11-03T00:00:00Z' }) },
+    });
+    const reads = fetchMock.mock.calls.length;
+    fireEvent.change(screen.getByLabelText('Previous reporting window'), {
+      target: { value: october },
+    });
+    const comparison = screen.getByRole('region', { name: 'Reporting window comparison' });
+    const rows = within(comparison).getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('+1 h');
+    expect(rows[2]).toHaveTextContent('+4 h');
+    expect(rows[3]).toHaveTextContent('Missing exact window');
+    expect(fetchMock.mock.calls.length).toBe(reads);
+    fireEvent.click(
+      within(comparison).getByRole('button', { name: 'Inspect Payments API: window comparison' }),
+    );
+    expect(screen.getByRole('region', { name: 'Selected service evidence' })).toHaveTextContent(
+      'Payments API',
+    );
+    fireEvent.click(screen.getByText('Compare saved windows'));
+    await screen.findByRole('region', { name: 'Reporting window comparison' });
+    expect(screen.getByLabelText('Previous reporting window')).toHaveValue(october);
+    expect(
+      await within(screen.getByRole('region', { name: 'Reporting window comparison' })).findByText(
+        '+1 h',
+      ),
+    ).toBeVisible();
+  });
+  it('retains previous window through scopes and clears comparison on source or Latest changes', async () => {
+    installPeriods();
+    mountBrowser();
+    await within(await screen.findByLabelText('Reporting window')).findByRole('option', {
+      name: '2025-11-01 to 2025-11-03 (UTC, end exclusive)',
+    });
+    fireEvent.change(screen.getByLabelText('Reporting window'), {
+      target: { value: windowKey({ start: '2025-11-01T00:00:00Z', end: '2025-11-03T00:00:00Z' }) },
+    });
+    fireEvent.change(screen.getByLabelText('Previous reporting window'), {
+      target: { value: october },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Commerce 1 products' }));
+    expect(screen.getByLabelText('Previous reporting window')).toHaveValue(october);
+    fireEvent.click(screen.getByRole('button', { name: 'Payments 1 services' }));
+    expect(screen.getByLabelText('Previous reporting window')).toHaveValue(october);
+    fireEvent.change(screen.getByLabelText('Reporting window'), { target: { value: 'latest' } });
+    expect(screen.getByLabelText('Previous reporting window')).toHaveValue('');
+    expect(
+      screen.queryByRole('region', { name: 'Reporting window comparison' }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reporting window'), { target: { value: october } });
+    fireEvent.change(screen.getByLabelText('Previous reporting window'), {
+      target: { value: october },
+    });
+    fireEvent.change(screen.getByLabelText('Result source'), { target: { value: 'argo' } });
+    expect(screen.getByLabelText('Reporting window')).toHaveValue('latest');
+    expect(screen.getByLabelText('Previous reporting window')).toHaveValue('');
+    expect(
+      screen.queryByRole('region', { name: 'Reporting window comparison' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+it('removes both-period evidence when a comparison refresh loses workspace access', async () => {
+  installPeriods();
+  const readPeriods = fetchMock.getMockImplementation();
+  if (!readPeriods) throw new Error('Missing period transport');
+  let denied = false;
+  fetchMock.mockImplementation(async (input, options) =>
+    denied && String(input).includes('/measurement-runs')
+      ? json({}, 403)
+      : readPeriods(input, options),
+  );
+  mountBrowser();
+  await within(await screen.findByLabelText('Reporting window')).findByRole('option', {
+    name: '2025-11-01 to 2025-11-03 (UTC, end exclusive)',
+  });
+  fireEvent.change(screen.getByLabelText('Reporting window'), {
+    target: { value: windowKey({ start: '2025-11-01T00:00:00Z', end: '2025-11-03T00:00:00Z' }) },
+  });
+  fireEvent.change(screen.getByLabelText('Previous reporting window'), {
+    target: { value: october },
+  });
+  expect(screen.getByRole('region', { name: 'Reporting window comparison' })).toHaveTextContent(
+    '+1 h',
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Refresh comparisons' })).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    ),
+  );
+  denied = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh comparisons' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('no longer accessible');
+  expect(
+    screen.queryByRole('region', { name: 'Reporting window comparison' }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText('+1 h')).not.toBeInTheDocument();
 });

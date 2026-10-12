@@ -15,6 +15,7 @@ export function OrganizationBrowser({
   const accessLost = useCallback(() => setBlocked(true), []);
   const [source, setSource] = useState<ComparisonSource>('measurement');
   const [period, setPeriod] = useState('latest');
+  const [previousPeriod, setPreviousPeriod] = useState('');
   const [teamId, setTeamId] = useState('');
   const [productId, setProductId] = useState('');
   const [serviceId, setServiceId] = useState('');
@@ -73,6 +74,15 @@ export function OrganizationBrowser({
     service?.name ??
     product?.name ??
     (unassigned ? 'Unassigned services' : (team?.name ?? 'Engineering'));
+  function changeSource(value: ComparisonSource) {
+    setSource(value);
+    setPeriod('latest');
+    setPreviousPeriod('');
+  }
+  function changePeriod(value: string) {
+    setPeriod(value);
+    if (value === 'latest') setPreviousPeriod('');
+  }
   function ownership(id: string) {
     const owned = organization.products.find((item) => item.id === assignments.get(id));
     return owned
@@ -270,18 +280,50 @@ export function OrganizationBrowser({
                 selectService(id);
               }}
               source={source}
-              onSourceChange={(value) => {
-                setSource(value);
-                setPeriod('latest');
-              }}
+              onSourceChange={changeSource}
+              previousPeriod={previousPeriod}
+              onPreviousPeriodChange={setPreviousPeriod}
               period={period}
-              onPeriodChange={setPeriod}
+              onPeriodChange={changePeriod}
               onAccessLost={accessLost}
             />
           )}
         </>
       )}
-      {service && renderService(service)}
+      {service && (
+        <>
+          <ServiceWindowComparison
+            key={service.id}
+            service={service}
+            ownership={ownership}
+            source={source}
+            onSourceChange={changeSource}
+            period={period}
+            onPeriodChange={changePeriod}
+            previousPeriod={previousPeriod}
+            onPreviousPeriodChange={setPreviousPeriod}
+            select={(id) => {
+              setFocusRequest((request) => request + 1);
+              selectService(id);
+            }}
+            onAccessLost={accessLost}
+          />
+          {renderService(service)}
+        </>
+      )}
     </div>
+  );
+}
+
+function ServiceWindowComparison({
+  service,
+  ...props
+}: Omit<Parameters<typeof ServiceComparison>[0], 'services' | 'compact'> & { service: Service }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="panel mt-3" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="text-action cursor-pointer">Compare saved windows</summary>
+      {open && <ServiceComparison {...props} services={[service]} compact />}
+    </details>
   );
 }

@@ -35,6 +35,14 @@ Reporting windows, source revisions and OEMS revisions can differ between servic
 
 Grouping uses current ownership. Reassigning a service changes where it appears, including when browsing past results, without rewriting immutable results. Saved times and evidence cutoffs remain visible; this view does not assert collection freshness or complete production coverage.
 
+## Compare reporting windows
+
+Choose an exact **Reporting window**, then a **Previous reporting window**. **No comparison** restores the usual current-result table. Both selections survive group navigation and service pagination. Switching source or returning to **Latest per service** clears the previous window. A retained selection absent from another page remains visible, with missing exact matches disclosed. Options and results use the same bounded history reads; choosing windows never starts collection.
+
+The comparison shows previous/current values, status and quality reasons for each service, with both saved contexts and service-history links. Signed deltas are current minus previous. They require the same service, source, connection/mapping revision and OEMS revision; chronological nonoverlapping windows of equal length; and two complete, finite numeric metric results. Equal-length and nonoverlap restrictions are Clio presentation policy, not additional OEMS rules. Adjacent windows or separated windows can be compared; unsaved gaps are not filled. Newest saved captures own exact windows, including legacy captures; the view never substitutes an older compatible capture to manufacture a delta.
+
+Deployment frequency differences use deployments/day, lead time hours, recovery minutes and failure/rework percentage points (pp). No division by a zero baseline or relative percentage is performed. Provisional numeric values stay visible with their quality, but produce no delta. Complete zero frequency remains a valid value; no-observation medians/ratios remain unavailable. A page-scoped list identifies services with increases in complete time or failure/rework metrics. These changes do not establish causes or assign health grades; no team/product medians are averaged. Existing per-service trend charts remain available below. On a service page, expand **Compare saved windows** to inspect that service's comparison while retaining its full evidence histories.
+
 ## Coverage and freshness
 
 Group comparisons summarize only the current page, selected source and reporting window. Saved results, absent matches, pending reads, failed reads and legacy results without metric details stay separate. Open summary details to inspect affected services. Coverage declarations and each saved OEMS metric status are counted independently; complete coverage does not upgrade provisional metrics. Empty observations retain their saved status, rather than becoming missing results.

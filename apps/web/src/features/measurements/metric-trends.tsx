@@ -5,12 +5,16 @@ export type TrendSample = { id: string; result: MetricResult };
 const metrics = [
   {
     key: 'deployments',
+    resultKey: 'deployment_frequency',
+    deltaUnit: '/day',
     label: 'Deployments',
     unit: 'per day',
     value: (r: MetricResult) => r.deployment_frequency.deployments_per_day,
   },
   {
     key: 'lead',
+    resultKey: 'change_lead_time',
+    deltaUnit: 'h',
     label: 'Lead time',
     unit: 'hours',
     value: (r: MetricResult) =>
@@ -18,6 +22,8 @@ const metrics = [
   },
   {
     key: 'failure',
+    resultKey: 'change_fail_rate',
+    deltaUnit: 'pp',
     label: 'Failure rate',
     unit: '%',
     value: (r: MetricResult) =>
@@ -25,6 +31,8 @@ const metrics = [
   },
   {
     key: 'rework',
+    resultKey: 'deployment_rework_rate',
+    deltaUnit: 'pp',
     label: 'Rework rate',
     unit: '%',
     value: (r: MetricResult) =>
@@ -32,6 +40,8 @@ const metrics = [
   },
   {
     key: 'recovery',
+    resultKey: 'failed_deployment_recovery_time',
+    deltaUnit: 'min',
     label: 'Recovery time',
     unit: 'minutes',
     value: (r: MetricResult) =>

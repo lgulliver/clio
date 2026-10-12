@@ -756,3 +756,22 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.period-comparison {
+  margin-top: 20px;
+}
+.period-comparison > details {
+  margin: 14px 0;
+}
+.period-comparison .comparison-scroll {
+  margin-top: 14px;
+}
+.period-comparison td {
+  min-width: 190px;
+}
+.period-comparison td:nth-child(2) {
+  min-width: 240px;
+}
+.delivery-dashboard .period-comparison td p {
+  overflow-wrap: anywhere;
+}
