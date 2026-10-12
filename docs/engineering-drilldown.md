@@ -35,6 +35,12 @@ Reporting windows, source revisions and OEMS revisions can differ between servic
 
 Grouping uses current ownership. Reassigning a service changes where it appears, including when browsing past results, without rewriting immutable results. Saved times and evidence cutoffs remain visible; this view does not assert collection freshness or complete production coverage.
 
+## Coverage and freshness
+
+Group comparisons summarize only the current page, selected source and reporting window. Saved results, absent matches, pending reads, failed reads and legacy results without metric details stay separate. Open summary details to inspect affected services. Coverage declarations and each saved OEMS metric status are counted independently; complete coverage does not upgrade provisional metrics. Empty observations retain their saved status, rather than becoming missing results.
+
+Collection age uses the collection evidence cutoff, including an independent measurement’s older collection basis. The measurement evidence cutoff and saved-result completion remain separate. Collection completion is unavailable for independent measurements. Choose a 1, 7 or 30 day age threshold; the default is 7 days. Age compares with your device clock and refreshes each minute without collection requests. Cutoffs ahead of that clock are disclosed separately. Historical windows naturally age; these thresholds are inspection aids, not freshness guarantees, service health grades or proof of complete production coverage.
+
 ## Local upgrade
 
 Migration `0014_organization.sql` adds the hierarchy and nullable service assignments. Run `pnpm db:migrate` explicitly before using the updated API. API startup never migrates. Composite foreign keys reject cross-workspace ownership; every API read/write rechecks the current session and workspace membership in its transaction.

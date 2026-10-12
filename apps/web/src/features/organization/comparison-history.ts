@@ -32,6 +32,7 @@ export function useComparisonHistories(
               revision,
               'overview',
               'group-comparison',
+              'snapshot-v2',
               instance,
               path,
             ],

@@ -443,6 +443,10 @@ describe('group reporting-window controls', () => {
     expect(
       within(table).getByText('No saved result for selected reporting window in loaded history.'),
     ).toBeVisible();
+    const summary = screen.getByRole('region', { name: 'Coverage and freshness' });
+    expect(summary).toHaveTextContent('Page 1: 3 of 3 services');
+    expect(summary).toHaveTextContent('Missing results (1)');
+    expect(summary).toHaveTextContent('2025-10-01 to 2025-10-03 (UTC, end exclusive)');
     expect(fetchMock.mock.calls.length).toBe(reads);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh comparisons' }));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBe(reads + 3));

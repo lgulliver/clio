@@ -12,6 +12,7 @@ import {
   windowLabel,
 } from './comparison-data';
 import { useComparisonHistories } from './comparison-history';
+import { CoverageSummary } from './coverage-summary';
 import { GroupTrends, type ServiceSeries } from './group-trends';
 
 export type { ComparisonSource } from './comparison-data';
@@ -266,6 +267,22 @@ export function ServiceComparison({
       </p>
       {services.length ? (
         <>
+          <CoverageSummary
+            rows={series}
+            totalServices={services.length}
+            page={activePage}
+            period={period}
+            source={
+              source === 'measurement'
+                ? 'Independent measurements'
+                : source === 'mock'
+                  ? 'Demo data'
+                  : source === 'argo'
+                    ? 'Argo CD'
+                    : 'GitHub Deployments'
+            }
+            select={select}
+          />
           <section className="comparison-scroll" aria-label="Scrollable service comparison table">
             <table>
               <caption>

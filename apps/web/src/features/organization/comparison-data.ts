@@ -16,6 +16,8 @@ export type SavedCapture = {
   oemsRevision: string;
   completedAt: string | null;
   evidenceCutoff: string;
+  collectionEvidenceCutoff: string;
+  collectionCompletedAt: string | null;
   coverage: {
     collectionComplete: boolean;
     deploymentHistoryComplete: boolean;
@@ -41,6 +43,8 @@ export function parseComparison(
         oemsRevision: result.oemsRevision,
         completedAt: run.completedAt,
         evidenceCutoff: result.evidenceCutoff,
+        collectionEvidenceCutoff: result.basisEvidenceCutoff,
+        collectionCompletedAt: null,
         coverage: result.coverage,
       };
     });
@@ -63,6 +67,8 @@ export function parseComparison(
       oemsRevision: result.oemsRevision,
       completedAt: run.completedAt,
       evidenceCutoff: result.evidenceCutoff,
+      collectionEvidenceCutoff: result.evidenceCutoff,
+      collectionCompletedAt: run.completedAt,
       coverage: result.coverage,
     };
   });
@@ -116,3 +122,10 @@ export function sourceLabel(source: string) {
       ? 'Argo CD'
       : 'GitHub';
 }
+
+export type ComparisonRow = {
+  id: string;
+  name: string;
+  state: 'loading' | 'error' | 'ready';
+  selected: SavedCapture | undefined;
+};

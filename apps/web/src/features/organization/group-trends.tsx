@@ -1,15 +1,16 @@
 import type { MetricResult } from '@clio/oems';
 import { useId, useState } from 'react';
 import { trendMetrics } from '../measurements/metric-trends';
-import { type SavedCapture, sourceLabel, windowKey, windowLabel } from './comparison-data';
+import {
+  type ComparisonRow,
+  type SavedCapture,
+  sourceLabel,
+  windowKey,
+  windowLabel,
+} from './comparison-data';
 
-export type ServiceSeries = {
-  id: string;
-  name: string;
-  state: 'loading' | 'error' | 'ready';
-  selected: SavedCapture | undefined;
-  samples: SavedCapture[];
-};
+export type ServiceSeries = ComparisonRow & { samples: SavedCapture[] };
+
 const colors = [
   '#60a5fa',
   '#2dd4bf',

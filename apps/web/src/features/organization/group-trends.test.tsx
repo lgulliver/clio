@@ -23,6 +23,8 @@ function capture(id: string, month: string, complete = true): SavedCapture {
     oemsRevision: 'pinned',
     completedAt: '2026-01-04T00:02:00Z',
     evidenceCutoff: result.evidence_cutoff,
+    collectionEvidenceCutoff: result.evidence_cutoff,
+    collectionCompletedAt: '2026-01-04T00:02:00Z',
     coverage: {
       collectionComplete: complete,
       deploymentHistoryComplete: complete,

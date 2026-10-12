@@ -628,3 +628,119 @@ body {
     align-self: flex-start;
   }
 }
+
+.coverage-summary {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #29384c;
+  border-radius: 8px;
+  background: #0f1a2a;
+}
+.coverage-summary .comparison-heading h3 {
+  font-size: 1.125rem;
+}
+.coverage-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.coverage-overview > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: #17263b;
+  border-radius: 6px;
+  min-width: 0;
+}
+.delivery-dashboard .coverage-overview dt {
+  color: #a8b8cd;
+  font-size: 0.8125rem;
+}
+.delivery-dashboard .coverage-overview dd {
+  margin-top: auto;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.freshness-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.delivery-dashboard .freshness-times dt {
+  color: #a8b8cd;
+  font-size: 0.8125rem;
+}
+.delivery-dashboard .freshness-times dd {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+.summary-details-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.coverage-summary details {
+  max-width: none;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: #cbd5e1;
+  margin-top: 10px;
+}
+.coverage-summary summary {
+  color: #93c5fd;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.coverage-summary summary:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 4px;
+}
+.delivery-dashboard .coverage-summary details p {
+  margin: 8px 0;
+}
+.summary-service-links {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.summary-service-links li {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.coverage-declarations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #29384c;
+}
+.metric-evidence-status {
+  margin-top: 20px;
+}
+.delivery-dashboard .metric-evidence-status h4 {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+@media (max-width: 1100px) {
+  .coverage-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .coverage-overview,
+  .freshness-times,
+  .summary-details-grid,
+  .coverage-declarations {
+    grid-template-columns: 1fr;
+  }
+  .coverage-summary {
+    padding: 14px;
+  }
+}
