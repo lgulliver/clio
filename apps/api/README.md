@@ -159,3 +159,19 @@ Inside `/api/workspaces/:workspaceId/services/:serviceId`, current owners read `
 Jobs pin original native basis, source/grant fingerprints and available immutable reports. Missing reports stay missing for that job. Workspace-first locking, 120-second leases and at most three attempts fence revoked/stale jobs. Calculation runs outside checked-out transactions; fresh eligibility checks guard atomic private-snapshot/result/success publication. Completed measurements remain readable after credential revocation under current workspace membership.
 
 Safe `clio.measurement.result.v1` contains workspace/service/provider/basis run, connection and OEMS revisions, closed UTC window, `basisEvidenceCutoff`, strictly later `evidenceCutoff`, static assessment/coverage and the exact pinned five-metric result. It excludes raw snapshots, reports, manifests, evidence references and credential material. Both times remain database-controlled; a future basis cutoff fails closed rather than manufacturing a receiver time. Worker processes exit on infrastructure errors; use a local supervisor/restart policy for sustained operation and inspect readiness before restarting.
+
+
+## Engineering organization
+
+Migration `0014_organization.sql` adds workspace-scoped teams and products. Each product belongs to exactly one team; a team can own multiple products. Each service has one nullable product assignment. Existing services remain unassigned, with their IDs, provider connections and saved results unchanged. Organization assignments describe current ownership; they do not rewrite historical measurement metadata.
+
+All routes below use current session and workspace membership checks inside the storage transaction. Owners write; owners and members read. Exact trusted Origin is required for writes. Bodies accept only listed fields; names use the existing 1–200 Unicode code point normalization and workspace-scoped case-sensitive uniqueness.
+
+| Method/path under `/api/workspaces/:workspaceId` | Body | Success |
+| --- | --- | --- |
+| GET `/organization` | — | 200 `{workspaceId,teams:[{id,workspaceId,name}],products:[{id,workspaceId,teamId,name}],services:[{id,workspaceId,name}],assignments:[{serviceId,productId}]}` |
+| POST `/teams` | `{name}` | 201 `{team:{id,workspaceId,name}}` |
+| POST `/products` | `{name,teamId}` | 201 `{product:{id,workspaceId,teamId,name}}` |
+| POST `/services/:serviceId/product` | `{productId:UUID|null}` | 200 `{assignment:{serviceId,productId}}` |
+
+The organization read uses one SQL statement for a consistent snapshot of teams, products, service names and assignments. It includes every workspace service, including `productId:null`. Existing service API shapes remain unchanged. Cross-workspace or missing parents/services return 404; duplicate normalized names return 409. Composite foreign keys enforce workspace isolation independently of routes. Team/product deletion, renaming and product team reassignment are outside this slice. Provider collection and OEMS calculations are unchanged.

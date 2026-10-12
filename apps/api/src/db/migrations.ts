@@ -149,8 +149,10 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query(
     'SELECT run_id,workspace_id,service_id,connection_revision,connection_input,service_name,evidence,snapshot,metrics,oems_revision,public_result,digest FROM github_collection_snapshots LIMIT 0',
   );
+  await pool.query('SELECT id, workspace_id, name FROM teams LIMIT 0');
+  await pool.query('SELECT id, workspace_id, team_id, name FROM products LIMIT 0');
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
-  await pool.query('SELECT id, workspace_id, name, created_at FROM services LIMIT 0');
+  await pool.query('SELECT id, workspace_id, name, product_id, created_at FROM services LIMIT 0');
   await pool.query(
     'SELECT workspace_id, service_id, mode, scenario, revision, primary_provider, production_environment, exposure_attested, observed_at, created_by FROM deployment_mapping_revisions LIMIT 0',
   );

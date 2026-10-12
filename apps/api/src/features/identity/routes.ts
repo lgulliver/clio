@@ -12,6 +12,7 @@ import { registerGitHubRoutes } from '../github-collection/routes.ts';
 import type { MeasurementConfig } from '../measurements/config.ts';
 import { registerMeasurementRoutes } from '../measurements/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
+import { createOrganizationRepository } from '../organization/repository.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
 import { IdentityError, object, opaqueId, uuid } from './input.ts';
@@ -59,6 +60,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       allowedHeaders: ['Content-Type'],
     });
   const repository = identity ? createIdentityRepository(identity.pool) : null;
+  const organization = identity ? createOrganizationRepository(identity.pool) : null;
   const mappings = identity ? createMappingRepository(identity.pool) : null;
   const runs = identity ? createMockCollectionRepository(identity.pool) : null;
   async function session(request: FastifyRequest, reply: FastifyReply, write: boolean) {
@@ -260,6 +262,46 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         .code(201)
         .send({ service: await repository.createService(current, id, body.name) });
     });
+    routes.get('/api/workspaces/:workspaceId/organization', async (request, reply) => {
+      const current = await actor(request, reply, false);
+      const id = uuid(params(request, ['workspaceId']).workspaceId);
+      object(request.query, []);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return organization.read(current, id);
+    });
+    routes.post('/api/workspaces/:workspaceId/teams', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const id = uuid(params(request, ['workspaceId']).workspaceId);
+      const body = object(request.body, ['name']);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return reply.code(201).send({ team: await organization.createTeam(current, id, body.name) });
+    });
+    routes.post('/api/workspaces/:workspaceId/products', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const id = uuid(params(request, ['workspaceId']).workspaceId);
+      const body = object(request.body, ['name', 'teamId']);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return reply
+        .code(201)
+        .send({ product: await organization.createProduct(current, id, body.teamId, body.name) });
+    });
+    routes.post(
+      '/api/workspaces/:workspaceId/services/:serviceId/product',
+      async (request, reply) => {
+        const current = await actor(request, reply, true);
+        const scope = params(request, ['workspaceId', 'serviceId']);
+        const body = object(request.body, ['productId']);
+        if (!organization) throw new IdentityError(503, 'unavailable');
+        return {
+          assignment: await organization.assign(
+            current,
+            uuid(scope.workspaceId),
+            uuid(scope.serviceId),
+            body.productId,
+          ),
+        };
+      },
+    );
     const mappingBase = '/api/workspaces/:workspaceId/services/:serviceId';
     routes.get(`${mappingBase}/deployment-mapping`, async (request, reply) => {
       const current = await actor(request, reply, false);

@@ -395,3 +395,167 @@ body {
 .delivery-dashboard .metric-evidence-spacer {
   min-height: 12px;
 }
+
+.scope-breadcrumbs {
+  margin-top: 24px;
+}
+.scope-breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+}
+.scope-breadcrumbs li + li::before {
+  content: "/";
+  margin-right: 10px;
+  color: #a8b8cd;
+}
+.scope-breadcrumbs button {
+  color: #93c5fd;
+  border-radius: 4px;
+}
+.scope-breadcrumbs [aria-current="page"] {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+.scope-selectors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+  color: #a8b8cd;
+}
+.scope-title {
+  margin-top: 28px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.scope-title:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 4px;
+}
+.scope-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.scope-groups button {
+  flex: 1 1 180px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  text-align: left;
+  border: 1px solid #42546b;
+  border-radius: 8px;
+  background: #17263b;
+  color: #e2e8f0;
+}
+.scope-groups button span {
+  color: #a8b8cd;
+  font-size: 0.875rem;
+}
+.scope-breadcrumbs button:focus-visible,
+.scope-groups button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 4px;
+}
+.comparison-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.comparison-heading h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.comparison-heading label {
+  color: #a8b8cd;
+}
+.comparison-scroll {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+.service-comparison table {
+  width: 100%;
+  min-width: 1000px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+.service-comparison caption {
+  text-align: left;
+  color: #a8b8cd;
+  padding-bottom: 12px;
+}
+.service-comparison th,
+.service-comparison td {
+  padding: 14px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid #29384c;
+}
+.service-comparison thead th {
+  color: #a8b8cd;
+  font-weight: 500;
+}
+.service-comparison tbody th {
+  min-width: 150px;
+}
+.service-comparison .comparison-meta {
+  display: block;
+  margin-top: 4px;
+  color: #a8b8cd;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.service-comparison details {
+  margin-top: 6px;
+  color: #a8b8cd;
+  font-size: 0.75rem;
+  max-width: 220px;
+}
+.service-comparison summary {
+  color: #93c5fd;
+  cursor: pointer;
+}
+.service-comparison summary:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 4px;
+}
+.organization-forms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 16px;
+}
+.organization-forms form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.organization-forms .field {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.organization-forms button {
+  margin-top: auto;
+}
+@media (max-width: 720px) {
+  .scope-selectors,
+  .organization-forms {
+    grid-template-columns: 1fr;
+  }
+  .comparison-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .comparison-heading label {
+    width: 100%;
+  }
+}

@@ -1033,3 +1033,153 @@ it('registers measurement history under current authenticated workspace access a
       .statusCode,
   ).toBe(401);
 });
+
+describe('workspace organization', () => {
+  it('persists team/product hierarchy and assignments while enforcing current scope and owner policy', async () => {
+    const owner = await login('organization-owner', 'organization-owner@example.com');
+    const member = await login('organization-member', 'organization-member@example.com');
+    const outsider = await login('organization-outsider', 'organization-outsider@example.com');
+    const id = await workspace(owner.cookie, 'Engineering');
+    const other = await workspace(outsider.cookie, 'Other Engineering');
+    const base = `/api/workspaces/${id}`;
+    await accept(
+      member.cookie,
+      (await invite(owner.cookie, id, 'organization-member@example.com')).token,
+    );
+    const write = (path: string, payload: Record<string, unknown>, cookie = owner.cookie) =>
+      server.inject({ method: 'POST', url: `${base}${path}`, headers: headers(cookie), payload });
+    const serviceResponse = await write('/services', { name: 'API' });
+    const service = record(record(serviceResponse.json()).service);
+    const serviceId = string(service.id);
+    const initial = await server.inject({
+      url: `${base}/organization`,
+      headers: headers(member.cookie),
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toEqual({
+      workspaceId: id,
+      teams: [],
+      products: [],
+      services: [service],
+      assignments: [{ serviceId, productId: null }],
+    });
+    const createdTeam = await write('/teams', { name: '  Platform  ' });
+    expect(createdTeam.statusCode).toBe(201);
+    const team = record(record(createdTeam.json()).team);
+    expect(team.name).toBe('Platform');
+    expect((await write('/teams', { name: '\tPlatform\n' })).statusCode).toBe(409);
+    const teamId = string(team.id);
+    const createdProduct = await write('/products', { name: 'Delivery', teamId });
+    expect(createdProduct.statusCode).toBe(201);
+    const product = record(record(createdProduct.json()).product);
+    const productId = string(product.id);
+    const secondProduct = await write('/products', { name: 'Insights', teamId });
+    expect(secondProduct.statusCode).toBe(201);
+    expect((await write('/products', { name: ' Delivery ', teamId })).statusCode).toBe(409);
+    const otherTeamResponse = await server.inject({
+      method: 'POST',
+      url: `/api/workspaces/${other}/teams`,
+      headers: headers(outsider.cookie),
+      payload: { name: 'Platform' },
+    });
+    const otherTeam = string(record(record(otherTeamResponse.json()).team).id);
+    const otherProductResponse = await server.inject({
+      method: 'POST',
+      url: `/api/workspaces/${other}/products`,
+      headers: headers(outsider.cookie),
+      payload: { name: 'Delivery', teamId: otherTeam },
+    });
+    const otherProduct = string(record(record(otherProductResponse.json()).product).id);
+    expect((await write('/products', { name: 'Intrusion', teamId: otherTeam })).statusCode).toBe(
+      404,
+    );
+    expect(
+      (await write(`/services/${serviceId}/product`, { productId: otherProduct })).statusCode,
+    ).toBe(404);
+    expect((await write(`/services/${randomUUID()}/product`, { productId })).statusCode).toBe(404);
+    expect((await write('/products', { name: 'Missing', teamId: randomUUID() })).statusCode).toBe(
+      404,
+    );
+    for (const [path, payload] of [
+      ['/teams', { name: 'Member team' }],
+      ['/products', { name: 'Member product', teamId }],
+      [`/services/${serviceId}/product`, { productId }],
+    ] as const)
+      expect((await write(path, payload, member.cookie)).statusCode).toBe(403);
+    for (const [path, payload] of [
+      ['/teams', { name: '' }],
+      ['/teams', { name: 'Good', extra: true }],
+      ['/products', { name: 'No team' }],
+      ['/products', { name: 'Good', teamId: 'bad' }],
+      [`/services/${serviceId}/product`, {}],
+      [`/services/${serviceId}/product`, { productId: 'bad' }],
+      [`/services/${serviceId}/product`, { productId, role: 'owner' }],
+    ] as const)
+      expect((await write(path, payload)).statusCode).toBe(400);
+    expect(
+      (
+        await server.inject({
+          method: 'POST',
+          url: `${base}/teams`,
+          headers: { cookie: owner.cookie, origin: 'https://untrusted.example' },
+          payload: { name: 'Bad origin' },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (await server.inject({ url: `${base}/organization`, headers: headers(outsider.cookie) }))
+        .statusCode,
+    ).toBe(404);
+    expect((await server.inject(`${base}/organization`)).statusCode).toBe(401);
+    expect(
+      (await server.inject({ url: `${base}/organization?extra=1`, headers: headers(owner.cookie) }))
+        .statusCode,
+    ).toBe(400);
+    await expect(
+      pool.query('INSERT INTO products (id,workspace_id,team_id,name) VALUES ($1,$2,$3,$4)', [
+        randomUUID(),
+        id,
+        otherTeam,
+        'Cross team',
+      ]),
+    ).rejects.toMatchObject({ code: '23503' });
+    await expect(
+      pool.query('UPDATE services SET product_id=$1 WHERE id=$2', [otherProduct, serviceId]),
+    ).rejects.toMatchObject({ code: '23503' });
+    const assigned = await write(`/services/${serviceId}/product`, { productId });
+    expect(assigned.statusCode).toBe(200);
+    expect(assigned.json()).toEqual({ assignment: { serviceId, productId } });
+    expect(
+      (await server.inject({ url: `${base}/services`, headers: headers(owner.cookie) })).json(),
+    ).toEqual({ services: [service] });
+    const organization = await server.inject({
+      url: `${base}/organization`,
+      headers: headers(member.cookie),
+    });
+    expect(organization.headers['cache-control']).toBe('no-store');
+    expect(organization.json()).toEqual({
+      workspaceId: id,
+      teams: [team],
+      products: [product, record(record(secondProduct.json()).product)],
+      services: [service],
+      assignments: [{ serviceId, productId }],
+    });
+    const reassignedId = string(record(record(secondProduct.json()).product).id);
+    expect(
+      (await write(`/services/${serviceId}/product`, { productId: reassignedId })).json(),
+    ).toEqual({ assignment: { serviceId, productId: reassignedId } });
+    expect((await write(`/services/${serviceId}/product`, { productId: null })).json()).toEqual({
+      assignment: { serviceId, productId: null },
+    });
+    await pool.query('DELETE FROM workspace_memberships WHERE workspace_id=$1 AND user_id=$2', [
+      id,
+      member.userId,
+    ]);
+    expect(
+      (await server.inject({ url: `${base}/organization`, headers: headers(member.cookie) }))
+        .statusCode,
+    ).toBe(404);
+    await pool.query('DELETE FROM auth_sessions WHERE id=$1', [owner.sessionId]);
+    expect((await write('/teams', { name: 'Revoked' })).statusCode).toBe(401);
+  });
+});

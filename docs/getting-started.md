@@ -1,5 +1,7 @@
 # Getting started locally
 
+After creating a workspace and services, use [Engineering drill-down](engineering-drilldown.md) to create teams/products, assign services and explore delivery by organization scope.
+
 This guide brings up Clio's browser, API, PostgreSQL and separate mock worker. GitHub sign-in is real identity; mock deployment previews and mock collection runs use fictional evidence only. Mock setup does not connect a live provider. Overview keeps saved fictional results separate from live-source histories. Separate [live GitHub](providers/connect-github.md) and [native Argo notification](providers/connect-argocd.md) workflows use private operator grants and their own workers. For independent production activation and application artifact provenance, follow the [Argo evidence producer guide](providers/argo-enrichment.md). The separate [measurement producer guide](providers/connect-measurement-evidence.md) covers evidence for all five metrics; it does not modify native collection results.
 
 ## Prerequisites and clone

@@ -28,6 +28,8 @@ PostgreSQL workspace/service persistence and transactional, checksummed migratio
 
 ## Frontend operational requirements
 
+The [Engineering drill-down](engineering-drilldown.md) organizes a workspace into teams, products and services. Products have one owning team; services have one optional product assignment. Current ownership is separate from immutable collection/measurement context and workspace authorization. Owners configure the hierarchy; members read it. Migration 0014 enforces workspace-bound ownership through composite foreign keys. Group views compare safe saved service results from one selected source, loading ten services per page; they do not calculate group-level OEMS metrics or average service medians. Service navigation retains existing evidence and trend boundaries.
+
 Workspace owners can use an inline five-step [source setup wizard](providers/source-setup-wizard.md) to select a service/source, configure the existing provider scope, collect a saved reporting window and review independent evidence. Provider controls remain mounted across presentation steps to preserve drafts and collection confirmation state. Progress depends on scoped saved configuration and successful results for the current revision, never enqueue success or empty history. The wizard reuses provider authorization, cache and stale-response fences; source credentials and independent reports remain server-side. Finishing a setup review does not promote coverage or metric quality.
 
 The app is a SPA, so production hosting must serve index.html for navigable application paths such as /settings, while serving assets normally. Client error/unknown-route states are present. No external fonts, telemetry or credentials are loaded by the shell.

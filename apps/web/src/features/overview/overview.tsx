@@ -7,12 +7,13 @@ import {
   type Run as GitHubRun,
   parseHistoryPage as parseGitHubPage,
 } from '../github-collection/api';
-import { errorMessage, parseServices, parseWorkspaces } from '../identity/api';
+import { errorMessage, parseWorkspaces } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MeasurementHistory } from '../measurement-evidence/measurement-history';
 import { MetricResults } from '../measurements/metric-results';
 import { comparableSamples, MetricTrends } from '../measurements/metric-trends';
 import { type Run as MockRun, parseHistoryPage as parseMockPage } from '../mock-collection/api';
+import { OrganizationBrowser } from '../organization/organization-browser';
 import { HistoryBrowser, useStoredRead } from '../result-history/history-browser';
 
 type StoredRun = GitHubRun | ArgoRun | MockRun;
@@ -89,53 +90,19 @@ function ServiceSelection({
   workspaceId: string;
   workspaceName: string;
 }) {
-  const [selected, setSelected] = useState('');
-  const query = useStoredRead(
-    `${workspaceId}/services`,
-    `/api/workspaces/${workspaceId}/services`,
-    (value) => parseServices(value, workspaceId),
-  );
-  if (query.isPending)
-    return (
-      <p className="col-span-full" role="status">
-        Loading services…
-      </p>
-    );
-  if (query.isError)
-    return <ReadError error={query.error} retry={() => void query.refetch()} label="services" />;
-  const active = query.data.find((service) => service.id === selected);
   return (
-    <>
-      {query.data.length === 0 ? (
-        <p>No services in this workspace. Add a service in Workspace.</p>
-      ) : (
-        <div className="scope-filter">
-          <label htmlFor="overview-service">Service</label>
-          <select
-            id="overview-service"
-            className="field"
-            value={active?.id ?? ''}
-            onChange={(event) => setSelected(event.target.value)}
-          >
-            <option value="">Choose a service</option>
-            {query.data.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {active && (
+    <OrganizationBrowser
+      workspaceId={workspaceId}
+      renderService={(service) => (
         <StoredResults
-          key={active.id}
+          key={service.id}
           workspaceId={workspaceId}
           workspaceName={workspaceName}
-          serviceId={active.id}
-          serviceName={active.name}
+          serviceId={service.id}
+          serviceName={service.name}
         />
       )}
-    </>
+    />
   );
 }
 

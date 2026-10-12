@@ -19,6 +19,7 @@ import {
 } from '../identity/api';
 import { useSession } from '../identity/session';
 import { MeasurementEvidence } from '../measurement-evidence/measurement-evidence';
+import { OrganizationSettings } from '../organization/organization-settings';
 import { SourceSetupWizard } from '../source-setup/source-setup-wizard';
 import { WorkspaceAccess } from './workspace-access';
 
@@ -379,6 +380,15 @@ function WorkspaceScope({
             </div>
           ) : (
             <>
+              {!setupOpen && (
+                <OrganizationSettings
+                  key={services.data.map((item) => item.id).join('.')}
+                  workspace={workspace}
+                  services={services.data}
+                  validSelection={valid}
+                  onAccessLost={measurementAccessLost}
+                />
+              )}
               <h3 className="mt-6 font-semibold">Services</h3>
               {workspace.role === 'owner' && (
                 <>

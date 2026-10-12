@@ -46,6 +46,13 @@ describe('unconfigured identity boundary', () => {
         ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/members'],
         ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/invitations'],
         ['POST', '/api/workspaces'],
+        ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/organization'],
+        ['POST', '/api/workspaces/00000000-0000-0000-0000-000000000001/teams'],
+        ['POST', '/api/workspaces/00000000-0000-0000-0000-000000000001/products'],
+        [
+          'POST',
+          '/api/workspaces/00000000-0000-0000-0000-000000000001/services/00000000-0000-0000-0000-000000000002/product',
+        ],
         ['GET', '/api/workspaces/00000000-0000-0000-0000-000000000001/services'],
         ['POST', '/api/auth/sign-in/social'],
         ['GET', '/api/auth/get-session'],

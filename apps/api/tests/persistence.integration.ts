@@ -45,7 +45,21 @@ afterAll(async () => {
 describe('real PostgreSQL foundation', () => {
   it('rejects unmigrated schema, serializes concurrent runners and is idempotent', async () => {
     await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+    await migrate(
+      pool,
+      migrations.filter((migration) => !migration.name.startsWith('0014_')),
+    );
+    const preservedWorkspace = randomUUID();
+    await repository.createWorkspace(preservedWorkspace, 'Existing workspace');
+    const preservedService = await repository.createService(preservedWorkspace, 'Existing service');
     await Promise.all([migrate(pool, migrations), migrate(pool, migrations)]);
+    expect(await repository.getService(preservedWorkspace, preservedService.id)).toEqual(
+      preservedService,
+    );
+    const assignment = await pool.query('SELECT product_id FROM services WHERE id = $1', [
+      preservedService.id,
+    ]);
+    expect(assignment.rows).toEqual([{ product_id: null }]);
     await migrate(pool, migrations);
     await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
     const ledger = await pool.query<Record<string, unknown>>(
@@ -163,6 +177,9 @@ describe('real PostgreSQL foundation', () => {
       ['argo_archive_journals', 'last_sequence'],
       ['argo_archive_records', 'archive_fingerprint'],
       ['argo_receipt_authorities', 'observed_at'],
+      ['teams', 'workspace_id'],
+      ['products', 'team_id'],
+      ['services', 'product_id'],
       ['argo_archive_buckets', 'tokens'],
       ['argo_connection_revisions', 'archive_grant'],
       ['argo_receipts', 'origin_transport'],

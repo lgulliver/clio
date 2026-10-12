@@ -61,6 +61,22 @@ function defaultRead(input: string | URL | Request) {
         { id: otherWorkspace, name: 'Other workspace', role: 'owner' },
       ],
     });
+  if (path.endsWith('/organization')) {
+    const workspaceId = path.includes(otherWorkspace) ? otherWorkspace : scope.workspaceId;
+    return json({
+      workspaceId,
+      teams: [],
+      products: [],
+      services: [
+        { id: scope.serviceId, name: 'Delivery', workspaceId },
+        { id: otherService, name: 'Other service', workspaceId },
+      ],
+      assignments: [
+        { serviceId: scope.serviceId, productId: null },
+        { serviceId: otherService, productId: null },
+      ],
+    });
+  }
   if (path.endsWith('/services')) {
     const workspaceId = path.includes(otherWorkspace) ? otherWorkspace : scope.workspaceId;
     return json({
@@ -195,7 +211,15 @@ describe('stored results overview', () => {
 
   it('shows empty services without asserting evidence absence', async () => {
     fetchMock.mockImplementation(async (input) =>
-      String(input).endsWith('/services') ? json({ services: [] }) : defaultRead(input),
+      String(input).endsWith('/organization')
+        ? json({
+            workspaceId: scope.workspaceId,
+            teams: [],
+            products: [],
+            services: [],
+            assignments: [],
+          })
+        : defaultRead(input),
     );
     mount();
     fireEvent.change(await screen.findByLabelText('Workspace'), {
@@ -338,14 +362,14 @@ describe('stored results overview', () => {
     },
   );
 
-  it.each(['/api/workspaces', '/services'])(
+  it.each(['/api/workspaces', '/organization'])(
     'expires identity after 401 while reading %s',
     async (suffix) => {
       fetchMock.mockImplementation(async (input) =>
         String(input).endsWith(suffix) ? json({}, 401) : defaultRead(input),
       );
       mount();
-      if (suffix === '/services')
+      if (suffix === '/organization')
         fireEvent.change(await screen.findByLabelText('Workspace'), {
           target: { value: scope.workspaceId },
         });
@@ -357,7 +381,7 @@ describe('stored results overview', () => {
 
   it('hides service results after service list access is lost', async () => {
     fetchMock.mockImplementation(async (input) =>
-      String(input).endsWith('/services') ? json({}, 404) : defaultRead(input),
+      String(input).endsWith('/organization') ? json({}, 404) : defaultRead(input),
     );
     mount();
     fireEvent.change(await screen.findByLabelText('Workspace'), {
