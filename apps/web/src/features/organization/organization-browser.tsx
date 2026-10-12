@@ -3,22 +3,31 @@ import { errorMessage, type Service } from '../identity/api';
 import { useStoredRead } from '../result-history/history-browser';
 import { parseOrganization } from './api';
 import { type ComparisonSource, ServiceComparison } from './service-comparison';
+import {
+  type ChangeOrganizationView,
+  defaultView,
+  type OrganizationView,
+  resolveOrganizationView,
+} from './view-state';
 
 export function OrganizationBrowser({
   workspaceId,
   renderService,
+  view,
+  onViewChange,
+  renderShareLink,
 }: {
+  view?: OrganizationView | undefined;
+  onViewChange?: ChangeOrganizationView | undefined;
+  renderShareLink?: ((current: OrganizationView) => ReactNode) | undefined;
   workspaceId: string;
-  renderService: (service: Service) => ReactNode;
+  renderService: (service: Service, onAccessLost: () => void) => ReactNode;
 }) {
   const [blocked, setBlocked] = useState(false);
   const accessLost = useCallback(() => setBlocked(true), []);
-  const [source, setSource] = useState<ComparisonSource>('measurement');
-  const [period, setPeriod] = useState('latest');
-  const [previousPeriod, setPreviousPeriod] = useState('');
-  const [teamId, setTeamId] = useState('');
-  const [productId, setProductId] = useState('');
-  const [serviceId, setServiceId] = useState('');
+  const [localView, setLocalView] = useState(defaultView);
+  const selectedView = view ?? localView;
+  const { source, period, previousPeriod } = selectedView;
   const heading = useRef<HTMLHeadingElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const query = useStoredRead(
@@ -32,8 +41,8 @@ export function OrganizationBrowser({
   if (blocked)
     return (
       <div className="panel" role="alert">
-        Workspace results are no longer accessible. Select another workspace or refresh your access
-        in Workspace.
+        Stored results are no longer accessible. Select another workspace or refresh your access in
+        Workspace.
       </div>
     );
   if (query.isPending) return <p role="status">Loading organization…</p>;
@@ -47,6 +56,8 @@ export function OrganizationBrowser({
       </div>
     );
   const organization = query.data;
+  const resolved = resolveOrganizationView(selectedView, organization);
+  const { teamId, productId, serviceId } = resolved.view;
   const services = organization.services;
   const assignments = new Map(
     organization.assignments.map((item) => [item.serviceId, item.productId]),
@@ -74,14 +85,19 @@ export function OrganizationBrowser({
     service?.name ??
     product?.name ??
     (unassigned ? 'Unassigned services' : (team?.name ?? 'Engineering'));
+  function change(patch: Partial<OrganizationView>) {
+    const update = (current: OrganizationView): OrganizationView => ({
+      ...resolveOrganizationView(current, organization).view,
+      ...patch,
+    });
+    if (onViewChange) onViewChange(update);
+    else setLocalView(update);
+  }
   function changeSource(value: ComparisonSource) {
-    setSource(value);
-    setPeriod('latest');
-    setPreviousPeriod('');
+    change({ source: value, period: 'latest', previousPeriod: '' });
   }
   function changePeriod(value: string) {
-    setPeriod(value);
-    if (value === 'latest') setPreviousPeriod('');
+    change({ period: value, ...(value === 'latest' ? { previousPeriod: '' } : {}) });
   }
   function ownership(id: string) {
     const owned = organization.products.find((item) => item.id === assignments.get(id));
@@ -91,12 +107,14 @@ export function OrganizationBrowser({
   }
   function selectService(id: string) {
     const owned = organization.products.find((item) => item.id === assignments.get(id));
-    setTeamId(owned?.teamId ?? '');
-    setProductId(owned?.id ?? 'unassigned');
-    setServiceId(id);
+    change({ teamId: owned?.teamId ?? '', productId: owned?.id ?? 'unassigned', serviceId: id });
   }
   return (
     <div className="organization-browser">
+      {view && resolved.unavailable && (
+        <p role="status">Linked selection is unavailable. Showing the closest accessible scope.</p>
+      )}
+      {renderShareLink?.(resolved.view)}
       <nav aria-label="Engineering drill-down" className="scope-breadcrumbs">
         <ol>
           <li>
@@ -105,9 +123,7 @@ export function OrganizationBrowser({
               aria-current={!team && !product && !unassigned && !service ? 'page' : undefined}
               onClick={() => {
                 setFocusRequest((request) => request + 1);
-                setTeamId('');
-                setProductId('');
-                setServiceId('');
+                change({ teamId: '', productId: '', serviceId: '' });
               }}
             >
               Engineering
@@ -120,9 +136,7 @@ export function OrganizationBrowser({
                 aria-current={!product && !service ? 'page' : undefined}
                 onClick={() => {
                   setFocusRequest((request) => request + 1);
-                  setTeamId(team.id);
-                  setProductId('');
-                  setServiceId('');
+                  change({ teamId: team.id, productId: '', serviceId: '' });
                 }}
               >
                 {team.name}
@@ -136,9 +150,11 @@ export function OrganizationBrowser({
                 aria-current={!service ? 'page' : undefined}
                 onClick={() => {
                   setFocusRequest((request) => request + 1);
-                  setTeamId(team?.id ?? '');
-                  setProductId(product?.id ?? (unassigned ? 'unassigned' : ''));
-                  setServiceId('');
+                  change({
+                    teamId: team?.id ?? '',
+                    productId: product?.id ?? (unassigned ? 'unassigned' : ''),
+                    serviceId: '',
+                  });
                 }}
               >
                 {product?.name ?? 'Unassigned services'}
@@ -155,9 +171,7 @@ export function OrganizationBrowser({
             className="field"
             value={team?.id ?? ''}
             onChange={(e) => {
-              setTeamId(e.target.value);
-              setProductId('');
-              setServiceId('');
+              change({ teamId: e.target.value, productId: '', serviceId: '' });
             }}
           >
             <option value="">All teams</option>
@@ -174,12 +188,13 @@ export function OrganizationBrowser({
             className="field"
             value={product?.id ?? (unassigned ? 'unassigned' : '')}
             onChange={(e) => {
-              setProductId(e.target.value);
               const selected = organization.products.find((item) => item.id === e.target.value);
-              setTeamId(
-                selected?.teamId ?? (e.target.value === 'unassigned' ? '' : (team?.id ?? '')),
-              );
-              setServiceId('');
+              change({
+                productId: e.target.value,
+                teamId:
+                  selected?.teamId ?? (e.target.value === 'unassigned' ? '' : (team?.id ?? '')),
+                serviceId: '',
+              });
             }}
           >
             <option value="">All products</option>
@@ -201,9 +216,11 @@ export function OrganizationBrowser({
               onChange={(e) => {
                 if (e.target.value) selectService(e.target.value);
                 else {
-                  setTeamId(team?.id ?? '');
-                  setProductId(product?.id ?? (unassigned ? 'unassigned' : ''));
-                  setServiceId('');
+                  change({
+                    teamId: team?.id ?? '',
+                    productId: product?.id ?? (unassigned ? 'unassigned' : ''),
+                    serviceId: '',
+                  });
                 }
               }}
             >
@@ -234,9 +251,7 @@ export function OrganizationBrowser({
                   type="button"
                   onClick={() => {
                     setFocusRequest((request) => request + 1);
-                    setTeamId(item.id);
-                    setProductId('');
-                    setServiceId('');
+                    change({ teamId: item.id, productId: '', serviceId: '' });
                   }}
                 >
                   <strong>{item.name}</strong>{' '}
@@ -253,8 +268,7 @@ export function OrganizationBrowser({
                   type="button"
                   onClick={() => {
                     setFocusRequest((request) => request + 1);
-                    setProductId(item.id);
-                    setServiceId('');
+                    change({ teamId: team.id, productId: item.id, serviceId: '' });
                   }}
                 >
                   <strong>{item.name}</strong>{' '}
@@ -273,6 +287,7 @@ export function OrganizationBrowser({
           {services.length > 0 && (
             <ServiceComparison
               key={`${team?.id ?? ''}/${product?.id ?? productId}`}
+              pageContext={view ? `${source}/${period}/${previousPeriod}` : undefined}
               services={scoped}
               ownership={ownership}
               select={(id) => {
@@ -282,7 +297,7 @@ export function OrganizationBrowser({
               source={source}
               onSourceChange={changeSource}
               previousPeriod={previousPeriod}
-              onPreviousPeriodChange={setPreviousPeriod}
+              onPreviousPeriodChange={(value) => change({ previousPeriod: value })}
               period={period}
               onPeriodChange={changePeriod}
               onAccessLost={accessLost}
@@ -294,6 +309,7 @@ export function OrganizationBrowser({
         <>
           <ServiceWindowComparison
             key={service.id}
+            shared={Boolean(view)}
             service={service}
             ownership={ownership}
             source={source}
@@ -301,14 +317,14 @@ export function OrganizationBrowser({
             period={period}
             onPeriodChange={changePeriod}
             previousPeriod={previousPeriod}
-            onPreviousPeriodChange={setPreviousPeriod}
+            onPreviousPeriodChange={(value) => change({ previousPeriod: value })}
             select={(id) => {
               setFocusRequest((request) => request + 1);
               selectService(id);
             }}
             onAccessLost={accessLost}
           />
-          {renderService(service)}
+          {renderService(service, accessLost)}
         </>
       )}
     </div>
@@ -317,11 +333,24 @@ export function OrganizationBrowser({
 
 function ServiceWindowComparison({
   service,
+  shared,
   ...props
-}: Omit<Parameters<typeof ServiceComparison>[0], 'services' | 'compact'> & { service: Service }) {
-  const [open, setOpen] = useState(false);
+}: Omit<Parameters<typeof ServiceComparison>[0], 'services' | 'compact'> & {
+  service: Service;
+  shared: boolean;
+}) {
+  const [open, setOpen] = useState(Boolean(shared && props.previousPeriod));
+  const comparisonContext =
+    shared && props.previousPeriod ? `${props.source}/${props.period}/${props.previousPeriod}` : '';
+  useEffect(() => {
+    if (comparisonContext) setOpen(true);
+  }, [comparisonContext]);
   return (
-    <details className="panel mt-3" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      open={open}
+      className="panel mt-3"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="text-action cursor-pointer">Compare saved windows</summary>
       {open && <ServiceComparison {...props} services={[service]} compact />}
     </details>

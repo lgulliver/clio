@@ -175,10 +175,12 @@ export function ServiceComparison({
   previousPeriod,
   onPreviousPeriodChange,
   compact = false,
+  pageContext,
 }: {
   previousPeriod: string;
   onPreviousPeriodChange: (period: string) => void;
   compact?: boolean;
+  pageContext?: string | undefined;
   onAccessLost: () => void;
   period: string;
   onPeriodChange: (period: string) => void;
@@ -188,7 +190,10 @@ export function ServiceComparison({
   ownership: (serviceId: string) => string;
   select: (serviceId: string) => void;
 }) {
-  const [page, setPage] = useState(0);
+  const [paging, setPaging] = useState({ context: pageContext, page: 0 });
+  const page = paging.context === pageContext ? paging.page : 0;
+  // Reset before forming queries, including when history returns to an earlier filter.
+  if (paging.context !== pageContext) setPaging({ context: pageContext, page: 0 });
   const totalPages = Math.ceil(services.length / 10);
   const activePage = Math.min(page, Math.max(0, totalPages - 1));
   const visible = useMemo(
@@ -382,7 +387,7 @@ export function ServiceComparison({
                 type="button"
                 className="control"
                 disabled={activePage === 0}
-                onClick={() => setPage(activePage - 1)}
+                onClick={() => setPaging({ context: pageContext, page: activePage - 1 })}
               >
                 Previous services
               </button>
@@ -393,7 +398,7 @@ export function ServiceComparison({
                 type="button"
                 className="control"
                 disabled={activePage + 1 >= totalPages}
-                onClick={() => setPage(activePage + 1)}
+                onClick={() => setPaging({ context: pageContext, page: activePage + 1 })}
               >
                 Next services
               </button>

@@ -43,6 +43,16 @@ The comparison shows previous/current values, status and quality reasons for eac
 
 Deployment frequency differences use deployments/day, lead time hours, recovery minutes and failure/rework percentage points (pp). No division by a zero baseline or relative percentage is performed. Provisional numeric values stay visible with their quality, but produce no delta. Complete zero frequency remains a valid value; no-observation medians/ratios remain unavailable. A page-scoped list identifies services with increases in complete time or failure/rework metrics. These changes do not establish causes or assign health grades; no team/product medians are averaged. Existing per-service trend charts remain available below. On a service page, expand **Compare saved windows** to inspect that service's comparison while retaining its full evidence histories.
 
+## Share a view
+
+Choose a workspace and drill-down scope, source and reporting windows, then **Copy view link**. If clipboard access is unavailable, a focused field exposes the sanitized link for manual copying. The URL carries workspace/team/product/service IDs and comparison filters. Recipients must sign in and already have workspace membership; links grant no access and contain no credentials, invitations or metric payloads. If sign-in redirects away, reopen the link after signing in.
+
+Back/Forward restores the URL selections. Workspace changes clear descendant selections and comparison filters; source changes or Latest clear the previous window. Links reopen the first service page, and changing shared source/window filters resets pagination. Exact valid windows remain selected when the bounded history does not contain them. Service links with a previous window open **Compare saved windows** automatically. These filters apply to comparison controls; independent measurement/native history panels retain their own browsing controls.
+
+Service IDs take precedence over product/team hints, and products follow their current owning team. Missing selections display a recovery notice and the closest accessible scope; an inaccessible workspace is never replaced automatically with another workspace. Copying or navigating produces a link reflecting the resolved current ownership. Malformed IDs, unsupported sources and impossible/unordered dates are ignored with a generic notice; unknown query fields are excluded from copied links. URL examples use `window=2026-01-01_2026-01-03` and the same format for `previous`, with UTC exclusive end.
+
+Shared views read saved history again; they are not frozen result snapshots. Ownership changes or a newer saved result for the same window can change what the link displays. Provider collection is never triggered by opening or copying a view.
+
 ## Coverage and freshness
 
 Group comparisons summarize only the current page, selected source and reporting window. Saved results, absent matches, pending reads, failed reads and legacy results without metric details stay separate. Open summary details to inspect affected services. Coverage declarations and each saved OEMS metric status are counted independently; complete coverage does not upgrade provisional metrics. Empty observations retain their saved status, rather than becoming missing results.

@@ -14,11 +14,29 @@ import { MetricResults } from '../measurements/metric-results';
 import { comparableSamples, MetricTrends } from '../measurements/metric-trends';
 import { type Run as MockRun, parseHistoryPage as parseMockPage } from '../mock-collection/api';
 import { OrganizationBrowser } from '../organization/organization-browser';
+import {
+  type ChangeOrganizationView,
+  defaultView,
+  type OrganizationView,
+} from '../organization/view-state';
 import { HistoryBrowser, useStoredRead } from '../result-history/history-browser';
+import { ShareViewLink } from './share-view-link';
+import {
+  type ChangeOverviewSearch,
+  type OverviewSearch,
+  searchForView,
+  viewFromSearch,
+} from './view-search';
 
 type StoredRun = GitHubRun | ArgoRun | MockRun;
 
-export function Overview() {
+export function Overview({
+  search,
+  onSearchChange,
+}: {
+  search?: OverviewSearch | undefined;
+  onSearchChange?: ChangeOverviewSearch | undefined;
+}) {
   const session = useSession();
   return (
     <section className="delivery-dashboard">
@@ -26,8 +44,15 @@ export function Overview() {
         <h1>Delivery overview</h1>
         <p>Understand service delivery through saved measurements and their evidence.</p>
       </header>
+      {search?.invalidView && (
+        <p role="status">Some view filters were invalid and have been ignored.</p>
+      )}
       {session.status === 'ready' && session.user ? (
-        <WorkspaceSelection key={`${session.user.id}:${session.revision}`} />
+        <WorkspaceSelection
+          key={`${session.user.id}:${session.revision}`}
+          search={search}
+          onSearchChange={onSearchChange}
+        />
       ) : (
         <div className="panel">
           <h2 className="text-xl font-semibold">Stored service evidence</h2>
@@ -47,8 +72,15 @@ export function Overview() {
   );
 }
 
-function WorkspaceSelection() {
-  const [selected, setSelected] = useState('');
+function WorkspaceSelection({
+  search,
+  onSearchChange,
+}: {
+  search?: OverviewSearch | undefined;
+  onSearchChange?: ChangeOverviewSearch | undefined;
+}) {
+  const [localSelected, setSelected] = useState('');
+  const selected = search?.workspace ?? localSelected;
   const query = useStoredRead('workspaces', '/api/workspaces', parseWorkspaces);
   if (query.isPending) return <p role="status">Loading workspaces…</p>;
   if (query.isError)
@@ -56,6 +88,9 @@ function WorkspaceSelection() {
   const active = query.data.find((workspace) => workspace.id === selected);
   return (
     <div className="overview-scope">
+      {selected && !active && (
+        <p role="alert">Linked workspace is unavailable. Choose an accessible workspace.</p>
+      )}
       {query.data.length === 0 ? (
         <p>No accessible workspaces. Create one or accept an invitation in Workspace.</p>
       ) : (
@@ -65,7 +100,12 @@ function WorkspaceSelection() {
             id="overview-workspace"
             className="field"
             value={active?.id ?? ''}
-            onChange={(event) => setSelected(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (onSearchChange)
+                onSearchChange(() => (value ? searchForView(value, defaultView) : {}));
+              else setSelected(value);
+            }}
           >
             <option value="">Choose a workspace</option>
             {query.data.map((workspace) => (
@@ -77,7 +117,20 @@ function WorkspaceSelection() {
         </div>
       )}
       {active && (
-        <ServiceSelection key={active.id} workspaceId={active.id} workspaceName={active.name} />
+        <ServiceSelection
+          key={active.id}
+          workspaceId={active.id}
+          workspaceName={active.name}
+          view={search ? viewFromSearch(search) : undefined}
+          onViewChange={
+            onSearchChange
+              ? (update) =>
+                  onSearchChange((current) =>
+                    searchForView(active.id, update(viewFromSearch(current))),
+                  )
+              : undefined
+          }
+        />
       )}
     </div>
   );
@@ -86,20 +139,32 @@ function WorkspaceSelection() {
 function ServiceSelection({
   workspaceId,
   workspaceName,
+  view,
+  onViewChange,
 }: {
   workspaceId: string;
   workspaceName: string;
+  view?: OrganizationView | undefined;
+  onViewChange?: ChangeOrganizationView | undefined;
 }) {
   return (
     <OrganizationBrowser
       workspaceId={workspaceId}
-      renderService={(service) => (
+      view={view}
+      onViewChange={onViewChange}
+      renderShareLink={
+        view
+          ? (current) => <ShareViewLink search={searchForView(workspaceId, current)} />
+          : undefined
+      }
+      renderService={(service, onAccessLost) => (
         <StoredResults
           key={service.id}
           workspaceId={workspaceId}
           workspaceName={workspaceName}
           serviceId={service.id}
           serviceName={service.name}
+          onAccessLost={onAccessLost}
         />
       )}
     />
@@ -122,7 +187,9 @@ function StoredResults({
   serviceId,
   workspaceName,
   serviceName,
+  onAccessLost,
 }: {
+  onAccessLost: () => void;
   workspaceId: string;
   serviceId: string;
   workspaceName: string;
@@ -149,7 +216,13 @@ function StoredResults({
           Manage workspace and sources
         </Link>
       </div>
-      <MeasurementHistory {...scope} onAccessLost={() => setBlocked(true)} />
+      <MeasurementHistory
+        {...scope}
+        onAccessLost={() => {
+          setBlocked(true);
+          onAccessLost();
+        }}
+      />
       <div className="mt-10 mb-4">
         <p className="text-lg font-semibold">Native collection history</p>
         <p className="mt-2 text-sm text-clio-muted">
@@ -171,7 +244,10 @@ function StoredResults({
           title={title}
           path={`${path}/${provider}-collection-runs`}
           parse={(value, options) => parse(value, scope, options)}
-          onAccessLost={() => setBlocked(true)}
+          onAccessLost={() => {
+            setBlocked(true);
+            onAccessLost();
+          }}
           renderResult={(newest, success, page) => (
             <ResultHistory newest={newest} success={success} page={page} />
           )}
