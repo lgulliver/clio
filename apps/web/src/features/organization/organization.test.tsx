@@ -10,7 +10,7 @@ import {
 } from '../github-collection/fixtures.test-support';
 import { runFixture } from '../measurement-evidence/fixtures.test-support';
 import { withMetric } from '../measurements/fixtures.test-support';
-import { parseOrganization } from './api';
+import { parseDeleted, parseOrganization, parseUpdatedProduct, parseUpdatedTeam } from './api';
 import { windowKey } from './comparison-data';
 import { OrganizationBrowser } from './organization-browser';
 import { OrganizationSettings } from './organization-settings';
@@ -611,4 +611,337 @@ it('expires identity and hides group charts after a dynamic history read returns
   expect(session.expire).toHaveBeenCalledWith(1);
   expect(screen.queryByRole('table')).not.toBeInTheDocument();
   expect(screen.queryByRole('img')).not.toBeInTheDocument();
+});
+
+describe('organization lifecycle', () => {
+  it('renames teams, moves products and confirms deletion while preserving services', async () => {
+    const data = organization();
+    fetchMock.mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (options?.method === 'PATCH' && path.endsWith(`/teams/${teamId}`)) {
+        const team = data.teams.find((item) => item.id === teamId);
+        if (!team) throw new Error('Missing team fixture');
+        team.name = 'Platform';
+        return json({ team });
+      }
+      if (options?.method === 'PATCH' && path.endsWith(`/products/${productId}`)) {
+        const product = data.products.find((item) => item.id === productId);
+        if (!product) throw new Error('Missing product fixture');
+        product.name = 'Billing';
+        product.teamId = otherTeam;
+        return json({ product });
+      }
+      if (options?.method === 'DELETE' && path.endsWith(`/products/${productId}`)) {
+        data.products = data.products.filter((item) => item.id !== productId);
+        data.assignments = data.assignments.map((item) =>
+          item.productId === productId ? { ...item, productId: null } : item,
+        );
+        return json({ deletedProductId: productId });
+      }
+      if (options?.method === 'DELETE' && path.endsWith(`/teams/${teamId}`)) {
+        data.teams = data.teams.filter((item) => item.id !== teamId);
+        return json({ deletedTeamId: teamId });
+      }
+      return json(data);
+    });
+    await openSettings();
+    fireEvent.change(screen.getByLabelText('Team to edit'), { target: { value: teamId } });
+    expect(screen.getByRole('button', { name: 'Delete team' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Team name'), { target: { value: 'Platform' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save team' }));
+    await screen.findByText('Team updated.');
+    await waitFor(() => expect(screen.getByLabelText('Team to edit')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Product to edit'), { target: { value: productId } });
+    fireEvent.change(screen.getByLabelText('Product name'), { target: { value: 'Billing' } });
+    fireEvent.change(screen.getByLabelText('Product owning team'), {
+      target: { value: otherTeam },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save product' }));
+    await screen.findByText('Product updated.');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Delete product' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete product' }));
+    const confirmation = screen.getByRole('region', { name: 'Delete Billing confirmation' });
+    expect(within(confirmation).getByRole('heading')).toHaveFocus();
+    expect(confirmation).toHaveTextContent('1 service currently assigned');
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(
+      0,
+    );
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel deletion' }));
+    expect(screen.getByRole('button', { name: 'Delete product' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete product' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+    await screen.findByText('Product deleted. Its services are now unassigned.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete team' })).toBeEnabled());
+    expect(screen.getByLabelText('Product to edit')).toHaveFocus();
+    expect(data.services).toHaveLength(3);
+    expect(
+      data.assignments.find((item) => item.serviceId === scope.serviceId)?.productId,
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+    await screen.findByText('Team deleted.');
+    await waitFor(() => expect(screen.getByLabelText('Team to edit')).toHaveFocus());
+    expect(
+      fetchMock.mock.calls
+        .filter(([, options]) => options?.method === 'PATCH')
+        .map(([, options]) => options?.body),
+    ).toEqual([
+      JSON.stringify({ name: 'Platform' }),
+      JSON.stringify({ name: 'Billing', teamId: otherTeam }),
+    ]);
+    expect(
+      fetchMock.mock.calls
+        .filter(([, options]) => options?.method === 'DELETE')
+        .map(([, options]) => options?.body),
+    ).toEqual(['{}', '{}']);
+  });
+  it('refreshes missing lifecycle targets without claiming lost workspace access', async () => {
+    const lost = vi.fn();
+    fetchMock.mockImplementation(async (input, options) =>
+      options?.method === 'PATCH' ? json({}, 404) : read(input),
+    );
+    await openSettings('owner', lost);
+    fireEvent.change(screen.getByLabelText('Team to edit'), { target: { value: teamId } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save team' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('choose again');
+    expect(lost).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Team name')).toHaveValue('Commerce');
+  });
+  it('rejects wrong-target and extra-field acknowledgments', () => {
+    const data = organization();
+    expect(() => parseUpdatedTeam({ team: data.teams[0] }, scope.workspaceId, otherTeam)).toThrow();
+    expect(() =>
+      parseUpdatedProduct({ product: data.products[0] }, scope.workspaceId, otherProduct),
+    ).toThrow();
+    expect(() =>
+      parseDeleted({ deletedProductId: otherProduct }, 'deletedProductId', productId),
+    ).toThrow();
+    expect(() =>
+      parseDeleted({ deletedTeamId: teamId, extra: true }, 'deletedTeamId', teamId),
+    ).toThrow();
+  });
+  it('follows a moved product and retains selected service as unassigned after deletion', async () => {
+    let data = organization();
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/organization') ? json(data) : json({ runs: [], nextCursor: null }),
+    );
+    const view = mountBrowser();
+    await screen.findByRole('table');
+    fireEvent.change(screen.getByLabelText('Product'), { target: { value: productId } });
+    data = {
+      ...data,
+      products: data.products.map((item) =>
+        item.id === productId ? { ...item, name: 'Billing', teamId: otherTeam } : item,
+      ),
+    };
+    await act(async () => {
+      await view.client.invalidateQueries({
+        predicate: (entry) =>
+          entry.queryKey.some(
+            (part) => typeof part === 'string' && part.endsWith('/organization/browser'),
+          ),
+      });
+    });
+    expect(await screen.findByRole('heading', { name: 'Billing' })).toBeVisible();
+    expect(screen.getByLabelText('Team')).toHaveValue(otherTeam);
+    const breadcrumbs = screen.getByRole('navigation', { name: 'Engineering drill-down' });
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Experience' }));
+    expect(screen.getByRole('heading', { name: 'Experience' })).toBeVisible();
+    expect(screen.getByLabelText('Team')).toHaveValue(otherTeam);
+    fireEvent.change(screen.getByLabelText('Product'), { target: { value: productId } });
+    fireEvent.change(screen.getByLabelText('Service'), { target: { value: scope.serviceId } });
+    data = {
+      ...data,
+      products: data.products.filter((item) => item.id !== productId),
+      assignments: data.assignments.map((item) =>
+        item.productId === productId ? { ...item, productId: null } : item,
+      ),
+    };
+    await act(async () => {
+      await view.client.invalidateQueries({
+        predicate: (entry) =>
+          entry.queryKey.some(
+            (part) => typeof part === 'string' && part.endsWith('/organization/browser'),
+          ),
+      });
+    });
+    expect(screen.getByRole('region', { name: 'Selected service evidence' })).toHaveTextContent(
+      'Payments API',
+    );
+    await waitFor(() => expect(screen.getByLabelText('Product')).toHaveValue('unassigned'));
+    expect(screen.getByLabelText('Team')).toHaveValue('');
+    expect(screen.getByRole('navigation', { name: 'Engineering drill-down' })).toHaveTextContent(
+      'Unassigned services',
+    );
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Engineering drill-down' })).getByRole(
+        'button',
+        { name: 'Unassigned services' },
+      ),
+    );
+    expect(screen.getByRole('heading', { name: 'Unassigned services' })).toBeVisible();
+    expect(screen.getByLabelText('Product')).toHaveValue('unassigned');
+    expect(screen.getByRole('button', { name: 'Payments API' })).toBeVisible();
+  });
+});
+
+it.each(['create product', 'assign service'])(
+  'rechecks workspace after stale parent during %s',
+  async (action) => {
+    const data = organization();
+    const lost = vi.fn();
+    fetchMock.mockImplementation(async (_input, options) => {
+      if (options?.method === 'POST') {
+        data.products = data.products.filter((item) => item.id !== productId);
+        data.teams = data.teams.filter((item) => item.id !== teamId);
+        data.assignments = data.assignments.map((item) =>
+          item.productId === productId ? { ...item, productId: null } : item,
+        );
+        return json({}, 404);
+      }
+      return json(data);
+    });
+    await openSettings('owner', lost);
+    if (action === 'create product') {
+      fireEvent.change(screen.getByLabelText('New product name'), { target: { value: 'New' } });
+      fireEvent.change(screen.getByLabelText('Owning team'), { target: { value: teamId } });
+      fireEvent.click(screen.getByRole('button', { name: 'Create product' }));
+    } else {
+      fireEvent.change(screen.getByLabelText('Service to assign'), {
+        target: { value: scope.serviceId },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Save service assignment' }));
+    }
+    expect(await screen.findByRole('alert')).toHaveTextContent('choose again');
+    expect(lost).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Owning team')).toHaveValue('');
+    expect(screen.getByLabelText('Assigned product')).toHaveValue('');
+  },
+);
+
+it('refreshes nonempty-team conflicts and closes delete confirmation', async () => {
+  const data = organization();
+  data.products = data.products.filter((item) => item.teamId !== teamId);
+  data.assignments = data.assignments.map((item) =>
+    item.productId === productId ? { ...item, productId: null } : item,
+  );
+  fetchMock.mockImplementation(async (_input, options) => {
+    if (options?.method === 'DELETE') {
+      data.products.push({
+        id: productId,
+        workspaceId: scope.workspaceId,
+        teamId,
+        name: 'Concurrent product',
+      });
+      return json({}, 409);
+    }
+    return json(data);
+  });
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <OrganizationSettings
+        workspace={{ id: scope.workspaceId, name: 'Engineering', role: 'owner' }}
+        services={services}
+        validSelection={() => true}
+        onAccessLost={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByText('Organize teams and products'));
+  await screen.findByText('2 teams · 1 products · 2 unassigned services');
+  fireEvent.change(screen.getByLabelText('Team to edit'), { target: { value: teamId } });
+  fireEvent.click(screen.getByRole('button', { name: 'Delete team' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('still owns products');
+  expect(screen.getByText(/1 product belongs to this team/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Delete team' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Confirm deletion' })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText('Team to edit')).toHaveFocus());
+});
+
+it('ignores late lifecycle success after owner role is removed', async () => {
+  let resolve: (response: Response) => void = () => {
+    throw new Error('Missing write resolver');
+  };
+  const pending = new Promise<Response>((done) => {
+    resolve = done;
+  });
+  fetchMock.mockImplementation(async (input, options) =>
+    options?.method === 'PATCH' ? pending : read(input),
+  );
+  const client = createQueryClient();
+  const props = { services, validSelection: () => true, onAccessLost: vi.fn() };
+  const content = (role: 'owner' | 'member') => (
+    <QueryClientProvider client={client}>
+      <OrganizationSettings
+        {...props}
+        workspace={{ id: scope.workspaceId, name: 'Engineering', role }}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(content('owner'));
+  fireEvent.click(screen.getByText('Organize teams and products'));
+  await screen.findByText('2 teams · 2 products · 1 unassigned services');
+  fireEvent.change(screen.getByLabelText('Team to edit'), { target: { value: teamId } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save team' }));
+  view.rerender(content('member'));
+  await act(async () =>
+    resolve(json({ team: { id: teamId, workspaceId: scope.workspaceId, name: 'Commerce' } })),
+  );
+  expect(screen.queryByText('Team updated.')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Team to edit')).not.toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.filter(([path]) => String(path).endsWith('/organization')),
+  ).toHaveLength(1);
+});
+
+it('keeps visible team when clearing Product after a move, and Engineering after deletion', async () => {
+  let data = organization();
+  fetchMock.mockImplementation(async (input) =>
+    String(input).endsWith('/organization') ? json(data) : json({ runs: [], nextCursor: null }),
+  );
+  const view = mountBrowser();
+  await screen.findByRole('table');
+  fireEvent.change(screen.getByLabelText('Product'), { target: { value: productId } });
+  data = {
+    ...data,
+    products: data.products.map((item) =>
+      item.id === productId ? { ...item, name: 'Billing', teamId: otherTeam } : item,
+    ),
+  };
+  await act(async () => {
+    await view.client.invalidateQueries({
+      predicate: (entry) =>
+        entry.queryKey.some(
+          (part) => typeof part === 'string' && part.endsWith('/organization/browser'),
+        ),
+    });
+  });
+  await screen.findByRole('heading', { name: 'Billing' });
+  fireEvent.change(screen.getByLabelText('Product'), { target: { value: '' } });
+  expect(screen.getByRole('heading', { name: 'Experience' })).toBeVisible();
+  expect(screen.getByLabelText('Team')).toHaveValue(otherTeam);
+  fireEvent.change(screen.getByLabelText('Product'), { target: { value: productId } });
+  fireEvent.change(screen.getByLabelText('Service'), { target: { value: scope.serviceId } });
+  data = {
+    ...data,
+    products: data.products.filter((item) => item.id !== productId),
+    assignments: data.assignments.map((item) =>
+      item.productId === productId ? { ...item, productId: null } : item,
+    ),
+  };
+  await act(async () => {
+    await view.client.invalidateQueries({
+      predicate: (entry) =>
+        entry.queryKey.some(
+          (part) => typeof part === 'string' && part.endsWith('/organization/browser'),
+        ),
+    });
+  });
+  await waitFor(() => expect(screen.getByLabelText('Product')).toHaveValue('unassigned'));
+  fireEvent.change(screen.getByLabelText('Product'), { target: { value: '' } });
+  expect(screen.getByRole('heading', { name: 'Engineering' })).toBeVisible();
+  expect(screen.getByLabelText('Team')).toHaveValue('');
 });

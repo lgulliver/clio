@@ -4,6 +4,7 @@ import { ApiError, errorMessage, request, type Service, type Workspace } from '.
 import { useSession } from '../identity/session';
 import { useStoredRead } from '../result-history/history-browser';
 import { parseAssignment, parseOrganization, parseProduct, parseTeam } from './api';
+import { OrganizationLifecycle } from './organization-lifecycle';
 
 function OrganizationEditor({
   workspace,
@@ -21,6 +22,8 @@ function OrganizationEditor({
   const revision = session.revision;
   const mounted = useRef(true);
   const pending = useRef(false);
+  const role = useRef(workspace.role);
+  role.current = workspace.role;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -46,7 +49,8 @@ function OrganizationEditor({
   useEffect(() => {
     if (denied) onAccessLost();
   }, [denied, onAccessLost]);
-  const valid = () => mounted.current && session.current(revision) && validSelection();
+  const valid = () =>
+    mounted.current && session.current(revision) && validSelection() && role.current === 'owner';
   async function save<T>(
     event: FormEvent,
     endpoint: string,
@@ -54,6 +58,7 @@ function OrganizationEditor({
     parse: (value: unknown) => T,
     message: string,
     clear: () => void,
+    method?: 'PATCH' | 'DELETE',
   ) {
     event.preventDefault();
     if (pending.current || !valid()) return;
@@ -62,7 +67,7 @@ function OrganizationEditor({
     setError('');
     setNotice('');
     try {
-      await request(`${path}${endpoint}`, parse, { body });
+      await request(`${path}${endpoint}`, parse, { body, ...(method ? { method } : {}) });
       if (!valid()) return;
       clear();
       setNotice(message);
@@ -80,11 +85,35 @@ function OrganizationEditor({
         });
     } catch (failure) {
       if (!valid()) return;
+      if (failure instanceof ApiError && failure.status === 404) {
+        await query.refetch();
+        if (valid())
+          setError(
+            'This team, product or owning team is no longer available. Refresh the organization and choose again.',
+          );
+        return;
+      }
       if (failure instanceof ApiError && [401, 403, 404].includes(failure.status)) {
         if (failure.status === 401) session.expire(revision);
         onAccessLost();
       }
-      setError(errorMessage(failure));
+      if (
+        method === 'DELETE' &&
+        endpoint.startsWith('/teams/') &&
+        failure instanceof ApiError &&
+        failure.status === 409
+      ) {
+        await query.refetch();
+        if (!valid()) return;
+      }
+      setError(
+        method === 'DELETE' &&
+          endpoint.startsWith('/teams/') &&
+          failure instanceof ApiError &&
+          failure.status === 409
+          ? 'This team still owns products. Move or delete them before deleting the team.'
+          : errorMessage(failure),
+      );
     } finally {
       pending.current = false;
       if (mounted.current) setBusy(false);
@@ -93,6 +122,18 @@ function OrganizationEditor({
   return (
     <section className="organization-settings mt-6" aria-label="Teams and products">
       <h3 className="font-semibold">Teams and products</h3>
+      <button
+        type="button"
+        className="control mt-3"
+        disabled={busy || query.isFetching}
+        onClick={() => {
+          setError('');
+          setNotice('');
+          void query.refetch();
+        }}
+      >
+        Refresh organization
+      </button>
       <p className="mt-2 text-sm text-clio-muted">
         Teams own products. Products group services. Unassigned services remain visible in
         Engineering.
@@ -167,7 +208,7 @@ function OrganizationEditor({
                   id={`${id}-team`}
                   className="field"
                   required
-                  value={teamId}
+                  value={query.data.teams.some((team) => team.id === teamId) ? teamId : ''}
                   disabled={busy}
                   onChange={(e) => setTeamId(e.target.value)}
                 >
@@ -187,7 +228,11 @@ function OrganizationEditor({
                   void save(
                     e,
                     `/services/${serviceId}/product`,
-                    { productId: productId || null },
+                    {
+                      productId: query.data.products.some((product) => product.id === productId)
+                        ? productId
+                        : null,
+                    },
                     (v) => parseAssignment(v, serviceId),
                     'Service assignment saved.',
                     () => {},
@@ -220,7 +265,9 @@ function OrganizationEditor({
                 <select
                   id={`${id}-product`}
                   className="field"
-                  value={productId}
+                  value={
+                    query.data.products.some((product) => product.id === productId) ? productId : ''
+                  }
                   disabled={busy}
                   onChange={(e) => setProductId(e.target.value)}
                 >
@@ -236,6 +283,9 @@ function OrganizationEditor({
                 </button>
               </form>
             </div>
+          )}
+          {workspace.role === 'owner' && (
+            <OrganizationLifecycle organization={query.data} busy={busy} save={save} />
           )}
         </>
       )}

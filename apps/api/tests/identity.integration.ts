@@ -7,6 +7,7 @@ import { checkReadiness, migrate } from '../src/db/migrations.ts';
 import { type ClioAuth, createAuth } from '../src/features/identity/auth.ts';
 import { readAuthConfig } from '../src/features/identity/config.ts';
 import { createIdentityRepository } from '../src/features/identity/repository.ts';
+import { processOne } from '../src/features/mock-collection/worker.ts';
 import { createServer } from '../src/server.ts';
 
 if (!process.env.CLIO_TEST_DATABASE_URL)
@@ -1181,5 +1182,271 @@ describe('workspace organization', () => {
     ).toBe(404);
     await pool.query('DELETE FROM auth_sessions WHERE id=$1', [owner.sessionId]);
     expect((await write('/teams', { name: 'Revoked' })).statusCode).toBe(401);
+  });
+});
+
+describe('workspace hierarchy lifecycle', () => {
+  async function fixture(label: string) {
+    const owner = await login(`lifecycle-${label}`, `lifecycle-${label}@example.com`);
+    const workspaceId = await workspace(owner.cookie, `Lifecycle ${label}`);
+    const base = `/api/workspaces/${workspaceId}`;
+    const write = (
+      method: 'POST' | 'PATCH' | 'DELETE',
+      path: string,
+      payload: Record<string, unknown> | unknown[],
+      cookie = owner.cookie,
+    ) => server.inject({ method, url: `${base}${path}`, headers: headers(cookie), payload });
+    const teamId = string(
+      record(record((await write('POST', '/teams', { name: 'Platform' })).json()).team).id,
+    );
+    const secondTeamId = string(
+      record(record((await write('POST', '/teams', { name: 'Product' })).json()).team).id,
+    );
+    const productId = string(
+      record(
+        record((await write('POST', '/products', { name: 'Delivery', teamId })).json()).product,
+      ).id,
+    );
+    const serviceId = string(
+      record(record((await write('POST', '/services', { name: 'API' })).json()).service).id,
+    );
+    await write('POST', `/services/${serviceId}/product`, { productId });
+    return { owner, workspaceId, base, write, teamId, secondTeamId, productId, serviceId };
+  }
+
+  it('renames and moves stable identities, refuses nonempty team deletion, and detaches services without changing saved configuration or results', async () => {
+    const f = await fixture('preserve');
+    expect((await f.write('PATCH', `/teams/${f.teamId}`, { name: '  Core  ' })).json()).toEqual({
+      team: { id: f.teamId, workspaceId: f.workspaceId, name: 'Core' },
+    });
+    expect((await f.write('PATCH', `/teams/${f.teamId}`, { name: 'Product' })).statusCode).toBe(
+      409,
+    );
+    const mapping = await f.write('POST', `/services/${f.serviceId}/deployment-mapping`, {
+      expectedRevision: null,
+      primaryProvider: 'github',
+      productionEnvironment: 'production',
+      exposureAttested: true,
+    });
+    expect(mapping.statusCode).toBe(200);
+    const queued = await f.write('POST', `/services/${f.serviceId}/mock-collection-runs`, {
+      revision: 1,
+      requestId: randomUUID(),
+    });
+    expect(queued.statusCode).toBe(202);
+    expect(await processOne(pool)).toBe(true);
+    const retained = await pool.query(
+      'SELECT r.*, s.digest FROM mock_collection_runs r JOIN mock_collection_snapshots s ON s.run_id = r.id WHERE r.workspace_id=$1 AND r.service_id=$2',
+      [f.workspaceId, f.serviceId],
+    );
+    expect(retained.rows).toHaveLength(1);
+    expect(retained.rows[0]?.status).toBe('succeeded');
+    expect((await f.write('DELETE', `/teams/${f.teamId}`, {})).statusCode).toBe(409);
+    expect(
+      (
+        await f.write('PATCH', `/products/${f.productId}`, {
+          name: '  Delivery renamed  ',
+          teamId: f.secondTeamId,
+        })
+      ).json(),
+    ).toEqual({
+      product: {
+        id: f.productId,
+        workspaceId: f.workspaceId,
+        name: 'Delivery renamed',
+        teamId: f.secondTeamId,
+      },
+    });
+    expect((await f.write('DELETE', `/teams/${f.teamId}`, {})).json()).toEqual({
+      deletedTeamId: f.teamId,
+    });
+    expect((await f.write('DELETE', `/products/${f.productId}`, {})).json()).toEqual({
+      deletedProductId: f.productId,
+    });
+    expect((await f.write('DELETE', `/products/${f.productId}`, {})).statusCode).toBe(404);
+    const organization = await server.inject({
+      url: `${f.base}/organization`,
+      headers: headers(f.owner.cookie),
+    });
+    expect(organization.json()).toEqual({
+      workspaceId: f.workspaceId,
+      teams: [{ id: f.secondTeamId, workspaceId: f.workspaceId, name: 'Product' }],
+      products: [],
+      services: [{ id: f.serviceId, workspaceId: f.workspaceId, name: 'API' }],
+      assignments: [{ serviceId: f.serviceId, productId: null }],
+    });
+    expect(
+      (
+        await server.inject({
+          url: `${f.base}/services/${f.serviceId}/deployment-mapping`,
+          headers: headers(f.owner.cookie),
+        })
+      ).json(),
+    ).toEqual(mapping.json());
+    expect(
+      (
+        await pool.query(
+          'SELECT r.*, s.digest FROM mock_collection_runs r JOIN mock_collection_snapshots s ON s.run_id = r.id WHERE r.workspace_id=$1 AND r.service_id=$2',
+          [f.workspaceId, f.serviceId],
+        )
+      ).rows,
+    ).toEqual(retained.rows);
+  });
+
+  it('validates strict mutation contracts, origin, current owner authority and target isolation', async () => {
+    const f = await fixture('policy');
+    const member = await login('lifecycle-member', 'lifecycle-member@example.com');
+    const outsider = await login('lifecycle-outsider', 'lifecycle-outsider@example.com');
+    await accept(
+      member.cookie,
+      (await invite(f.owner.cookie, f.workspaceId, 'lifecycle-member@example.com')).token,
+    );
+    const otherId = await workspace(f.owner.cookie, 'Other lifecycle');
+    const otherTeam = await server.inject({
+      method: 'POST',
+      url: `/api/workspaces/${otherId}/teams`,
+      headers: headers(f.owner.cookie),
+      payload: { name: 'Remote' },
+    });
+    const otherTeamId = string(record(record(otherTeam.json()).team).id);
+    const otherProduct = await server.inject({
+      method: 'POST',
+      url: `/api/workspaces/${otherId}/products`,
+      headers: headers(f.owner.cookie),
+      payload: { name: 'Remote', teamId: otherTeamId },
+    });
+    const otherProductId = string(record(record(otherProduct.json()).product).id);
+    const mutations = [
+      ['PATCH', `/teams/${f.teamId}`, { name: 'Renamed' }],
+      ['PATCH', `/products/${f.productId}`, { name: 'Renamed', teamId: f.teamId }],
+      ['DELETE', `/teams/${f.secondTeamId}`, {}],
+      ['DELETE', `/products/${f.productId}`, {}],
+    ] as const;
+    for (const [method, path, payload] of mutations) {
+      expect((await f.write(method, path, payload, member.cookie)).statusCode).toBe(403);
+      expect((await f.write(method, path, payload, outsider.cookie)).statusCode).toBe(404);
+      expect(
+        (
+          await server.inject({
+            method,
+            url: `${f.base}${path}`,
+            headers: { origin: 'http://localhost:5173' },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(401);
+      for (const origin of [undefined, 'https://untrusted.example'])
+        expect(
+          (
+            await server.inject({
+              method,
+              url: `${f.base}${path}`,
+              headers: { cookie: f.owner.cookie, ...(origin ? { origin } : {}) },
+              payload,
+            })
+          ).statusCode,
+        ).toBe(403);
+      expect((await f.write(method, `${path}?extra=1`, payload)).statusCode).toBe(400);
+      expect((await f.write(method, path, { ...payload, role: 'owner' })).statusCode).toBe(400);
+      expect((await f.write(method, path, [])).statusCode).toBe(400);
+      if (method === 'DELETE') {
+        expect(
+          (
+            await server.inject({
+              method,
+              url: `${f.base}${path}`,
+              headers: headers(f.owner.cookie),
+            })
+          ).statusCode,
+        ).toBe(400);
+        expect((await f.write(method, path, { name: 'Ignored' })).statusCode).toBe(400);
+      }
+      const preflight = await server.inject({
+        method: 'OPTIONS',
+        url: `${f.base}${path}`,
+        headers: { origin: 'http://localhost:5173', 'access-control-request-method': method },
+      });
+      expect(preflight.statusCode).toBe(204);
+      expect(preflight.headers['access-control-allow-methods']).toContain(method);
+    }
+    for (const [path, payload] of [
+      [`/teams/${f.teamId}`, {}],
+      [`/teams/${f.teamId}`, { name: '' }],
+      [`/teams/${f.teamId}`, { name: 'x'.repeat(201) }],
+      [`/products/${f.productId}`, { name: 'No team' }],
+      [`/products/${f.productId}`, { teamId: f.teamId }],
+      [`/products/${f.productId}`, { name: 'Bad team', teamId: 'bad' }],
+      [`/teams/bad`, { name: 'Bad id' }],
+    ] as const)
+      expect((await f.write('PATCH', path, payload)).statusCode).toBe(400);
+    expect(
+      (await f.write('PATCH', `/products/${f.productId}`, { name: 'Moved', teamId: otherTeamId }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await f.write('PATCH', `/teams/${otherTeamId}`, { name: 'Intrusion' })).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await f.write('PATCH', `/products/${otherProductId}`, {
+          name: 'Intrusion',
+          teamId: f.teamId,
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await f.write('DELETE', `/teams/${otherTeamId}`, {})).statusCode).toBe(404);
+    expect((await f.write('DELETE', `/products/${otherProductId}`, {})).statusCode).toBe(404);
+    const second = await f.write('POST', '/products', { name: 'Second', teamId: f.teamId });
+    const secondId = string(record(record(second.json()).product).id);
+    expect(
+      (
+        await f.write('PATCH', `/products/${secondId}`, {
+          name: 'Delivery',
+          teamId: f.secondTeamId,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (await pool.query('SELECT name, team_id FROM products WHERE id=$1', [secondId])).rows,
+    ).toEqual([{ name: 'Second', team_id: f.teamId }]);
+    await pool.query(
+      "UPDATE workspace_memberships SET role='member' WHERE workspace_id=$1 AND user_id=$2",
+      [f.workspaceId, f.owner.userId],
+    );
+    for (const [method, path, payload] of mutations)
+      expect((await f.write(method, path, payload)).statusCode).toBe(403);
+    await pool.query('DELETE FROM workspace_memberships WHERE workspace_id=$1 AND user_id=$2', [
+      f.workspaceId,
+      f.owner.userId,
+    ]);
+    for (const [method, path, payload] of mutations)
+      expect((await f.write(method, path, payload)).statusCode).toBe(404);
+    await pool.query('DELETE FROM auth_sessions WHERE id=$1', [f.owner.sessionId]);
+    for (const [method, path, payload] of mutations)
+      expect((await f.write(method, path, payload)).statusCode).toBe(401);
+    expect((await pool.query('SELECT name FROM teams WHERE id=$1', [otherTeamId])).rows).toEqual([
+      { name: 'Remote' },
+    ]);
+  });
+
+  it('serializes assignment/deletion and product creation/team deletion without foreign-key failures', async () => {
+    const f = await fixture('races');
+    const [assigned, deleted] = await Promise.all([
+      f.write('POST', `/services/${f.serviceId}/product`, { productId: f.productId }),
+      f.write('DELETE', `/products/${f.productId}`, {}),
+    ]);
+    expect([200, 404]).toContain(assigned.statusCode);
+    expect(deleted.statusCode).toBe(200);
+    expect(
+      (await pool.query('SELECT product_id FROM services WHERE id=$1', [f.serviceId])).rows,
+    ).toEqual([{ product_id: null }]);
+    const [created, removed] = await Promise.all([
+      f.write('POST', '/products', { name: 'Concurrent', teamId: f.secondTeamId }),
+      f.write('DELETE', `/teams/${f.secondTeamId}`, {}),
+    ]);
+    expect([
+      [201, 409],
+      [404, 200],
+    ]).toContainEqual([created.statusCode, removed.statusCode]);
   });
 });

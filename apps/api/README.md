@@ -172,6 +172,10 @@ All routes below use current session and workspace membership checks inside the 
 | GET `/organization` | — | 200 `{workspaceId,teams:[{id,workspaceId,name}],products:[{id,workspaceId,teamId,name}],services:[{id,workspaceId,name}],assignments:[{serviceId,productId}]}` |
 | POST `/teams` | `{name}` | 201 `{team:{id,workspaceId,name}}` |
 | POST `/products` | `{name,teamId}` | 201 `{product:{id,workspaceId,teamId,name}}` |
+| PATCH `/teams/:teamId` | `{name}` | 200 `{team:{id,workspaceId,name}}` |
+| PATCH `/products/:productId` | `{name,teamId}` | 200 `{product:{id,workspaceId,teamId,name}}` |
+| DELETE `/teams/:teamId` | `{}` | 200 `{deletedTeamId}` |
+| DELETE `/products/:productId` | `{}` | 200 `{deletedProductId}` |
 | POST `/services/:serviceId/product` | `{productId:UUID|null}` | 200 `{assignment:{serviceId,productId}}` |
 
-The organization read uses one SQL statement for a consistent snapshot of teams, products, service names and assignments. It includes every workspace service, including `productId:null`. Existing service API shapes remain unchanged. Cross-workspace or missing parents/services return 404; duplicate normalized names return 409. Composite foreign keys enforce workspace isolation independently of routes. Team/product deletion, renaming and product team reassignment are outside this slice. Provider collection and OEMS calculations are unchanged.
+The organization read uses one SQL statement for a consistent snapshot of teams, products, service names and assignments. It includes every workspace service, including `productId:null`. Existing service API shapes remain unchanged. Cross-workspace or missing parents/services return 404; duplicate normalized names return 409. Composite foreign keys enforce workspace isolation independently of routes. Rename/move operations retain IDs. Team deletion returns 409 while products remain. Product deletion atomically detaches services before removing the product, preserving services, provider configuration and immutable results. Lifecycle writes reject extra query/body fields and serialize with authorization and other hierarchy writes under the workspace lock. Provider collection and OEMS calculations are unchanged.

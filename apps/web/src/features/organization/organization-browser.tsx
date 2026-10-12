@@ -47,15 +47,17 @@ export function OrganizationBrowser({
     );
   const organization = query.data;
   const services = organization.services;
-  const team = organization.teams.find((item) => item.id === teamId);
-  const product = organization.products.find(
-    (item) => item.id === productId && (!team || item.teamId === team.id),
-  );
-  const products = organization.products.filter((item) => !team || item.teamId === team.id);
-  const unassigned = productId === 'unassigned';
   const assignments = new Map(
     organization.assignments.map((item) => [item.serviceId, item.productId]),
   );
+  const selectedService = services.find((item) => item.id === serviceId);
+  const currentProductId = selectedService ? assignments.get(selectedService.id) : productId;
+  const product = organization.products.find((item) => item.id === currentProductId);
+  const team = organization.teams.find(
+    (item) => item.id === (selectedService ? product?.teamId : (product?.teamId ?? teamId)),
+  );
+  const products = organization.products.filter((item) => !team || item.teamId === team.id);
+  const unassigned = selectedService ? currentProductId === null : productId === 'unassigned';
   const scoped = services.filter((service) => {
     const assigned = assignments.get(service.id);
     return unassigned
@@ -108,6 +110,7 @@ export function OrganizationBrowser({
                 aria-current={!product && !service ? 'page' : undefined}
                 onClick={() => {
                   setFocusRequest((request) => request + 1);
+                  setTeamId(team.id);
                   setProductId('');
                   setServiceId('');
                 }}
@@ -123,6 +126,8 @@ export function OrganizationBrowser({
                 aria-current={!service ? 'page' : undefined}
                 onClick={() => {
                   setFocusRequest((request) => request + 1);
+                  setTeamId(team?.id ?? '');
+                  setProductId(product?.id ?? (unassigned ? 'unassigned' : ''));
                   setServiceId('');
                 }}
               >
@@ -161,7 +166,9 @@ export function OrganizationBrowser({
             onChange={(e) => {
               setProductId(e.target.value);
               const selected = organization.products.find((item) => item.id === e.target.value);
-              if (selected) setTeamId(selected.teamId);
+              setTeamId(
+                selected?.teamId ?? (e.target.value === 'unassigned' ? '' : (team?.id ?? '')),
+              );
               setServiceId('');
             }}
           >
@@ -181,7 +188,14 @@ export function OrganizationBrowser({
               id="overview-service"
               className="field"
               value={service?.id ?? ''}
-              onChange={(e) => (e.target.value ? selectService(e.target.value) : setServiceId(''))}
+              onChange={(e) => {
+                if (e.target.value) selectService(e.target.value);
+                else {
+                  setTeamId(team?.id ?? '');
+                  setProductId(product?.id ?? (unassigned ? 'unassigned' : ''));
+                  setServiceId('');
+                }
+              }}
             >
               <option value="">Choose a service</option>
               {scoped.map((item) => (

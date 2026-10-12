@@ -117,7 +117,7 @@ export function apiOrigin(value: unknown): string {
 export async function request<T>(
   path: string,
   parse: (value: unknown) => T,
-  options: { signal?: AbortSignal; body?: object; method?: 'DELETE' } = {},
+  options: { signal?: AbortSignal; body?: object; method?: 'DELETE' | 'PATCH' } = {},
 ): Promise<T> {
   const response = await fetch(`${apiOrigin(import.meta.env.VITE_API_URL)}${path}`, {
     method: options.method ?? (options.body ? 'POST' : 'GET'),

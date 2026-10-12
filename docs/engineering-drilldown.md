@@ -19,7 +19,7 @@ Products spanning teams are not supported initially. Existing services start una
 4. Choose a service and its assigned product, then **Save service assignment**.
 5. To remove an assignment, choose **Unassigned** and save again.
 
-Workspace owners edit ownership. Members read it. Team and product names are unique within their workspace. This first slice creates teams/products and changes service assignments; renaming, deleting and moving products between teams are not implemented.
+Workspace owners edit ownership. Members read it. Team and product names are unique within their workspace. Under **Manage existing teams and products**, select a team or product to rename it. Select a product’s owning team and save to move it, together with its current service group. IDs, connections and immutable evidence are preserved. Delete controls require confirmation. Only empty teams can be deleted; move or delete their products first. Deleting a product makes its services unassigned, preserving services, connections and saved results. Refresh organization to load changes made in another tab.
 
 ## Explore delivery
 

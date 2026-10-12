@@ -91,3 +91,28 @@ export function parseOrganization(value: unknown, workspaceId: string): Organiza
     throw new ApiError(0);
   return { workspaceId, teams, products, services, assignments };
 }
+
+export function parseDeleted(
+  value: unknown,
+  key: 'deletedTeamId' | 'deletedProductId',
+  expectedId: string,
+): string {
+  const row = exact(value, [key]);
+  const id = uuid(row[key]);
+  if (id !== expectedId) throw new ApiError(0);
+  return id;
+}
+export function parseUpdatedTeam(value: unknown, workspaceId: string, expectedId: string): Team {
+  const team = parseTeam(value, workspaceId);
+  if (team.id !== expectedId) throw new ApiError(0);
+  return team;
+}
+export function parseUpdatedProduct(
+  value: unknown,
+  workspaceId: string,
+  expectedId: string,
+): Product {
+  const product = parseProduct(value, workspaceId);
+  if (product.id !== expectedId) throw new ApiError(0);
+  return product;
+}

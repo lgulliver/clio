@@ -100,7 +100,7 @@ export function createOrganizationRepository(pool: Pool) {
       const normalized = name(productName);
       return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
         const found = await client.query(
-          'SELECT id FROM teams WHERE workspace_id = $1 AND id = $2',
+          'SELECT id FROM teams WHERE workspace_id = $1 AND id = $2 FOR UPDATE',
           [id, parent],
         );
         if (!found.rowCount) throw new IdentityError(404, 'not_found');
@@ -111,6 +111,89 @@ export function createOrganizationRepository(pool: Pool) {
         const row = result.rows[0];
         if (!row) throw new Error('Product insert returned no row');
         return product(row);
+      });
+    },
+    async updateTeam(
+      actor: Actor,
+      workspaceId: string,
+      teamId: string,
+      teamName: unknown,
+    ): Promise<Team> {
+      const id = uuid(workspaceId);
+      const target = uuid(teamId);
+      const normalized = name(teamName);
+      return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
+        const result = await client.query<Record<string, unknown>>(
+          'UPDATE teams SET name = $3 WHERE workspace_id = $1 AND id = $2 RETURNING id, workspace_id, name',
+          [id, target, normalized],
+        );
+        const row = result.rows[0];
+        if (!row) throw new IdentityError(404, 'not_found');
+        return team(row);
+      });
+    },
+    async updateProduct(
+      actor: Actor,
+      workspaceId: string,
+      productId: string,
+      teamId: unknown,
+      productName: unknown,
+    ): Promise<Product> {
+      const id = uuid(workspaceId);
+      const target = uuid(productId);
+      const parent = uuid(teamId);
+      const normalized = name(productName);
+      return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
+        const found = await client.query(
+          'SELECT id FROM teams WHERE workspace_id = $1 AND id = $2 FOR UPDATE',
+          [id, parent],
+        );
+        if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        const result = await client.query<Record<string, unknown>>(
+          'UPDATE products SET name = $3, team_id = $4 WHERE workspace_id = $1 AND id = $2 RETURNING id, workspace_id, team_id, name',
+          [id, target, normalized, parent],
+        );
+        const row = result.rows[0];
+        if (!row) throw new IdentityError(404, 'not_found');
+        return product(row);
+      });
+    },
+    async deleteTeam(actor: Actor, workspaceId: string, teamId: string): Promise<string> {
+      const id = uuid(workspaceId);
+      const target = uuid(teamId);
+      return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
+        const found = await client.query(
+          'SELECT id FROM teams WHERE workspace_id = $1 AND id = $2 FOR UPDATE',
+          [id, target],
+        );
+        if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        const children = await client.query(
+          'SELECT id FROM products WHERE workspace_id = $1 AND team_id = $2 LIMIT 1',
+          [id, target],
+        );
+        if (children.rowCount) throw new IdentityError(409, 'conflict');
+        await client.query('DELETE FROM teams WHERE workspace_id = $1 AND id = $2', [id, target]);
+        return target;
+      });
+    },
+    async deleteProduct(actor: Actor, workspaceId: string, productId: string): Promise<string> {
+      const id = uuid(workspaceId);
+      const target = uuid(productId);
+      return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
+        const found = await client.query(
+          'SELECT id FROM products WHERE workspace_id = $1 AND id = $2 FOR UPDATE',
+          [id, target],
+        );
+        if (!found.rowCount) throw new IdentityError(404, 'not_found');
+        await client.query(
+          'UPDATE services SET product_id = NULL WHERE workspace_id = $1 AND product_id = $2',
+          [id, target],
+        );
+        await client.query('DELETE FROM products WHERE workspace_id = $1 AND id = $2', [
+          id,
+          target,
+        ]);
+        return target;
       });
     },
     async assign(
@@ -125,7 +208,7 @@ export function createOrganizationRepository(pool: Pool) {
       return authorizedWorkspaceTransaction(pool, actor, id, true, async (client) => {
         if (parent !== null) {
           const found = await client.query(
-            'SELECT id FROM products WHERE workspace_id = $1 AND id = $2',
+            'SELECT id FROM products WHERE workspace_id = $1 AND id = $2 FOR UPDATE',
             [id, parent],
           );
           if (!found.rowCount) throw new IdentityError(404, 'not_found');

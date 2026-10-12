@@ -56,7 +56,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
     server.register(cors, {
       origin: identity.config.appOrigin,
       credentials: true,
-      methods: ['GET', 'POST', 'DELETE'],
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type'],
     });
   const repository = identity ? createIdentityRepository(identity.pool) : null;
@@ -284,6 +284,65 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       return reply
         .code(201)
         .send({ product: await organization.createProduct(current, id, body.teamId, body.name) });
+    });
+    routes.patch('/api/workspaces/:workspaceId/teams/:teamId', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const scope = params(request, ['workspaceId', 'teamId']);
+      object(request.query, []);
+      const body = object(request.body, ['name']);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return {
+        team: await organization.updateTeam(
+          current,
+          uuid(scope.workspaceId),
+          uuid(scope.teamId),
+          body.name,
+        ),
+      };
+    });
+    routes.patch('/api/workspaces/:workspaceId/products/:productId', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const scope = params(request, ['workspaceId', 'productId']);
+      object(request.query, []);
+      const body = object(request.body, ['name', 'teamId']);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return {
+        product: await organization.updateProduct(
+          current,
+          uuid(scope.workspaceId),
+          uuid(scope.productId),
+          body.teamId,
+          body.name,
+        ),
+      };
+    });
+    routes.delete('/api/workspaces/:workspaceId/teams/:teamId', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const scope = params(request, ['workspaceId', 'teamId']);
+      object(request.query, []);
+      object(request.body, []);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return {
+        deletedTeamId: await organization.deleteTeam(
+          current,
+          uuid(scope.workspaceId),
+          uuid(scope.teamId),
+        ),
+      };
+    });
+    routes.delete('/api/workspaces/:workspaceId/products/:productId', async (request, reply) => {
+      const current = await actor(request, reply, true);
+      const scope = params(request, ['workspaceId', 'productId']);
+      object(request.query, []);
+      object(request.body, []);
+      if (!organization) throw new IdentityError(503, 'unavailable');
+      return {
+        deletedProductId: await organization.deleteProduct(
+          current,
+          uuid(scope.workspaceId),
+          uuid(scope.productId),
+        ),
+      };
     });
     routes.post(
       '/api/workspaces/:workspaceId/services/:serviceId/product',
