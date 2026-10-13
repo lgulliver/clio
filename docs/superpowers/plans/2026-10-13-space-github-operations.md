@@ -110,7 +110,7 @@ Safe `OperationMapping`: `id`, `workspaceId`, `teamId/teamName`, `appId`, `insta
 
 **Interfaces:** Produces provider types and three adapter exports above. Consumes existing `FetchTransport`, `signGitHubAppJwt`, API version, bounded transport and redacted `AdapterError`/rate-limit errors. No database, survey or OEMS dependencies.
 
-- [ ] Add controlled HTTP fixture helpers within the test file. Use realistic GitHub PR JSON with nested repositories/body fields to prove only allowlisted normalized fields survive.
+- [x] Add controlled HTTP fixture helpers within the test file. Use realistic GitHub PR JSON with nested repositories/body fields to prove only allowlisted normalized fields survive.
 
 ```ts
 const rawPull = { id: 101, number: 1, created_at: '2026-09-01T09:00:00Z',
@@ -121,12 +121,12 @@ expect(JSON.stringify(slice.checkpoint)).not.toMatch(/private-title|private-body
 expect(slice.checkpoint.pulls[0]?.id).toBe(rawPull.id);
 ```
 
-- [ ] Run `pnpm --filter @clio/adapters exec vitest run tests/github-pulls.test.ts`; observe RED before implementation, retaining failure output in ignored artifacts.
-- [ ] Implement exact PR/Metadata-read verification separately; prove App/account/installation/suspension/selected scope, narrowed repository token and metadata with existing safe helpers. Test deployment permissions rejected here and existing deployment verifier unchanged.
-- [ ] Implement strict checkpoint parser and endpoint-specific Link validator. Require matching origin/path/query, exact page size and monotonic next page. Reject embedded credentials, redirects, unrelated resources and duplicate pages before checkpoint advance.
-- [ ] Implement discovery, deterministic review ordering, current-author re-fetch per claim, transient actor comparison, deduplication/conflict gaps and limits. Keep pending reviews out of timed facts. Handle missing actor and time as declared gaps; malformed identity/path is a failed acquisition.
-- [ ] Test old-created/new-merged PR, old PR reviewed in window, review exactly at end excluded, bot/self/pending/dismissed/missing users, nested near-byte-cap pages, repeated reviews, conflict pages, quota-shaped errors, aborted bodies and restart mid-review. Assert no author/reviewer IDs persist in checkpoints.
-- [ ] Run focused adapter suite and typecheck GREEN. Coordinator reviews task diff and gets Claude read-only review; fixes receive regressions before integration. Commit only after repository-required checks, using `feat(adapters): collect bounded GitHub pull evidence`.
+- [x] Run `pnpm --filter @clio/adapters exec vitest run tests/github-pulls.test.ts`; observe RED before implementation, retaining failure output in ignored artifacts.
+- [x] Implement exact PR/Metadata-read verification separately; prove App/account/installation/suspension/selected scope, narrowed repository token and metadata with existing safe helpers. Test deployment permissions rejected here and existing deployment verifier unchanged.
+- [x] Implement strict checkpoint parser and endpoint-specific Link validator. Require matching origin/path/query, exact page size and monotonic next page. Reject embedded credentials, redirects, unrelated resources and duplicate pages before checkpoint advance.
+- [x] Implement discovery, deterministic review ordering, current-author re-fetch per claim, transient actor comparison, deduplication/conflict gaps and limits. Keep pending reviews out of timed facts. Handle missing actor and time as declared gaps; malformed identity/path is a failed acquisition.
+- [x] Test old-created/new-merged PR, old PR reviewed in window, review exactly at end excluded, bot/self/pending/dismissed/missing users, nested near-byte-cap pages, repeated reviews, conflict pages, quota-shaped errors, aborted bodies and restart mid-review. Assert no author/reviewer IDs persist in checkpoints.
+- [x] Run focused adapter suite and typecheck GREEN. Coordinator reviews task diff and gets Claude read-only review; fixes receive regressions before integration. Commit only after repository-required checks, using `feat(adapters): collect bounded GitHub pull evidence`.
 
 ## Task 2: Application calculation and safe result contract
 

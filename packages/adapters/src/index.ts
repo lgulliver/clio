@@ -25,6 +25,19 @@ export type { CollectionDiagnostic, GitHubBatch, GitHubCheckpoint } from './gith
 export { collectGitHubDeployments, parseGitHubCheckpoint } from './github.ts';
 export type { FetchTransport, InstallationToken } from './github-app.ts';
 export { createInstallationToken, githubApiVersion } from './github-app.ts';
+export { parsePullCheckpoint } from './github-pulls-checkpoint.ts';
+export { collectGitHubPullSlice, pullFailureCheckpoint } from './github-pulls-collect.ts';
+export type {
+  AccountClass,
+  AcquisitionGap,
+  PullCheckpoint,
+  PullFact,
+  PullSlice,
+  PullSliceInput,
+  ReviewFact,
+} from './github-pulls-contract.ts';
+export { PullSliceError, PullSliceRateLimitError } from './github-pulls-contract.ts';
+export { verifyGitHubPullScope } from './github-pulls-scope.ts';
 export { GitHubRateLimitError, githubRateLimit } from './github-rate-limit.ts';
 export { verifyGitHubScope } from './github-scope.ts';
 export { createBoundedGitHubTransport } from './github-transport.ts';
