@@ -172,6 +172,11 @@ export function createOrganizationRepository(pool: Pool) {
           [id, target],
         );
         if (children.rowCount) throw new IdentityError(409, 'conflict');
+        const pulses = await client.query(
+          "SELECT 1 FROM space_pulses WHERE workspace_id=$1 AND team_id=$2 AND state IN ('draft','open') LIMIT 1",
+          [id, target],
+        );
+        if (pulses.rowCount) throw new IdentityError(409, 'conflict');
         await client.query('DELETE FROM teams WHERE workspace_id = $1 AND id = $2', [id, target]);
         return target;
       });

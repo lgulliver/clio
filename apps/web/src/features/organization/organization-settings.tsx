@@ -111,7 +111,7 @@ function OrganizationEditor({
           endpoint.startsWith('/teams/') &&
           failure instanceof ApiError &&
           failure.status === 409
-          ? 'This team still owns products. Move or delete them before deleting the team.'
+          ? 'This team still owns products or has draft/open pulses. Move or delete its products and close or cancel its pulses before deleting the team.'
           : errorMessage(failure),
       );
     } finally {

@@ -10,6 +10,8 @@ Independent service-scoped population, change/history, classification and recove
 
 Use [Engineering drill-down](docs/engineering-drilldown.md) to organize teams, products and services, then compare saved service metrics within each scope.
 
+Use [SPACE team pulses](docs/space-getting-started.md) to assign members to primary teams, run a guided pulse and review protected question results in Developer experience. Owners configure the reporting minimum (default three). The original pilot instrument covers all five SPACE dimensions through self-reported experience; it does not calculate a productivity score or change OEMS delivery metrics. No collection provider is required for a pulse.
+
 Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. Use [real-source preparation and access checks](docs/providers/real-sources.md) for GitHub App registration and scoped Argo access; use [local live GitHub connection](docs/providers/connect-github.md) to configure private operator grants and collect GitHub Deployments. Use [connecting Argo CD](docs/providers/connect-argocd.md) for explicit Application scope, operation info, notification authentication and immutable results. Use [independent measurement evidence](docs/providers/connect-measurement-evidence.md) to configure private producer capabilities and save evidence-backed measurements. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
 
 Use Node 24 LTS (24.21.0 is pinned in .node-version) and pnpm 12.10.1:

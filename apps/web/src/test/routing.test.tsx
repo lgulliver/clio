@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../lib/query-client';
@@ -46,6 +46,29 @@ describe('application routing', () => {
         'Select a workspace and service to manage live GitHub or Argo connections, or demo deployment settings.',
       ),
     ).toBeVisible();
+  });
+
+  it('navigates to developer experience from the main navigation', async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp();
+    const navigation = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await user.click(within(navigation).getByRole('link', { name: 'Developer experience' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Developer experience', level: 1 }),
+    ).toBeVisible();
+    expect(router.state.location.pathname).toBe('/developer-experience');
+    expect(within(navigation).getByRole('link', { name: 'Developer experience' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('renders developer experience on a direct visit', async () => {
+    renderApp('/developer-experience');
+    expect(
+      await screen.findByRole('heading', { name: 'Developer experience', level: 1 }),
+    ).toBeVisible();
+    expect(await screen.findByText('Sign in with GitHub to view team pulses.')).toBeVisible();
   });
 
   it('offers a working recovery link for an unknown route', async () => {

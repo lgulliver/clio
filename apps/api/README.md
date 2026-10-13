@@ -56,6 +56,8 @@ The public Better Auth bridge allowlists only `POST /api/auth/sign-in/social` (b
 
 ## Workspace HTTP contract
 
+SPACE pulse endpoints use the same session, current membership, trusted Origin and owner-role boundaries. Read the [SPACE HTTP contract](../../docs/space-api.md) and [team pulse guide](../../docs/space-getting-started.md). Migration 0015 adds SPACE storage; apply migrations explicitly with the usual command. Login OAuth remains separate from collection credentials, and pulse surveys do not require a provider connection.
+
 All requests below require a real database-backed session. JSON bodies allow only listed fields. Names trim whitespace and contain 1–200 Unicode code points. Workspace/invitation IDs are UUIDs; user IDs remain opaque Better Auth text IDs. All responses use `Cache-Control: no-store`.
 
 | Method/path | Body | Success |

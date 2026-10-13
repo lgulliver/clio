@@ -47,7 +47,7 @@ describe('real PostgreSQL foundation', () => {
     await expect(checkReadiness(pool, migrations)).rejects.toThrow();
     await migrate(
       pool,
-      migrations.filter((migration) => !migration.name.startsWith('0014_')),
+      migrations.filter((migration) => migration.name < '0014_'),
     );
     const preservedWorkspace = randomUUID();
     await repository.createWorkspace(preservedWorkspace, 'Existing workspace');

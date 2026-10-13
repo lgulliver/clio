@@ -146,7 +146,8 @@ export function OrganizationLifecycle({
               </form>
               <p className="mt-3 text-sm">
                 {products.length} {products.length === 1 ? 'product belongs' : 'products belong'} to
-                this team. Move or delete all products before deleting the team.
+                this team. Move or delete all products and close or cancel draft/open SPACE pulses
+                before deleting the team. Archived pulse results remain available.
               </p>
               <button
                 ref={teamDelete}
@@ -160,7 +161,7 @@ export function OrganizationLifecycle({
               {deletingTeam && (
                 <DeleteConfirmation
                   name={team.name}
-                  description="Only this empty team will be deleted. Services and saved evidence are preserved."
+                  description="This empty team will be deleted and its current primary-team assignments cleared. Services, saved evidence and archived pulse results are preserved."
                   busy={busy}
                   cancel={() => {
                     setDeletingTeam(false);

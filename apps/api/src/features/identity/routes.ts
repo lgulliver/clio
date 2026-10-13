@@ -13,6 +13,7 @@ import type { MeasurementConfig } from '../measurements/config.ts';
 import { registerMeasurementRoutes } from '../measurements/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
 import { createOrganizationRepository } from '../organization/repository.ts';
+import { registerSpaceRoutes } from '../space/routes.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
 import { IdentityError, object, opaqueId, uuid } from './input.ts';
@@ -115,6 +116,7 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
         return reply.code(409).send({ error: 'conflict' });
       return reply.code(503).send({ error: 'unavailable' });
     });
+    registerSpaceRoutes(routes, identity ? { pool: identity.pool, actor } : undefined);
     if (identity) {
       registerGitHubRoutes(routes, { pool: identity.pool, github: identity.github ?? null, actor });
       registerArgoRoutes(routes, { pool: identity.pool, argo: identity.argo ?? null, actor });

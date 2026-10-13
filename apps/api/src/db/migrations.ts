@@ -149,6 +149,17 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query(
     'SELECT run_id,workspace_id,service_id,connection_revision,connection_input,service_name,evidence,snapshot,metrics,oems_revision,public_result,digest FROM github_collection_snapshots LIMIT 0',
   );
+  await pool.query('SELECT workspace_id, minimum_respondents FROM space_preferences LIMIT 0');
+  await pool.query('SELECT workspace_id, user_id, team_id FROM space_assignments LIMIT 0');
+  await pool.query(
+    'SELECT id, workspace_id, user_id, team_id, team_name, changed_at FROM space_assignment_history LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,team_id,current_team_id,team_name,instrument_version,reference_start,reference_end,state,minimum_respondents,roster_size,submitted_count,questions,created_at,opened_at,closed_at,cancelled_at FROM space_pulses LIMIT 0',
+  );
+  await pool.query('SELECT pulse_id, user_id FROM space_roster LIMIT 0');
+  await pool.query('SELECT pulse_id, user_id FROM space_receipts LIMIT 0');
+  await pool.query('SELECT id, pulse_id, answers FROM space_answers LIMIT 0');
   await pool.query('SELECT id, workspace_id, name FROM teams LIMIT 0');
   await pool.query('SELECT id, workspace_id, team_id, name FROM products LIMIT 0');
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');
