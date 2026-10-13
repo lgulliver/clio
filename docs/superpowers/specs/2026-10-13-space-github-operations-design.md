@@ -1,6 +1,6 @@
 # SPACE operational GitHub signals
 
-Status: proposed for maintainer review; not implemented.
+Status: approved by the maintainer on 2026-10-13; not implemented.
 Date: 2026-10-13
 Base: `4c1297c1749c1527e4c11e2aacfd6544c86220fe`
 
@@ -8,7 +8,7 @@ Base: `4c1297c1749c1527e4c11e2aacfd6544c86220fe`
 
 Complement the shipped SPACE pulses with observed repository activity, review collaboration and pull-request flow. Owners connect selected GitHub repositories; workspace members inspect aggregate evidence in Developer experience. Preserve confidential survey reporting, existing DORA collection and the pinned OEMS contract.
 
-The maintainer authorized moving to operational GitHub signals. The signal definitions, separate App and attribution policy below are proposed application choices requiring review. Repository ownership describes where work occurs, not the team membership of everyone contributing to it.
+The maintainer approved this written design on 2026-10-13, including signal definitions, separate App and attribution policy. Repository ownership describes where work occurs, not the team membership of everyone contributing to it.
 
 ## Approaches considered
 
@@ -69,8 +69,10 @@ Every event uses provider timestamp membership in `[windowStart, windowEnd)`. Re
 | PRs opened observed | Distinct discovered PR IDs with `created_at` inside window | Includes draft and bot PRs; state explicitly describes repository activity |
 | PRs merged observed | Distinct discovered PR IDs with non-null `merged_at` inside window | Includes draft-time history and bot/unknown-author PRs; creation may precede window; closed-unmerged is excluded |
 | Review records submitted observed | Distinct review IDs with `submitted_at` inside window | Exclude pending reviews, self reviews, Bot accounts and unknown actors; include submitted commented/approved/changes-requested/dismissed records with valid timestamps. Repeated reviews/comments by one person are not distinct reviewers or necessarily distinct review sessions |
-| Open-to-first-review duration among reviewed human PRs | Median of earliest observed qualifying non-self/non-bot submitted review time minus PR creation time | Cohort: human-authored PRs opened in window; follow-up bounded by that window end. Includes draft time and incomplete follow-up; never call it ready-for-review wait time |
-| Open-to-merge duration among merged human PRs | Median `merged_at - created_at` for discovered human-authored PRs merged in window | Includes draft time and possibly PRs opened long before window; excludes still-open, closed-unmerged, bot-authored and unknown-author PRs. Never call it deployment lead time |
+| Time to first human review (open to first review) | Median of earliest observed qualifying non-self/non-bot submitted review time minus PR creation time | Cohort: human-authored PRs opened in window; follow-up bounded by that window end. Includes draft time and incomplete follow-up; never call it ready-for-review wait time |
+| PR review time (open to merge) | Median `merged_at - created_at` for discovered human-authored PRs merged in window | Includes draft time and possibly PRs opened long before window; excludes still-open, closed-unmerged, bot-authored and unknown-author PRs. Never call it deployment lead time |
+
+The maintainer explicitly requested PR review time. Present both timing indicators with the boundaries above, sample sizes and repository/team-scoped trends. Keep internal signal IDs `open_to_first_review` and `open_to_merge`. PR review time here is elapsed lifecycle time, including author changes, queues and drafts; these API events cannot establish minutes spent actively reviewing code. It remains separate from pinned OEMS calculations and their deployment-linked populations.
 
 Durations publish only with at least three valid timed PRs: three PRs with a qualifying observed first review, or three PRs with a valid merge duration respectively. Below that minimum publish null with `insufficient_samples`. This is a fixed operational sample guard, separate from configurable survey respondent suppression. Missing timestamps, excluded invalid samples and incomplete review traversal remain explicit qualification reasons. No duration treats an unanswered/unreviewed PR as zero; show reviewed sample count alongside limitations, without identities. An observed no-qualifying-review count covers only discovered human cohort PRs whose review traversal finished; incomplete review traversal produces unknown context rather than classifying those PRs as unreviewed. The first-review median is conditional on observing a review within the reference period: later-opened PRs have shorter follow-up and absent/slower responses are censored, biasing observed durations toward shorter waits. Show this limitation explicitly; do not compare it as an unconditional waiting-time improvement.
 
