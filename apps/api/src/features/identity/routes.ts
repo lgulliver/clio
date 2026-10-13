@@ -12,6 +12,10 @@ import { registerGitHubRoutes } from '../github-collection/routes.ts';
 import type { MeasurementConfig } from '../measurements/config.ts';
 import { registerMeasurementRoutes } from '../measurements/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
+import type { NotificationConfig } from '../notifications/config.ts';
+import type { NotificationProvider } from '../notifications/provider.ts';
+import { registerNotificationRoutes } from '../notifications/routes.ts';
+import type { SlackIdentityProvider } from '../notifications/slack-identity.ts';
 import { createOrganizationRepository } from '../organization/repository.ts';
 import { registerSpaceRoutes } from '../space/routes.ts';
 import type { SpaceGitHubConfig } from '../space-github/config.ts';
@@ -31,6 +35,10 @@ export interface IdentityDependencies {
   measurement?: MeasurementConfig | null;
   spaceGithub?: SpaceGitHubConfig | null;
   spaceGithubProvider?: SpaceGitHubProvider;
+  notifications?: NotificationConfig | null;
+  notificationsConfigNow?: () => Promise<NotificationConfig | null>;
+  notificationProvider?: NotificationProvider;
+  slackIdentityProvider?: SlackIdentityProvider;
 }
 
 function clientError(status: number) {
@@ -130,6 +138,25 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
             config: identity.spaceGithub ?? null,
             actor,
             ...(identity.spaceGithubProvider ? { provider: identity.spaceGithubProvider } : {}),
+          }
+        : undefined,
+    );
+    registerNotificationRoutes(
+      routes,
+      identity
+        ? {
+            pool: identity.pool,
+            config: identity.notifications ?? null,
+            actor,
+            appOrigin: identity.config.appOrigin,
+            callbackOrigin: identity.config.baseUrl,
+            ...(identity.notificationsConfigNow
+              ? { configNow: identity.notificationsConfigNow }
+              : {}),
+            ...(identity.notificationProvider ? { provider: identity.notificationProvider } : {}),
+            ...(identity.slackIdentityProvider
+              ? { identityProvider: identity.slackIdentityProvider }
+              : {}),
           }
         : undefined,
     );
