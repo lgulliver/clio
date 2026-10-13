@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, parseWorkspaces, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
 import { parseOrganization } from '../organization/api';
@@ -31,8 +31,57 @@ import { TrendChart } from './trend-chart';
 type Clock = () => Date;
 const systemClock: Clock = () => new Date();
 
-export function DeveloperExperiencePage({ now = systemClock }: { now?: Clock }) {
+/** Notification link target; the workspace is honoured only if it is in the current roster. */
+export type LinkTarget = { workspaceId: string; pulseId?: string };
+type LinkOutcome = 'success' | 'failed';
+const outcomeText: Record<LinkOutcome, string> = {
+  success: 'Slack sign-in finished and returned to Clio. This result has not been checked here.',
+  failed: 'Slack account linking did not complete. You can try the link again later.',
+};
+
+export function DeveloperExperiencePage({
+  now = systemClock,
+  initialTarget,
+  notificationLink,
+  navigationKey,
+  onTargetChange,
+}: {
+  now?: Clock;
+  initialTarget?: LinkTarget;
+  notificationLink?: LinkOutcome;
+  /** Changes for every navigation, so each callback outcome is consumed once. */
+  navigationKey?: string;
+  /** Called with null when a target is closed or replaced, or with the remaining target once an outcome has been shown. */
+  onTargetChange?: (target: LinkTarget | null) => void;
+}) {
   const session = useSession();
+  const [shown, setShown] = useState<LinkOutcome | null>(notificationLink ?? null);
+  const targetWorkspace = initialTarget?.workspaceId ?? '';
+  const targetPulse = initialTarget?.pulseId ?? '';
+  const latestChange = useRef(onTargetChange);
+  latestChange.current = onTargetChange;
+  // Each callback navigation shows its own fixed outcome and then leaves the URL clean. The
+  // notice belongs to that navigation entry: it survives its own cleanup replace, and any other
+  // outcome-free entry (a link, Back or Forward to a cleaned entry) discards it.
+  const outcomeEvent = notificationLink
+    ? `${navigationKey ?? ''}:${notificationLink}:${targetWorkspace}`
+    : '';
+  const ownCleanup = useRef(false);
+  useEffect(() => {
+    if (!outcomeEvent || !notificationLink) return;
+    setShown(notificationLink);
+    ownCleanup.current = true;
+    latestChange.current?.(targetWorkspace ? { workspaceId: targetWorkspace } : null);
+  }, [outcomeEvent, notificationLink, targetWorkspace]);
+  const entry = `${navigationKey ?? ''}:${targetWorkspace}:${targetPulse}`;
+  useEffect(() => {
+    if (notificationLink || entry === '') return;
+    if (ownCleanup.current) {
+      ownCleanup.current = false;
+      return;
+    }
+    setShown(null);
+  }, [notificationLink, entry]);
   return (
     <section className="delivery-dashboard space-dashboard">
       <header className="page-header">
@@ -43,8 +92,18 @@ export function DeveloperExperiencePage({ now = systemClock }: { now?: Clock }) 
           are shown separately, per repository. There is no combined productivity score.
         </p>
       </header>
+      {shown && (
+        <p role="status" className="space-note">
+          {outcomeText[shown]}
+        </p>
+      )}
       {session.status === 'ready' && session.user ? (
-        <SpaceWorkspaces key={`${session.user.id}:${session.revision}`} now={now} />
+        <SpaceWorkspaces
+          key={`${session.user.id}:${session.revision}`}
+          now={now}
+          target={initialTarget}
+          onTargetChange={onTargetChange}
+        />
       ) : (
         <div className="panel">
           <h2 className="text-xl font-semibold">Team pulses</h2>
@@ -55,16 +114,47 @@ export function DeveloperExperiencePage({ now = systemClock }: { now?: Clock }) 
                 ? 'Developer experience is unavailable until your session can be checked.'
                 : 'Sign in with GitHub to view team pulses.'}
           </p>
+          {session.status === 'signed-out' && initialTarget && (
+            <p className="mt-3">Sign in with GitHub, then reopen the original notification link.</p>
+          )}
         </div>
       )}
     </section>
   );
 }
 
-function SpaceWorkspaces({ now }: { now: Clock }) {
+function SpaceWorkspaces({
+  now,
+  target,
+  onTargetChange,
+}: {
+  now: Clock;
+  target: LinkTarget | undefined;
+  onTargetChange: ((target: LinkTarget | null) => void) | undefined;
+}) {
   const query = useStoredRead('space/workspaces', '/api/workspaces', parseWorkspaces);
-  const [selected, setSelected] = useState('');
-  const selection = useRef('');
+  const [selected, setSelected] = useState(target?.workspaceId ?? '');
+  const selection = useRef(target?.workspaceId ?? '');
+  const [linked, setLinked] = useState<LinkTarget | null>(target ?? null);
+  const targetWorkspace = target?.workspaceId;
+  const targetPulse = target?.pulseId;
+  const appliedTarget = useRef(`${targetWorkspace ?? ''}:${targetPulse ?? ''}`);
+  // The URL is the source of truth: a new link (back/forward or a fresh notification) replaces
+  // the local target and workspace, and an emptied URL drops the local pulse target.
+  useLayoutEffect(() => {
+    const key = `${targetWorkspace ?? ''}:${targetPulse ?? ''}`;
+    if (appliedTarget.current === key) return;
+    appliedTarget.current = key;
+    if (!targetWorkspace) {
+      setLinked(null);
+      return;
+    }
+    selection.current = targetWorkspace;
+    setSelected(targetWorkspace);
+    setDenied('');
+    setRoleChanged('');
+    setLinked({ workspaceId: targetWorkspace, ...(targetPulse ? { pulseId: targetPulse } : {}) });
+  }, [targetWorkspace, targetPulse]);
   const roles = useRef(new Map<string, Workspace['role']>());
   roles.current = new Map((query.data ?? []).map((item) => [item.id, item.role]));
   const [denied, setDenied] = useState('');
@@ -139,6 +229,8 @@ function SpaceWorkspaces({ now }: { now: Clock }) {
             value={active?.id ?? ''}
             onChange={(event) => {
               selection.current = event.target.value;
+              if (linked) onTargetChange?.(null);
+              setLinked(null);
               setDenied('');
               setRoleChanged('');
               setSelected(event.target.value);
@@ -154,7 +246,11 @@ function SpaceWorkspaces({ now }: { now: Clock }) {
         </div>
       )}
       {selected && !active && (
-        <p role="alert">This workspace is no longer available to you. Choose another workspace.</p>
+        <p role="alert">
+          {linked?.workspaceId === selected
+            ? 'The linked workspace is not available to you. Choose another workspace.'
+            : 'This workspace is no longer available to you. Choose another workspace.'}
+        </p>
       )}
       {active &&
         (denied === activeKey ? (
@@ -189,7 +285,14 @@ function SpaceWorkspaces({ now }: { now: Clock }) {
               latestRole={latestRole}
               revalidate={revalidate}
             >
-              <SpaceDashboard now={now} />
+              <SpaceDashboard
+                now={now}
+                linkedPulse={linked?.workspaceId === active.id ? linked.pulseId : undefined}
+                onCloseLinked={() => {
+                  setLinked(null);
+                  onTargetChange?.(null);
+                }}
+              />
             </SpaceScopeProvider>
           </>
         ))}
@@ -209,7 +312,15 @@ function latestClosed(pulses: readonly Pulse[], teamId: string) {
     )[0];
 }
 
-function SpaceDashboard({ now }: { now: Clock }) {
+function SpaceDashboard({
+  now,
+  linkedPulse,
+  onCloseLinked,
+}: {
+  now: Clock;
+  linkedPulse: string | undefined;
+  onCloseLinked: () => void;
+}) {
   const scope = useSpaceScope();
   const id = useId();
   const workspaceId = scope.workspace.id;
@@ -220,6 +331,11 @@ function SpaceDashboard({ now }: { now: Clock }) {
   const [wizard, setWizard] = useState<{ draft: Pulse | null; key: number } | null>(null);
   const wizardTrigger = useRef<HTMLButtonElement>(null);
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [draftNote, setDraftNote] = useState('');
+  const linkedHeading = useRef<HTMLHeadingElement>(null);
+  const linkedRef = useRef(linkedPulse ?? '');
+  linkedRef.current = linkedPulse ?? '';
+  const stillLinked = useCallback((expected: string) => () => linkedRef.current === expected, []);
   const scopeHeading = useRef<HTMLHeadingElement>(null);
   const focusScope = useRef(false);
   const instrumentQuery = useSpaceRead('instrument', `${scope.path}/instrument`, parseInstrument);
@@ -250,6 +366,11 @@ function SpaceDashboard({ now }: { now: Clock }) {
     if (focusScope.current) scopeHeading.current?.focus();
     focusScope.current = false;
   });
+  const ready = Boolean(instrumentQuery.data && preferences.data && organization.data);
+  useEffect(() => {
+    // Move focus to the linked pulse once the scope is ready and whenever the target changes.
+    if (ready && linkedPulse) linkedHeading.current?.focus();
+  }, [ready, linkedPulse]);
   const currentTeams = organization.data?.teams ?? [];
   const choices = useMemo(() => {
     const current = (organization.data?.teams ?? []).map((item) => ({
@@ -275,16 +396,23 @@ function SpaceDashboard({ now }: { now: Clock }) {
   );
   /** Buttons move focus to the new scope heading; the Team selector keeps keyboard focus. */
   function selectTeam(next: TeamChoice | null, pulse = '', focus = true) {
+    if (linkedPulse) onCloseLinked();
     selectedPulse.current = pulse;
     setPulseId(pulse);
     setTeam(next);
     focusScope.current = focus;
   }
   function selectPulse(next: string) {
+    if (next && linkedPulse) onCloseLinked();
     selectedPulse.current = next;
     setPulseId(next);
   }
   function openWizard(draft: Pulse | null) {
+    setDraftNote(
+      draft && !currentNames.has(draft.teamId)
+        ? 'The team for this draft no longer exists. Choose a current team in setup, or cancel the draft.'
+        : '',
+    );
     setWizard((current) => ({ draft, key: (current?.key ?? 0) + 1 }));
   }
   const roots = [instrumentQuery, preferences, organization];
@@ -318,6 +446,30 @@ function SpaceDashboard({ now }: { now: Clock }) {
   const selectedChoice = team ? (choices.find((item) => item.id === team.id) ?? team) : null;
   return (
     <div className="space-layout">
+      {linkedPulse && (
+        <section className="space-linked" aria-labelledby={`${id}-linked`}>
+          <h2 id={`${id}-linked`} ref={linkedHeading} tabIndex={-1} className="scope-title">
+            Pulse from your link
+          </h2>
+          <PulseDetail
+            key={linkedPulse}
+            pulseId={linkedPulse}
+            still={stillLinked(linkedPulse)}
+            onEditDraft={openWizard}
+            missingText="This pulse is not available to you, or it no longer exists."
+          />
+          <button
+            type="button"
+            className="space-secondary"
+            onClick={() => {
+              focusScope.current = true;
+              onCloseLinked();
+            }}
+          >
+            Close linked pulse
+          </button>
+        </section>
+      )}
       <div className="space-scope-bar">
         <label htmlFor={`${id}-team`}>Team</label>
         <select
@@ -372,6 +524,7 @@ function SpaceDashboard({ now }: { now: Clock }) {
           </ul>
         </section>
       )}
+      {scope.owner && wizard && draftNote && <p role="status">{draftNote}</p>}
       {scope.owner && wizard && (
         <PulseWizard
           key={wizard.key}
@@ -380,6 +533,7 @@ function SpaceDashboard({ now }: { now: Clock }) {
           now={now}
           onClose={() => {
             setWizard(null);
+            setDraftNote('');
             wizardTrigger.current?.focus();
           }}
         />

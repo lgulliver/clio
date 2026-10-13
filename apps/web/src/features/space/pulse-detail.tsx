@@ -26,10 +26,12 @@ export function PulseDetail({
   pulseId,
   still,
   onEditDraft,
+  missingText = 'This pulse is no longer available. Choose another pulse from the list.',
 }: {
   pulseId: string;
   still: () => boolean;
   onEditDraft: (pulse: Pulse) => void;
+  missingText?: string;
 }) {
   const scope = useSpaceScope();
   const id = useId();
@@ -84,7 +86,7 @@ export function PulseDetail({
   if (query.missing)
     return (
       <p role="status" className="panel">
-        This pulse is no longer available. Choose another pulse from the list.
+        {missingText}
       </p>
     );
   if (query.isError)
