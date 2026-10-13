@@ -1,6 +1,6 @@
 # SPACE pulse notifications: Slack DMs with email fallback
 
-Status: proposed; maintainer review required before implementation planning.
+Status: approved by the maintainer on 2026-10-13; implementation plan awaiting review.
 Date: 2026-10-13
 Owner: Liam Gulliver
 
@@ -8,7 +8,7 @@ Owner: Liam Gulliver
 
 Help team members discover open surveys, remember to respond, and find closed results without polling Clio. Preserve confidential team aggregates, frozen pulse rosters and current workspace authorization.
 
-The maintainer selected email and Slack notifications, private Slack DMs, and Slack first with email fallback. SMTP, explicit Slack account linking, timings and the other policies below are proposed defaults. This is a new application subsystem, not an OEMS metric or a change to survey calculations.
+The maintainer selected email and Slack notifications, private Slack DMs, and Slack first with email fallback. Approval of this spec includes SMTP, explicit Slack account linking, timings and the other defaults below. This is a new application subsystem, not an OEMS metric or a change to survey calculations.
 
 ## Approach
 
@@ -81,7 +81,7 @@ Transport tests exercise Slack acceptance, definitive refusal, rate limits, ambi
 
 Identity tests exercise valid signed OpenID responses, nonce/state replay, wrong issuer/audience/workspace, invalid/expired signatures, session revocation at callback and duplicate Slack-user binding. Browser tests cover setup confirmation, role/workspace/session changes, owner/member separation, uncertain retry warnings, keyboard access and honest missing configuration. Controlled end-to-end evidence must run pulse transition → worker → local transport → safe delivery status with real random-schema PostgreSQL.
 
-Follow committed bounded specialist workflow: isolated concurrent writers, shared-file ownership and opposite-engine review. Run `pnpm check`, meaningful real PostgreSQL integration and `git diff --check` before commits; build/regenerate routes when routes change. No live Slack/email sends, paid services or hosting changes are authorized by this proposed design.
+Follow committed bounded specialist workflow: isolated concurrent writers, shared-file ownership and opposite-engine review. Run `pnpm check`, meaningful real PostgreSQL integration and `git diff --check` before commits; build/regenerate routes when routes change. No live Slack/email sends, paid services or hosting changes are authorized by this design.
 
 ## Scope exclusions
 
