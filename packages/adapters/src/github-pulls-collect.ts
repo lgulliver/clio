@@ -444,8 +444,16 @@ export async function collectGitHubPullSlice(input: PullSliceInput): Promise<Pul
       !input.signal?.aborted
     ) {
       if (input.activeMillis + lastTime - start >= 1_800_000) {
-        terminate('active_time_limit');
-        retained = checkpoint();
+        // Build from validated evidence even if the live checkpoint could not be recovered.
+        retained = Object.freeze({
+          ...retained,
+          phase: 'ready',
+          nextPullPage: null,
+          pulls: Object.freeze([...retained.pulls].sort(pullOrder)),
+          gaps: Object.freeze([
+            ...new Set<AcquisitionGap>([...retained.gaps, 'active_time_limit']),
+          ]),
+        });
       }
       return Object.freeze({
         checkpoint: retained,

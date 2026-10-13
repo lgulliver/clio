@@ -608,6 +608,50 @@ describe('bounded pull evidence', () => {
     expect(result.done).toBe(false);
     expect(result.checkpoint.nextPullPage).toBe(1);
   });
+  it('retains accepted review-page facts when a resumed response deadline exhausts active acquisition', async () => {
+    const first = await collect(
+      async (url) =>
+        url.includes('?state=all')
+          ? http([pull()])
+          : url === `${root}/1`
+            ? http(pull())
+            : http([review()], `<${root}/1/reviews?per_page=100&page=2>; rel="next"`),
+      { remainingRequests: 3 },
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(clock());
+    try {
+      const result = collect(
+        async (url) => (url === `${root}/1` ? http(pull()) : new Response(new ReadableStream())),
+        { checkpoint: first.checkpoint, activeMillis: 1_799_000, clock: () => new Date() },
+      );
+      const assertion = expect(result).resolves.toMatchObject({
+        done: true,
+        requests: 2,
+        activeMillis: 1000,
+        checkpoint: {
+          phase: 'ready',
+          nextPullPage: null,
+          nextReviewIndex: 0,
+          nextReviewPage: 2,
+          reviewTraversalComplete: [],
+          gaps: ['active_time_limit'],
+          reviews: [{ id: 201 }],
+        },
+      });
+      void assertion.catch(() => {});
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      const slice = await result;
+      expect(slice.checkpoint.pulls).toHaveLength(1);
+      expect(parsePullCheckpoint(slice.checkpoint)).toEqual(slice.checkpoint);
+      expect(JSON.stringify(slice.checkpoint)).not.toMatch(
+        /private-|"user"|"login"|"authorId"|"reviewerId"/,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('enforces the total active acquisition limit with an incomplete terminal result', async () => {
     const result = await collect(
       async () => {
