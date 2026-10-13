@@ -134,7 +134,7 @@ expect(slice.checkpoint.pulls[0]?.id).toBe(rawPull.id);
 
 **Interfaces:** Consumes provider checkpoint types; produces `calculateSignals`, safe types above and unknown-input parsers. Browser exports `parseOperationResult`, `parseOperationMapping`, `parseOperationRun` and page parsers; endpoint transport uses existing credentialed identity helpers.
 
-- [ ] Add actual calculation fixtures with three human PRs, durations 1/3/5 hours, duplicate review observations and a bot PR. Assert median 3 hours, bot PR counted in activity but excluded from durations. Below-three timed samples stays null; empty counts stay null rather than zero.
+- [x] Add actual calculation fixtures with three human PRs, durations 1/3/5 hours, duplicate review observations and a bot PR. Assert median 3 hours, bot PR counted in activity but excluded from durations. Below-three timed samples stays null; empty counts stay null rather than zero.
 
 ```ts
 const result = calculateSignals(checkpoint, {
@@ -145,12 +145,12 @@ expect(duration).toEqual({ id: 'open_to_first_review', status: 'provisional',
   value: 3, unit: 'hours', sampleCount: 3 });
 ```
 
-- [ ] Run `pnpm --filter @clio/api exec vitest run --config vitest.config.ts tests/space-github.test.ts`; observe RED.
-- [ ] Implement half-open event cohorts, safe-instant order, human eligibility, per-PR complete-review exclusion and conditional medians. Validate exact closed midnight bounds and maximum 90 days; reject future/noncanonical dates and unknown request fields.
-- [ ] Add a discriminating timing case: three human PRs opened at 09:00, first reviewed at 10:00 and merged at 14:00 on the same day produce first-review median 1 hour and PR-review-time median 5 hours. Prove review submission is not substituted for merge and that draft PRs remain eligible under the approved lifecycle definition.
-- [ ] Browser parsers reject missing/duplicate signals, numeric no-observation values, negative counts/hours, duration under minimum, wrong unit/version/source/mapping/window, invalid timestamps and cursor mismatches. They never accept private provider fields.
-- [ ] Parity test passes actual API calculation inside a real safe result to browser parser. Mutate context/version/status after serialization and prove rejection. Do not merely duplicate fixture constants across server/browser.
-- [ ] Run API focused suite, web parser/parity suites and both typechecks GREEN. Coordinator owns shared contract changes; opposite-engine review before commit `feat(space): define qualified GitHub operational signals`.
+- [x] Run `pnpm --filter @clio/api exec vitest run --config vitest.config.ts tests/space-github.test.ts`; observe RED.
+- [x] Implement half-open event cohorts, safe-instant order, human eligibility, per-PR complete-review exclusion and conditional medians. Validate exact closed midnight bounds and maximum 90 days; reject future/noncanonical dates and unknown request fields.
+- [x] Add a discriminating timing case: three human PRs opened at 09:00, first reviewed at 10:00 and merged at 14:00 on the same day produce first-review median 1 hour and PR-review-time median 5 hours. Prove review submission is not substituted for merge and that draft PRs remain eligible under the approved lifecycle definition.
+- [x] Browser parsers reject missing/duplicate signals, numeric no-observation values, negative counts/hours, duration under minimum, wrong unit/version/source/mapping/window, invalid timestamps and cursor mismatches. They never accept private provider fields.
+- [x] Parity test passes actual API calculation inside a real safe result to browser parser. Mutate context/version/status after serialization and prove rejection. Do not merely duplicate fixture constants across server/browser.
+- [x] Run API focused suite, web parser/parity suites and both typechecks GREEN. Coordinator owns shared contract changes; opposite-engine review before commit `feat(space): define qualified GitHub operational signals`.
 
 ## Task 3: Private configuration, PostgreSQL mappings and durable worker
 
