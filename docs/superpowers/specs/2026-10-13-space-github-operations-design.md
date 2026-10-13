@@ -1,6 +1,6 @@
 # SPACE operational GitHub signals
 
-Status: approved by the maintainer on 2026-10-13; not implemented.
+Status: implemented and locally verified on 2026-10-13. Live GitHub App setup and source verification remain manual.
 Date: 2026-10-13
 Base: `4c1297c1749c1527e4c11e2aacfd6544c86220fe`
 

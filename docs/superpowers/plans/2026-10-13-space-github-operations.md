@@ -158,7 +158,7 @@ expect(duration).toEqual({ id: 'open_to_first_review', status: 'provisional',
 
 **Interfaces:** `readSpaceGitHubConfig(env: NodeJS.ProcessEnv, deploymentAppId: number | null): Promise<SpaceGitHubConfig | null>`; `SpaceGitHubConfig` has existing App/key/grant structure with explicit PR profile/fingerprint. `createSpaceGitHubRepository(pool, config)` produces authorized read/list/save/disconnect/enqueue/history/getResult methods returning safe types. `processOneSpaceGitHub(pool, config, {signal, provider?}): Promise<boolean>` processes at most one eligible job slice; injected provider uses actual adapter interfaces.
 
-- [ ] Build disposable random-schema integration harness following existing SPACE tests. Add migration/constraint tests, atomic snapshot/readback, request-ID replay and first worker slice before implementation; observe RED against new integration file.
+- [x] Build disposable random-schema integration harness following existing SPACE tests. Add migration/constraint tests, atomic snapshot/readback, request-ID replay and first worker slice before implementation; observe RED against new integration file.
 
 ```ts
 expect(await repository.enqueue(actor, workspaceId, mapping.id, request)).toEqual(
@@ -169,14 +169,14 @@ await expect(repository.enqueue(actor, workspaceId, mapping.id, changedRequest))
   .rejects.toMatchObject({ statusCode: 409 });
 ```
 
-- [ ] Reserve migration after confirming 0015 latest. Add workspace-bound mapping/team keys, repository uniqueness, revisioned connection state; jobs with scoped request ID uniqueness and active-job partial index; bounded checkpoints; private evidence + safe result rows. Add immutable completion guards, claim/retry/refund guards, deadline/lease constraints and source-safe indexes. Historical team fields copied, not cascading through current teams.
-- [ ] Implement config absent/invalid/identical-App policies and grant profile fingerprints. Never read/print real grant contents during tests. Fixtures supply temporary owner-only files outside Git with teardown.
-- [ ] Repository uses `authorizedWorkspaceTransaction` for every member read/owner write, one checked-out client, parameterized SQL. Verification runs outside transaction with preflight and postflight fences. Explicit disconnect cancels/fences active work; deleteTeam refuses connected mappings/active jobs.
-- [ ] Implement claim/checkpoint/reschedule/complete/fail against database time and current grants/revision. Use existing `acquireQuota`, `paceQuota`, `observeQuota`, `releaseQuota`; wrap *all* requests in the shared deadline/request counter. Add App-independent cooldown tests and same-App contention across operational jobs. Never pace while holding database transaction.
-- [ ] Account elapsed active milliseconds on every slice path, including failed and cooperative work. Enforce 24-hour expiration even after long cooldown. Commit checkpoint/result only under live job lease/current grant/current connected revision; cancelled or expired jobs cannot complete.
-- [ ] Tests exercise restart mid-review/author re-fetch, deleted author, renamed/transferred repository, mapping revoked during quota wait, expired lease, concurrent claims, quota refund, byte/fact/time caps, idempotency and immutable original team/name after rename/move. Inspect JSON checkpoint/evidence for forbidden actor IDs/content.
-- [ ] Worker CLI supports `--once`, safe shutdown and redacted errors; identity missing disables live HTTP setup; migration checks precede work. Add `worker:space-github` scripts without dependency/lockfile changes.
-- [ ] Run `CLIO_TEST_DATABASE_URL=<existing test database> pnpm --filter @clio/api exec vitest run --config vitest.integration.config.ts tests/space-github.integration.ts` using inherited/private environment, never literal secrets. Preserve existing development schemas/volumes. Coordinator observes exit and opposite-engine review before commit `feat(api): persist and collect SPACE GitHub evidence`.
+- [x] Reserve migration after confirming 0015 latest. Add workspace-bound mapping/team keys, repository uniqueness, revisioned connection state; jobs with scoped request ID uniqueness and active-job partial index; bounded checkpoints; private evidence + safe result rows. Add immutable completion guards, claim/retry/refund guards, deadline/lease constraints and source-safe indexes. Historical team fields copied, not cascading through current teams.
+- [x] Implement config absent/invalid/identical-App policies and grant profile fingerprints. Never read/print real grant contents during tests. Fixtures supply temporary owner-only files outside Git with teardown.
+- [x] Repository uses `authorizedWorkspaceTransaction` for every member read/owner write, one checked-out client, parameterized SQL. Verification runs outside transaction with preflight and postflight fences. Explicit disconnect cancels/fences active work; deleteTeam refuses connected mappings/active jobs.
+- [x] Implement claim/checkpoint/reschedule/complete/fail against database time and current grants/revision. Use existing `acquireQuota`, `paceQuota`, `observeQuota`, `releaseQuota`; wrap *all* requests in the shared deadline/request counter. Add App-independent cooldown tests and same-App contention across operational jobs. Never pace while holding database transaction.
+- [x] Account elapsed active milliseconds on every slice path, including failed and cooperative work. Enforce 24-hour expiration even after long cooldown. Commit checkpoint/result only under live job lease/current grant/current connected revision; cancelled or expired jobs cannot complete.
+- [x] Tests exercise restart mid-review/author re-fetch, deleted author, renamed/transferred repository, mapping revoked during quota wait, expired lease, concurrent claims, quota refund, byte/fact/time caps, idempotency and immutable original team/name after rename/move. Inspect JSON checkpoint/evidence for forbidden actor IDs/content.
+- [x] Worker CLI supports `--once`, safe shutdown and redacted errors; identity missing disables live HTTP setup; migration checks precede work. Add `worker:space-github` scripts without dependency/lockfile changes.
+- [x] Run `CLIO_TEST_DATABASE_URL=<existing test database> pnpm --filter @clio/api exec vitest run --config vitest.integration.config.ts tests/space-github.integration.ts` using inherited/private environment, never literal secrets. Preserve existing development schemas/volumes. Coordinator observes exit and opposite-engine review before commit `feat(api): persist and collect SPACE GitHub evidence`.
 
 ## Task 4: HTTP API and runtime wiring
 
@@ -196,7 +196,7 @@ await expect(repository.enqueue(actor, workspaceId, mapping.id, changedRequest))
 | GET `/mappings/:mappingId/results?cursor` | Member; `{results,nextCursor}`, max 25; immutable success history |
 | GET `/results/:resultId` | Member; `{result}`; readable after disconnect/team deletion |
 
-- [ ] Add fail-closed tests for missing identity/config, cross-workspace reads, revoked sessions/members, member writes, wrong Origin, unknown fields, stale revision and invalid cursor before routes; observe RED.
+- [x] Add fail-closed tests for missing identity/config, cross-workspace reads, revoked sessions/members, member writes, wrong Origin, unknown fields, stale revision and invalid cursor before routes; observe RED.
 
 ```ts
 const denied = await server.inject({ method: 'POST',
@@ -208,10 +208,10 @@ expect(denied.statusCode).toBe(403);
 expect(denied.headers['cache-control']).toBe('no-store');
 ```
 
-- [ ] Implement exact parsers and safe wrappers; current authorization covers successful/error responses and no-store. Resource/cursor 404 stays distinct from membership absence; SQL conflicts return safe 409 rather than raw provider diagnostics.
-- [ ] Wire config to startup/server/identity routes and read-only availability. Readiness verifies current migration and expected operational columns. Existing login, deployment, Argo, measurement and pulse routes stay active; adding optional feature must not require PR credentials for unrelated routes.
-- [ ] Test owner demotion/session revocation between preflight and network verification completion, safe grant choices only for owner, scope-specific pagination and no credentials in all success/error envelopes.
-- [ ] Run route/unit + real PostgreSQL HTTP tests and existing identity/GitHub regression suites GREEN. Publish actual HTTP contract; coordinator review and Conventional Commit `feat(api): expose scoped SPACE GitHub workflows`.
+- [x] Implement exact parsers and safe wrappers; current authorization covers successful/error responses and no-store. Resource/cursor 404 stays distinct from membership absence; SQL conflicts return safe 409 rather than raw provider diagnostics.
+- [x] Wire config to startup/server/identity routes and read-only availability. Readiness verifies current migration and expected operational columns. Existing login, deployment, Argo, measurement and pulse routes stay active; adding optional feature must not require PR credentials for unrelated routes.
+- [x] Test owner demotion/session revocation between preflight and network verification completion, safe grant choices only for owner, scope-specific pagination and no credentials in all success/error envelopes.
+- [x] Run route/unit + real PostgreSQL HTTP tests and existing identity/GitHub regression suites GREEN. Publish actual HTTP contract; coordinator review and Conventional Commit `feat(api): expose scoped SPACE GitHub workflows`.
 
 ## Task 5: Guided setup, safe repository results and qualified trends
 
@@ -219,7 +219,7 @@ expect(denied.headers['cache-control']).toBe('no-store');
 
 **Interfaces:** `OperationsPanel({workspaceId, teamId, role})` consumes existing SPACE scope provider/fences. Four-stage `OperationsSetupWizard`: source/team → scope/limits/privacy review → save/window/explicit collection → stored result. Browser API transport follows Task 4 exact request/envelope shapes. `buildOperationalPoints(results, signalId)` returns independently qualified points keyed by repository/team/revision/calculation/window length.
 
-- [ ] Add UI tests for unconfigured/no-result/pending/failed/latest-success states, setup confirmation and workspace change while requests resolve. Assert Refresh performs GET only, never queues work; observe RED.
+- [x] Add UI tests for unconfigured/no-result/pending/failed/latest-success states, setup confirmation and workspace change while requests resolve. Assert Refresh performs GET only, never queues work; observe RED.
 
 ```tsx
 await user.click(screen.getByRole('button', { name: 'Refresh saved results' }));
@@ -228,24 +228,24 @@ expect(screen.getByText('No observations')).toBeVisible();
 expect(screen.queryByText('0 pull requests')).not.toBeInTheDocument();
 ```
 
-- [ ] Mount operational context alongside pulses, retaining survey copy/minimum and current workspace/team scope. Owner grants/mapping controls are absent for members. Reuse scope/revision/query abort behavior and independently recheck metadata after resource/cursor 403/404 or role mismatch.
-- [ ] Wizard states source identity, one owning team, incomplete-discovery ceilings, draft-inclusive conditional durations and small-source attribution limits. Explicit Save and Collect confirmations; retain unsaved choices through safe refresh, clear owner data on access/role change. Back/Next controls semantic and keyboard accessible.
-- [ ] Show safe repository result cards with observed/provisional labels, sample counts, acquisition interval and stored copied ownership. No totals/averaged medians across rows. Surface per-signal gaps, insufficient samples, unknown traversal and conditional-duration bias. New failed run cannot hide prior success.
-- [ ] Render separate **PR review time (open to merge)** and **Time to first human review (open to first review)** cards and trend selections. Test both accessible labels and their different fixture values; show draft/lifecycle inclusion without implying measured active review effort.
-- [ ] Implement bounded mapping/run/result pages and copied deleted-team history. Disconnect and stale revision return local feedback; history remains readable. Align panel heights using existing responsive grid tokens.
-- [ ] Render timestamp-positioned qualified points without connecting lines for incomplete history. Separate series by exact repository/team/revision/calculation/signal/period length; null/no observations/under-minimum samples are gaps. Include accessible tabular values/labels and reduced-motion behavior.
-- [ ] Test mixed repositories/team moves/mapping revisions/window lengths; stale late mutations, owner→member transition during save, cursor recovery with unchanged membership, true access loss, unmount/abort and no fake evidence in unconfigured state. Parity uses actual server calculations.
-- [ ] Run focused web tests/typecheck and build GREEN. Native Codex reviews Claude-authored UI (or Claude reviews Codex-authored UI); coordinator runs final shared integration. Commit `feat(web): add guided GitHub SPACE insights` after required checks.
+- [x] Mount operational context alongside pulses, retaining survey copy/minimum and current workspace/team scope. Owner grants/mapping controls are absent for members. Reuse scope/revision/query abort behavior and independently recheck metadata after resource/cursor 403/404 or role mismatch.
+- [x] Wizard states source identity, one owning team, incomplete-discovery ceilings, draft-inclusive conditional durations and small-source attribution limits. Explicit Save and Collect confirmations; retain unsaved choices through safe refresh, clear owner data on access/role change. Back/Next controls semantic and keyboard accessible.
+- [x] Show safe repository result cards with observed/provisional labels, sample counts, acquisition interval and stored copied ownership. No totals/averaged medians across rows. Surface per-signal gaps, insufficient samples, unknown traversal and conditional-duration bias. New failed run cannot hide prior success.
+- [x] Render separate **PR review time (open to merge)** and **Time to first human review (open to first review)** cards and trend selections. Test both accessible labels and their different fixture values; show draft/lifecycle inclusion without implying measured active review effort.
+- [x] Implement bounded mapping/run/result pages and copied deleted-team history. Disconnect and stale revision return local feedback; history remains readable. Align panel heights using existing responsive grid tokens.
+- [x] Render timestamp-positioned qualified points without connecting lines for incomplete history. Separate series by exact repository/team/revision/calculation/signal/period length; null/no observations/under-minimum samples are gaps. Include accessible tabular values/labels and reduced-motion behavior.
+- [x] Test mixed repositories/team moves/mapping revisions/window lengths; stale late mutations, owner→member transition during save, cursor recovery with unchanged membership, true access loss, unmount/abort and no fake evidence in unconfigured state. Parity uses actual server calculations.
+- [x] Run focused web tests/typecheck and build GREEN. Native Codex reviews Claude-authored UI (or Claude reviews Codex-authored UI); coordinator runs final shared integration. Commit `feat(web): add guided GitHub SPACE insights` after required checks.
 
 ## Task 6: Operator guide, integration proof and delivery
 
 **Files:** Create `docs/providers/connect-space-github.md`; update `README.md`, `docs/architecture.md`, `docs/space-getting-started.md`, API README, approved spec status and this plan. Add cross-boundary fixture cases to web parity tests and API integration tests rather than new demo dependency/toolchain.
 
-- [ ] Guide gives exact PR-only App permissions and selected-repository installation, private key/grant files, separate env keys, safe App-ID distinction, mapping wizard, worker command, explicit collection, cutoff/traversal/status interpretation, troubleshooting and disconnect behavior. Real registration/authorization are deliberate maintainer actions; do not operate account automatically.
-- [ ] Document controlled test fixtures and how to reproduce adapter → worker → safe result → browser parser evidence without live credentials. No fixture results presented as real source measurements; no fake/mock banner added to live UI.
-- [ ] Self-review approved spec section by section and mark tasks only when actual deliverable/checks observed. Supply opposite-engine reviewer exact base, complete added-file diff, acceptance criteria and real check outputs in ignored `.agent-runs/space-github-operations/` artifacts. Fix material findings with bounded regressions.
-- [ ] Run `pnpm check`, full `pnpm test:integration` with existing private test database environment, and `git diff --check`; observe exits. These commands include real test behavior, not claims copied from prior pulse delivery.
-- [ ] Explicitly apply reviewed new migration to development DB without touching prior migrations/data. Reload runtime if migration ledger cache requires it; verify readiness. Exercise controlled HTTP worker path. Browser/keyboard checks only through an allowed browser surface; if policy blocks it, record visuals unverified without alternate-browser/CDP workaround.
+- [x] Guide gives exact PR-only App permissions and selected-repository installation, private key/grant files, separate env keys, safe App-ID distinction, mapping wizard, worker command, explicit collection, cutoff/traversal/status interpretation, troubleshooting and disconnect behavior. Real registration/authorization are deliberate maintainer actions; do not operate account automatically.
+- [x] Document controlled test fixtures and how to reproduce adapter → worker → safe result → browser parser evidence without live credentials. No fixture results presented as real source measurements; no fake/mock banner added to live UI.
+- [x] Self-review approved spec section by section and mark tasks only when actual deliverable/checks observed. Supply opposite-engine reviewer exact base, complete added-file diff, acceptance criteria and real check outputs in ignored `.agent-runs/space-github-operations/` artifacts. Fix material findings with bounded regressions.
+- [x] Run `pnpm check`, full `pnpm test:integration` with existing private test database environment, and `git diff --check`; observe exits. These commands include real test behavior, not claims copied from prior pulse delivery.
+- [x] Explicitly apply reviewed new migration to development DB without touching prior migrations/data. Reload runtime if migration ledger cache requires it; verify readiness. Exercise controlled HTTP worker path. Browser/keyboard checks only through an allowed browser surface; if policy blocks it, record visuals unverified without alternate-browser/CDP workaround.
 - [ ] Coordinator creates Conventional Commit(s), pushes existing authorized main after verified integration, then inspects exact-commit CI. Report shipped behavior, checks, source-access requirements, provisional coverage, no product/service attribution and any unverified visuals. Leave real App registration, notifications and automatic collection disabled unless separately authorized.
 
 ## Plan self-review and execution handoff
@@ -253,3 +253,9 @@ expect(screen.queryByText('0 pull requests')).not.toBeInTheDocument();
 Spec coverage: independent permission profile (1,3,4); actor privacy/restarts/order/limits (1,3); all signal semantics and qualifications (2,5); scoped mappings/immutable context/durable quota/jobs (3,4); wizard/query fences/history/trends (4,5); real-source docs and review/checks (6). Review-focus cases appear in their owning tasks. All shared type/function names above are explicitly defined or point to existing verified repository exports; worker/HTTP implementation supplies the signatures defined here.
 
 Status: approved for implementation by the maintainer on 2026-10-13, including explicit PR review time. Execution uses the committed coordinator/specialist workflow. Task checkboxes record observed delivery, not planned outcomes.
+
+## Local verification record
+
+Implemented all six slices. Independent opposite-engine reviews covered provider, calculations, storage/worker, identity routes, UI and coordinator integration; final source review required history filter cursor reset, accurate transient-payload disclosure and database-clock enqueue validation. Bounded regressions cover those fixes.
+
+Observed local proof: full PostgreSQL suite 242/242; controlled REST adapter → worker → PostgreSQL safe result → strict browser parser 4/4. Migration 0016 applied explicitly to development PostgreSQL, API restarted, `/health/ready` returned 200 with `ready`. Signed-in browser showed the unconfigured GitHub repository state and saved-result Refresh correctly. Controlled fixture DOM checks at 640/1024/1440 confirmed equal card heights and contained expanded-table scrolling; native summary Enter and scroll-area Tab focus worked. Browser screenshots were unavailable, so pixel appearance remains unverified. No live PR App was registered or configured, no automatic collection enabled, and no fixture results inserted into the live workspace.

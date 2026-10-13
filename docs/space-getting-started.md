@@ -47,4 +47,4 @@ Results are confidential aggregate reporting, not anonymity. Small teams, databa
 
 - Browser visual and assistive-technology checks have not yet been recorded; behaviour is covered by jsdom tests.
 - There is no scheduling, reminder, export, free-text answer, product/service drill-down or composite score.
-- Operational SPACE signals (for example pull request or review activity) are not collected in this slice.
+- Repository operational signals use a separate [GitHub SPACE connection](providers/connect-space-github.md) alongside pulses: observed PR/review activity, PR review time (open to merge), and time to first human review. These provisional signals remain separate from confidential survey answers and respondent suppression. They are not combined into a productivity score.
