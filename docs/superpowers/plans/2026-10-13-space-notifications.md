@@ -295,6 +295,6 @@ Coverage mapping: event types/frozen cohorts/manual limits/clock/retention (1,4)
 
 Execution preserves committed coordinator/specialist workflow. Task1 stabilizes contracts/schema; Task2 then Task3 prove network/identity boundaries; Task4 integrates durable pulse behavior; Task5 exposes production routes; Task6 completes product flow; Task7 proves and delivers. Ready isolated pieces may overlap under the three-specialist limit, but no later dependency is accepted based only on copied source or unrun tests.
 
-Status: plan proposed for maintainer review. Spec approval authorized planning; implementation begins after this written plan is reviewed. No product code/dependencies/migrations/runtime configuration changed during planning.
+Status: approved by the maintainer on 2026-10-13; implementation in progress using the committed coordinator/specialist workflow. No product code/dependencies/migrations/runtime configuration changed during planning.
 
 Primary transport references checked during planning: [Nodemailer SMTP](https://nodemailer.com/smtp), [supported pre-encrypted socket hook](https://nodemailer.com/smtp/proxies), [SMTP error metadata](https://nodemailer.com/errors). Version pins and hook feasibility are checked again during dependency integration; no dependency was installed while writing this plan.

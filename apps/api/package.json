@@ -18,12 +18,14 @@
     "worker:space-github": "node --env-file-if-exists=.env src/worker-space-github.ts"
   },
   "dependencies": {
-    "fastify": "5.12.5",
-    "pg": "8.23.1",
-    "better-auth": "1.7.7",
-    "@fastify/cors": "11.3.1",
     "@clio/adapters": "workspace:*",
-    "@clio/oems": "workspace:*"
+    "@clio/oems": "workspace:*",
+    "@fastify/cors": "11.3.1",
+    "better-auth": "1.7.7",
+    "fastify": "5.12.5",
+    "jose": "6.2.12",
+    "nodemailer": "10.1.0",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@clio/typescript-config": "workspace:*",
