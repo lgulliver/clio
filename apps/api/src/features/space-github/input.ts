@@ -33,7 +33,7 @@ export function parseWindow(value: unknown, now?: Date): OperationWindow {
   }
   return { windowStart: start, windowEnd: end };
 }
-export function parseCollectionRequest(value: unknown, now = new Date()): CollectionRequest {
+export function parseCollectionRequest(value: unknown, now?: Date): CollectionRequest {
   const body = object(value, ['revision', 'requestId', 'windowStart', 'windowEnd']);
   return {
     ...parseWindow({ windowStart: body.windowStart, windowEnd: body.windowEnd }, now),

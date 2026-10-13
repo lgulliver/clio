@@ -58,6 +58,8 @@ The public Better Auth bridge allowlists only `POST /api/auth/sign-in/social` (b
 
 SPACE pulse endpoints use the same session, current membership, trusted Origin and owner-role boundaries. Read the [SPACE HTTP contract](../../docs/space-api.md) and [team pulse guide](../../docs/space-getting-started.md). Migration 0015 adds SPACE storage; apply migrations explicitly with the usual command. Login OAuth remains separate from collection credentials, and pulse surveys do not require a provider connection.
 
+GitHub operational SPACE uses a separate PR-only App, migration `0016_space_github.sql` and `pnpm worker:space-github`. Configure the server-only `GITHUB_SPACE_APP_ID`, `GITHUB_SPACE_APP_PRIVATE_KEY_FILE` and `GITHUB_SPACE_APP_GRANTS_FILE` as described in the [real-source guide](../../docs/providers/connect-space-github.md). Its App ID must differ from the deployment collection App. Current authorized mappings, durable jobs and private evidence are separate from deployment storage; immutable safe results expose provisional observations, not historical completeness. Read the [scoped HTTP contract](../../docs/space-github-api.md). Configuration changes require restarting API and worker together; startup does not migrate or collect automatically.
+
 All requests below require a real database-backed session. JSON bodies allow only listed fields. Names trim whitespace and contain 1–200 Unicode code points. Workspace/invitation IDs are UUIDs; user IDs remain opaque Better Auth text IDs. All responses use `Cache-Control: no-store`.
 
 | Method/path | Body | Success |

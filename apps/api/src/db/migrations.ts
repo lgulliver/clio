@@ -160,6 +160,15 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query('SELECT pulse_id, user_id FROM space_roster LIMIT 0');
   await pool.query('SELECT pulse_id, user_id FROM space_receipts LIMIT 0');
   await pool.query('SELECT id, pulse_id, answers FROM space_answers LIMIT 0');
+  await pool.query(
+    'SELECT id,workspace_id,live_team_id,team_id,team_name,app_id,installation_id,repository_id,repository_label,revision,connected,grant_fingerprint FROM space_github_mappings LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,mapping_id,request_id,context,grant_fingerprint,state,queued_at,expires_at,available_at,completed_at,reason,result_id,lease_token,lease_until,failures,active_millis,checkpoint,acquisition_started_at,acquisition_ended_at FROM space_github_jobs LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,mapping_id,run_id,completed_at,evidence,result FROM space_github_results LIMIT 0',
+  );
   await pool.query('SELECT id, workspace_id, name FROM teams LIMIT 0');
   await pool.query('SELECT id, workspace_id, team_id, name FROM products LIMIT 0');
   await pool.query('SELECT id, name, created_at FROM workspaces LIMIT 0');

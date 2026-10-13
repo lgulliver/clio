@@ -6,15 +6,17 @@ import { readGitHubConfig } from './features/github-collection/config.ts';
 import { createAuth } from './features/identity/auth.ts';
 import { readAuthConfig } from './features/identity/config.ts';
 import { readMeasurementConfig } from './features/measurements/config.ts';
+import { readSpaceGitHubConfig } from './features/space-github/config.ts';
 import { createServer } from './server.ts';
 
 async function main() {
   const config = readConfig(process.env);
   const authConfig = readAuthConfig(process.env);
   const github = await readGitHubConfig(process.env);
+  const spaceGithub = await readSpaceGitHubConfig(process.env, github?.appId ?? null);
   const argo = await readArgoConfig(process.env);
   const measurement = await readMeasurementConfig(process.env);
-  if ((github || argo || measurement) && !authConfig)
+  if ((github || argo || measurement || spaceGithub) && !authConfig)
     throw new Error('Live connections require identity configuration');
   const migrations = await loadMigrations();
   const pool = createPool(config.databaseUrl);
@@ -24,7 +26,15 @@ async function main() {
       close: () => pool.end(),
     },
     authConfig
-      ? { auth: createAuth(pool, authConfig), config: authConfig, pool, github, argo, measurement }
+      ? {
+          auth: createAuth(pool, authConfig),
+          config: authConfig,
+          pool,
+          github,
+          argo,
+          measurement,
+          spaceGithub,
+        }
       : undefined,
   );
   let closing = false;

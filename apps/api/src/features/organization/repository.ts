@@ -177,6 +177,13 @@ export function createOrganizationRepository(pool: Pool) {
           [id, target],
         );
         if (pulses.rowCount) throw new IdentityError(409, 'conflict');
+        const github = await client.query(
+          `SELECT 1 FROM space_github_mappings WHERE workspace_id=$1 AND live_team_id=$2 AND connected
+           UNION ALL
+           SELECT 1 FROM space_github_jobs WHERE workspace_id=$1 AND context->>'teamId'=$2::text AND state IN ('queued','running') LIMIT 1`,
+          [id, target],
+        );
+        if (github.rowCount) throw new IdentityError(409, 'conflict');
         await client.query('DELETE FROM teams WHERE workspace_id = $1 AND id = $2', [id, target]);
         return target;
       });

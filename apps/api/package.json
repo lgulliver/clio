@@ -14,7 +14,8 @@
     "worker:mock": "node --env-file-if-exists=.env src/worker-mock.ts",
     "worker:github": "node --env-file-if-exists=.env src/worker-github.ts",
     "worker:argo": "node --env-file-if-exists=.env src/worker-argo.ts",
-    "worker:measurement": "node --env-file-if-exists=.env src/worker-measurement.ts"
+    "worker:measurement": "node --env-file-if-exists=.env src/worker-measurement.ts",
+    "worker:space-github": "node --env-file-if-exists=.env src/worker-space-github.ts"
   },
   "dependencies": {
     "fastify": "5.12.5",

@@ -14,6 +14,9 @@ import { registerMeasurementRoutes } from '../measurements/routes.ts';
 import { createMockCollectionRepository } from '../mock-collection/repository.ts';
 import { createOrganizationRepository } from '../organization/repository.ts';
 import { registerSpaceRoutes } from '../space/routes.ts';
+import type { SpaceGitHubConfig } from '../space-github/config.ts';
+import type { SpaceGitHubProvider } from '../space-github/provider.ts';
+import { registerSpaceGitHubRoutes } from '../space-github/routes.ts';
 import { type ClioAuth, readSession } from './auth.ts';
 import type { AuthConfig } from './config.ts';
 import { IdentityError, object, opaqueId, uuid } from './input.ts';
@@ -26,6 +29,8 @@ export interface IdentityDependencies {
   github?: GitHubConfig | null;
   argo?: ArgoConfig | null;
   measurement?: MeasurementConfig | null;
+  spaceGithub?: SpaceGitHubConfig | null;
+  spaceGithubProvider?: SpaceGitHubProvider;
 }
 
 function clientError(status: number) {
@@ -117,6 +122,17 @@ export function registerIdentity(server: FastifyInstance, identity?: IdentityDep
       return reply.code(503).send({ error: 'unavailable' });
     });
     registerSpaceRoutes(routes, identity ? { pool: identity.pool, actor } : undefined);
+    registerSpaceGitHubRoutes(
+      routes,
+      identity
+        ? {
+            pool: identity.pool,
+            config: identity.spaceGithub ?? null,
+            actor,
+            ...(identity.spaceGithubProvider ? { provider: identity.spaceGithubProvider } : {}),
+          }
+        : undefined,
+    );
     if (identity) {
       registerGitHubRoutes(routes, { pool: identity.pool, github: identity.github ?? null, actor });
       registerArgoRoutes(routes, { pool: identity.pool, argo: identity.argo ?? null, actor });
