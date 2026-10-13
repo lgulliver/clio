@@ -1354,6 +1354,7 @@ body {
   font-size: 11px;
 }
 .space-dashboard .space-trends details {
+  min-width: 0;
   font-size: 0.8125rem;
 }
 .space-dashboard .space-trends summary {

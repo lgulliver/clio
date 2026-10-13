@@ -524,13 +524,19 @@ export function MappingDetail({
               hasOlder={results.data.nextCursor !== null}
             />
           )}
+          {/* Cursors are bound to mapping and team filter; remount so no page carries across. */}
           <ResultHistory
+            key={`results:${mapping.id}:${filter ?? ''}`}
             mappingId={mapping.id}
             teamId={filter}
             selectedId={shown?.id}
             onSelect={setSelected}
           />
-          <RunHistory mappingId={mapping.id} teamId={filter} />
+          <RunHistory
+            key={`runs:${mapping.id}:${filter ?? ''}`}
+            mappingId={mapping.id}
+            teamId={filter}
+          />
         </>
       )}
       {scope.owner && (

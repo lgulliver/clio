@@ -14,7 +14,13 @@ import {
   workspaceId,
 } from '../space/fixtures.test-support';
 import { DeveloperExperiencePage } from '../space/space-page';
-import type { OperationMapping, OperationResult, OperationRun } from './api';
+import {
+  type OperationMapping,
+  type OperationResult,
+  type OperationRun,
+  parseOperationResultPage,
+  parseOperationRunPage,
+} from './api';
 
 // Fictional operational fixtures for tests only; signal values come from the server calculator.
 const session = vi.hoisted(() => ({ revision: 1, expire: vi.fn(), refresh: vi.fn() }));
@@ -792,6 +798,177 @@ describe('GitHub operational panel', () => {
       ).toBe(true),
     );
     expect(await filtered.findAllByRole('article')).toHaveLength(5);
+  });
+
+  it('resets warm-cache result and run cursors when the team history filter toggles', async () => {
+    const current = mapping();
+    const historical = mapping({ teamId: archivedTeam, teamName: 'Legacy' });
+    server.mappings = [current];
+    server.results = [result(historical)];
+    type Kind = 'results' | 'runs';
+    type Filter = 'legacy' | 'all';
+    const newest = {
+      results: {
+        legacy: Array.from({ length: 25 }, (_, index) => result(historical, { start: -index })),
+        all: [
+          result(historical),
+          ...Array.from({ length: 24 }, (_, index) => result(current, { start: -index - 1 })),
+        ],
+      },
+      runs: {
+        legacy: Array.from({ length: 25 }, (_, index) =>
+          run(historical, 'failed', { start: -index, reason: 'provider_unavailable' }),
+        ),
+        all: Array.from({ length: 25 }, (_, index) =>
+          run(current, 'failed', { start: -index, reason: 'retry_exhausted' }),
+        ),
+      },
+    };
+    const older = {
+      results: {
+        legacy: [result(historical, { start: -60 })],
+        all: [result(current, { start: -90 })],
+      },
+      runs: {
+        legacy: [run(historical, 'failed', { start: -60, reason: 'provider_unavailable' })],
+        all: [run(current, 'cancelled', { start: -90, reason: 'disconnected' })],
+      },
+    };
+    const teamOf = (filter: Filter) => (filter === 'legacy' ? archivedTeam : null);
+    const page = (kind: Kind, filter: Filter, cursor: string | null) => ({
+      workspaceId,
+      mappingId: mappingA,
+      teamId: teamOf(filter),
+      [kind]: cursor === null ? newest[kind][filter] : older[kind][filter],
+      nextCursor: cursor === null ? `${kind}-${filter}-2` : null,
+    });
+    // Context-bound cursors, as on the server: a cursor only continues the filter that issued it.
+    server.override = (call) => {
+      if (call.method !== 'GET') return undefined;
+      const url = new URL(call.path, 'http://clio.test');
+      const kind: Kind | undefined = url.pathname.endsWith(`/mappings/${mappingA}/results`)
+        ? 'results'
+        : url.pathname.endsWith(`/mappings/${mappingA}/runs`)
+          ? 'runs'
+          : undefined;
+      if (!kind) return undefined;
+      const team = url.searchParams.get('teamId');
+      const filter: Filter | undefined =
+        team === archivedTeam ? 'legacy' : team === null ? 'all' : undefined;
+      if (!filter) return undefined;
+      const cursor = url.searchParams.get('cursor');
+      if (cursor !== null && cursor !== `${kind}-${filter}-2`) return json({ error: 'gone' }, 404);
+      return json(page(kind, filter, cursor));
+    };
+    const client = createQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <DeveloperExperiencePage now={now} />
+      </QueryClientProvider>,
+    );
+    // Scoped reads drop a query when its observer changes key, so seed the target filter's newest
+    // pages before each toggle: the detail then renders without a loading remount.
+    const warm = (filter: Filter) => {
+      const scope = {
+        workspaceId,
+        mappingId: mappingA,
+        ...(filter === 'legacy' ? { teamId: archivedTeam } : {}),
+      };
+      const team = teamOf(filter) ?? '';
+      const key = (kind: Kind) => [
+        'identity',
+        'alice',
+        session.revision,
+        'overview',
+        `space/${workspaceId}/owner/github/${kind}/${mappingA}/${team}/`,
+      ];
+      client.setQueryData(
+        key('results'),
+        parseOperationResultPage(page('results', filter, null), scope),
+      );
+      client.setQueryData(key('runs'), parseOperationRunPage(page('runs', filter, null), scope));
+    };
+    const stale = (from: Filter) =>
+      server.calls.filter((call) =>
+        (['results', 'runs'] as const).some(
+          (kind) =>
+            call.path.includes(`cursor=${kind}-${from}-2`) &&
+            call.path.includes(`teamId=${archivedTeam}`) !== (from === 'legacy'),
+        ),
+      );
+    const issued = (kind: Kind, filter: Filter) =>
+      server.calls.some(
+        (call) =>
+          call.path ===
+          `${base}/mappings/${mappingA}/${kind}?${filter === 'legacy' ? `teamId=${archivedTeam}&` : ''}cursor=${kind}-${filter}-2`,
+      );
+    await chooseWorkspace();
+    const unfiltered = await openMapping();
+    await userEvent.click(
+      await unfiltered.findByRole('button', { name: 'View Legacy team history' }),
+    );
+    const view = await openMapping();
+    const resultsTable = () => view.findByRole('table', { name: /saved results per page/ });
+    const runsTable = () => view.findByRole('table', { name: /collection runs per page/ });
+    const openRuns = async () => {
+      const summary = await view.findByText('Collection runs', { selector: 'summary' });
+      const details = summary.closest('details');
+      if (details && !details.open) await userEvent.click(summary);
+    };
+    const rows = async (table: () => Promise<HTMLElement>, count: number) =>
+      waitFor(async () => expect(within(await table()).getAllByRole('row')).toHaveLength(count));
+    const pageOlder = async (filter: Filter) => {
+      await rows(resultsTable, 26);
+      await userEvent.click(view.getByRole('button', { name: 'Older results' }));
+      await waitFor(() => expect(issued('results', filter)).toBe(true));
+      await rows(resultsTable, 2);
+      await openRuns();
+      await rows(runsTable, 26);
+      await userEvent.click(view.getByRole('button', { name: 'Older runs' }));
+      await waitFor(() => expect(issued('runs', filter)).toBe(true));
+      await rows(runsTable, 2);
+    };
+    expect(await view.findByText('Showing history recorded for Legacy.')).toBeVisible();
+    const loaded = server.calls.length;
+
+    await pageOlder('legacy');
+    warm('all');
+    await userEvent.click(view.getByRole('button', { name: 'Show all teams for this repository' }));
+    expect(await view.findByText('Showing history recorded for every team.')).toBeVisible();
+    await openRuns();
+    await rows(resultsTable, 26);
+    await rows(runsTable, 26);
+    expect(stale('legacy')).toEqual([]);
+    await pageOlder('all');
+
+    warm('legacy');
+    await userEvent.click(view.getByRole('button', { name: 'Show only Legacy' }));
+    expect(await view.findByText('Showing history recorded for Legacy.')).toBeVisible();
+    await openRuns();
+    await rows(resultsTable, 26);
+    await rows(runsTable, 26);
+    expect(stale('all')).toEqual([]);
+    expect(view.getByRole('button', { name: 'Older results' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(view.getByRole('button', { name: 'Older runs' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(view.queryByText(/no longer available/)).toBeNull();
+    // Newest pages after each toggle came from the warm cache; only older pages were requested.
+    expect(
+      server.calls
+        .slice(loaded)
+        .filter((call) => call.path.startsWith(`${base}/mappings/${mappingA}/`))
+        .map((call) => call.path.replace(`${base}/mappings/${mappingA}/`, '')),
+    ).toEqual([
+      `results?teamId=${archivedTeam}&cursor=results-legacy-2`,
+      `runs?teamId=${archivedTeam}&cursor=runs-legacy-2`,
+      'results?cursor=results-all-2',
+      'runs?cursor=runs-all-2',
+    ]);
   });
 
   it('retries an unconfirmed collection with the same request ID', async () => {

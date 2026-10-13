@@ -218,8 +218,14 @@ export function OperationsSetupWizard({
             <h4>Before you connect</h4>
             <p>
               Clio uses a separate GitHub App with Pull requests: read and Metadata: read on
-              selected repositories only. It reads pull request and review timing, not code, titles,
-              descriptions or comments.
+              selected repositories only. It does not ask for access to repository code.
+            </p>
+            <p>
+              GitHub&apos;s pull request and review responses also include titles, descriptions and
+              review text. Clio discards these while processing each response and does not save
+              them. It keeps only opened, merged and review times, review outcomes, and whether each
+              author or reviewer is a person, a bot or unknown, including whether a review came from
+              the pull request&apos;s author.
             </p>
             <p>
               One explicit owning team per repository. Shared repositories still need a single
