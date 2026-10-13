@@ -146,8 +146,9 @@ export function OrganizationLifecycle({
               </form>
               <p className="mt-3 text-sm">
                 {products.length} {products.length === 1 ? 'product belongs' : 'products belong'} to
-                this team. Move or delete all products and close or cancel draft/open SPACE pulses
-                before deleting the team. Archived pulse results remain available.
+                this team. Move or delete all products, close or cancel draft/open SPACE pulses, and
+                disconnect its GitHub repositories before deleting the team. Archived pulse and
+                repository results remain available.
               </p>
               <button
                 ref={teamDelete}
@@ -161,7 +162,7 @@ export function OrganizationLifecycle({
               {deletingTeam && (
                 <DeleteConfirmation
                   name={team.name}
-                  description="This empty team will be deleted and its current primary-team assignments cleared. Services, saved evidence and archived pulse results are preserved."
+                  description="This empty team will be deleted and its current primary-team assignments cleared. Connected GitHub repositories and active collection jobs must be retired first. Services, saved evidence and archived pulse and repository results are preserved."
                   busy={busy}
                   cancel={() => {
                     setDeletingTeam(false);

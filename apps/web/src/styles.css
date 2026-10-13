@@ -1013,9 +1013,16 @@ body {
   min-width: 0;
 }
 .space-dashboard .space-dimension-card h3,
-.space-dashboard .space-dimension-card h4 {
+.space-dashboard .space-dimension-card h4,
+.space-dashboard .space-dimension-card h5 {
   font-weight: 600;
   color: #f1f5f9;
+}
+.space-dashboard .space-github,
+.space-dashboard .space-github-detail {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
 }
 .space-dashboard .space-dimension-card > ul {
   display: grid;

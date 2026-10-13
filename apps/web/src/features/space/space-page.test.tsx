@@ -141,6 +141,20 @@ async function respond(input: string | URL | Request, init?: RequestInit): Promi
     });
   if (!space) return json({ error: 'not_found' }, 404);
   const { scope, rest } = space;
+  // GitHub operational collection is not configured in these pulse-focused tests.
+  if (rest === '/github/availability')
+    return json(
+      scope === workspaceId && server.role === 'owner'
+        ? { workspaceId: scope, enabled: false, grants: [] }
+        : { workspaceId: scope, enabled: false },
+    );
+  if (rest === '/github/mappings' && call.method === 'GET')
+    return json({
+      workspaceId: scope,
+      teamId: url.searchParams.get('teamId'),
+      mappings: [],
+      nextCursor: null,
+    });
   if (rest === '/instrument') return json(instrumentBody());
   if (rest === '/preferences')
     return json({ workspaceId: scope, minimumRespondents: server.minimum });

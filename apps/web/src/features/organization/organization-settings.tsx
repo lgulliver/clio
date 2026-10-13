@@ -111,7 +111,7 @@ function OrganizationEditor({
           endpoint.startsWith('/teams/') &&
           failure instanceof ApiError &&
           failure.status === 409
-          ? 'This team still owns products or has draft/open pulses. Move or delete its products and close or cancel its pulses before deleting the team.'
+          ? 'This team still owns products, has draft/open pulses, or has connected GitHub repositories or active collection jobs. Move or delete its products, close or cancel its pulses, and disconnect its repositories before deleting the team.'
           : errorMessage(failure),
       );
     } finally {

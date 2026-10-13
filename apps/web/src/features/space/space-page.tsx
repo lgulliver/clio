@@ -3,6 +3,7 @@ import { errorMessage, parseWorkspaces, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
 import { parseOrganization } from '../organization/api';
 import { useStoredRead } from '../result-history/history-browser';
+import { OperationsPanel } from '../space-github/operations-panel';
 import {
   dimensions,
   instrument,
@@ -37,8 +38,9 @@ export function DeveloperExperiencePage({ now = systemClock }: { now?: Clock }) 
       <header className="page-header">
         <h1>Developer experience</h1>
         <p>
-          Team pulse surveys grouped by SPACE dimension. Each question is reported separately as a
-          confidential team aggregate; there is no combined productivity score.
+          Team pulse surveys grouped by SPACE dimension, with each question reported separately as a
+          confidential team aggregate. Pull request observations from connected GitHub repositories
+          are shown separately, per repository. There is no combined productivity score.
         </p>
       </header>
       {session.status === 'ready' && session.user ? (
@@ -444,6 +446,23 @@ function SpaceDashboard({ now }: { now: Clock }) {
           </button>
         </div>
       )}
+      <OperationsPanel
+        workspaceId={workspaceId}
+        role={scope.workspace.role}
+        teamId={selectedChoice?.id}
+        teamName={selectedChoice?.name}
+        teams={currentTeams}
+        now={now}
+        onTeamSelect={(choice) => {
+          // Copied result ownership feeds the existing team choice; deleted teams stay history.
+          const current = currentNames.get(choice.id);
+          selectTeam(
+            current === undefined
+              ? { id: choice.id, name: choice.name, current: false }
+              : { id: choice.id, name: current, current: true },
+          );
+        }}
+      />
       <div className="space-side">
         <OwnAssignment />
         {scope.owner && (
