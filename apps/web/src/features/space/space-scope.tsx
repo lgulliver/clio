@@ -25,7 +25,12 @@ export type MutationOutcome<T> =
  */
 export type AccessVerdict = 'unchanged' | 'changed' | 'gone' | 'unknown' | 'stale';
 
+/** Trusted internal API areas sharing this scope's fences; never caller or browser input. */
+export type ScopeNamespace = 'space' | 'notifications';
+
 type MutationInput<T> = {
+  /** Defaults to `space`; `notifications` targets the workspace notification routes. */
+  namespace?: ScopeNamespace;
   path: string;
   parse: (value: unknown) => T;
   body: object;
@@ -41,11 +46,12 @@ type SpaceScope = {
   path: string;
   owner: boolean;
   busy: boolean;
-  readScope: (suffix: string) => string;
+  readScope: (suffix: string, namespace?: ScopeNamespace) => string;
   mutate: <T>(input: MutationInput<T>) => Promise<MutationOutcome<T>>;
   /** Resolves true only when current access and role are verified unchanged. */
   verify: () => Promise<boolean>;
-  refresh: () => void;
+  /** Re-reads saved data of one namespace (default `space`); never sends or queues anything. */
+  refresh: (namespace?: ScopeNamespace) => void;
 };
 
 const Context = createContext<SpaceScope | null>(null);
@@ -94,7 +100,10 @@ export function SpaceScopeProvider({
   const epoch = useRef(0);
   const controllers = useRef(new Set<AbortController>());
   const [busy, setBusy] = useState(false);
-  const prefix = `space/${workspace.id}/${workspace.role}/`;
+  const prefixFor = useCallback(
+    (namespace: ScopeNamespace) => `${namespace}/${workspace.id}/${workspace.role}/`,
+    [workspace.id, workspace.role],
+  );
   useEffect(() => {
     mounted.current = true;
     const active = controllers.current;
@@ -128,17 +137,21 @@ export function SpaceScopeProvider({
     }
     return false;
   }, [revalidate, valid, workspace.role]);
-  const refresh = useCallback(() => {
-    if (!valid(false)) return;
-    void client.invalidateQueries({
-      predicate: (entry) =>
-        entry.queryKey[0] === 'identity' &&
-        entry.queryKey[1] === userId &&
-        entry.queryKey[2] === revision &&
-        typeof entry.queryKey[4] === 'string' &&
-        entry.queryKey[4].startsWith(prefix),
-    });
-  }, [client, prefix, revision, userId, valid]);
+  const refresh = useCallback(
+    (namespace: ScopeNamespace = 'space') => {
+      if (!valid(false)) return;
+      const prefix = prefixFor(namespace);
+      void client.invalidateQueries({
+        predicate: (entry) =>
+          entry.queryKey[0] === 'identity' &&
+          entry.queryKey[1] === userId &&
+          entry.queryKey[2] === revision &&
+          typeof entry.queryKey[4] === 'string' &&
+          entry.queryKey[4].startsWith(prefix),
+      });
+    },
+    [client, prefixFor, revision, userId, valid],
+  );
   const mutate = useCallback(
     async <T,>(input: MutationInput<T>): Promise<MutationOutcome<T>> => {
       if (pending.current || !valid(input.owner, input.still)) return { status: 'stale' };
@@ -151,7 +164,7 @@ export function SpaceScopeProvider({
         ticket === epoch.current && !controller.signal.aborted && valid(input.owner, input.still);
       try {
         const value = await request(
-          `/api/workspaces/${workspace.id}/space${input.path}`,
+          `/api/workspaces/${workspace.id}/${input.namespace ?? 'space'}${input.path}`,
           input.parse,
           {
             body: input.body,
@@ -186,12 +199,12 @@ export function SpaceScopeProvider({
       path: `/api/workspaces/${workspace.id}/space`,
       owner: workspace.role === 'owner',
       busy,
-      readScope: (suffix) => `${prefix}${suffix}`,
+      readScope: (suffix, namespace = 'space') => `${prefixFor(namespace)}${suffix}`,
       mutate,
       verify,
       refresh,
     }),
-    [workspace, busy, prefix, mutate, verify, refresh],
+    [workspace, busy, prefixFor, mutate, verify, refresh],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
@@ -208,9 +221,10 @@ export function useSpaceRead<T>(
   path: string,
   parse: (value: unknown) => T,
   enabled = true,
+  namespace: ScopeNamespace = 'space',
 ) {
   const scope = useSpaceScope();
-  const query = useStoredRead(scope.readScope(suffix), path, parse, enabled);
+  const query = useStoredRead(scope.readScope(suffix, namespace), path, parse, enabled);
   const error = query.error;
   const needsCheck = suspicious(error);
   const verify = useRef(scope.verify);

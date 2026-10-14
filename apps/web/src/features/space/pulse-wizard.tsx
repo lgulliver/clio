@@ -249,8 +249,9 @@ export function PulseWizard({
             frozen.
           </p>
           <p className="space-muted">
-            Clio does not send messages. Ask participants to open Developer experience in Clio to
-            respond.
+            Clio messages participants only if an owner has enabled pulse notifications for this
+            workspace. Pulses are never created or closed automatically. Participants can always
+            open Developer experience in Clio to respond.
           </p>
         </div>
       ) : (
@@ -366,8 +367,8 @@ export function PulseWizard({
                 {refreshPreview}
                 <p>
                   Opening freezes the team name, reference period, minimum, instrument and roster.
-                  The roster cannot grow after opening and closed pulses cannot reopen. Clio does
-                  not send messages to participants.
+                  The roster cannot grow after opening and closed pulses cannot reopen.
+                  Notifications go out only if an owner has enabled them for this workspace.
                 </p>
                 <button
                   className="control mt-4"

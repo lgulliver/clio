@@ -139,6 +139,50 @@ async function respond(input: string | URL | Request, init?: RequestInit): Promi
       hasMore: false,
       nextCursor: null,
     });
+  // Notifications are unconfigured in these pulse-focused tests: benign saved state, no sends.
+  const notifications = /^\/api\/workspaces\/([0-9a-f-]+)\/notifications\/(.*)$/.exec(url.pathname);
+  if (notifications && call.method === 'GET') {
+    const [, scope, rest] = notifications;
+    if (rest === 'availability')
+      return json({
+        workspaceId: scope,
+        emailConfigured: false,
+        slackConfigured: false,
+        linkingConfigured: false,
+      });
+    if (rest === 'policy' && server.role === 'owner')
+      return json({
+        policy: {
+          revision: 0,
+          enabled: false,
+          invitations: true,
+          closures: true,
+          reminders: true,
+          firstReminderHours: 48,
+          repeatHours: 72,
+          maximumReminders: 2,
+        },
+      });
+    if (rest === 'slack-link')
+      return json({ link: { linked: false, revision: 0, linkedAt: null } });
+    if (rest === 'history') return json({ workspaceId: scope, items: [], nextCursor: null });
+    if (rest?.startsWith('pulses/') && server.role === 'owner')
+      return json({
+        workspaceId: scope,
+        pulseId: rest.slice('pulses/'.length),
+        counts: {
+          pending: 0,
+          leased: 0,
+          retry_scheduled: 0,
+          provider_accepted: 0,
+          skipped: 0,
+          failed: 0,
+          uncertain: 0,
+        },
+        remindersEnabled: false,
+        revision: 0,
+      });
+  }
   if (!space) return json({ error: 'not_found' }, 404);
   const { scope, rest } = space;
   // GitHub operational collection is not configured in these pulse-focused tests.

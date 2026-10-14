@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '../identity/api';
+import { PulseNotificationControls } from '../notifications/delivery-summary';
 import { type Pulse, parsePulse } from './api';
 import { formatReferencePeriod } from './period';
 import { PulseResponse } from './pulse-response';
@@ -185,6 +186,13 @@ export function PulseDetail({
         <p className="space-muted">Closed pulses are immutable and cannot reopen.</p>
       )}
       {pulse.state !== 'draft' && <DimensionResults pulse={pulse} headingLevel={4} />}
+      {scope.owner && (pulse.state === 'open' || pulse.state === 'closed') && (
+        <PulseNotificationControls
+          key={`notifications-${pulse.id}`}
+          pulseId={pulse.id}
+          state={pulse.state}
+        />
+      )}
       {scope.busy && <p role="status">Updating pulse…</p>}
       {notice && <p role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}

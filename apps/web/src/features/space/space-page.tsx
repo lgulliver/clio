@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, parseWorkspaces, type Workspace } from '../identity/api';
 import { useSession } from '../identity/session';
+import { NotificationPanel } from '../notifications/notification-panel';
 import { parseOrganization } from '../organization/api';
 import { useStoredRead } from '../result-history/history-browser';
 import { OperationsPanel } from '../space-github/operations-panel';
@@ -617,13 +618,16 @@ function SpaceDashboard({
           );
         }}
       />
+      <NotificationPanel workspaceId={workspaceId} role={scope.workspace.role} />
       <div className="space-side">
         <OwnAssignment />
         {scope.owner && (
           <section className="panel space-owner" aria-labelledby={`${id}-owner`}>
             <h3 id={`${id}-owner`}>Owner tools</h3>
             <p className="space-muted">
-              Pulses open only when you choose. Clio does not schedule pulses or send messages.
+              Pulses open only when you choose. Clio does not schedule, open or close pulses by
+              itself; it messages people only through the pulse notifications an owner enables
+              below.
             </p>
             <button
               ref={wizardTrigger}
