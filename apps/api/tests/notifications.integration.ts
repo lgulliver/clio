@@ -223,6 +223,10 @@ it('serializes concurrent manual request replay, rejects changed bodies and appl
     "UPDATE notification_pulse_policies SET last_manual_at=clock_timestamp()-interval '25 hours' WHERE pulse_id=$1",
     [f.pulse.id],
   );
+  await pool.query(
+    "UPDATE notification_events SET state='provider_accepted',channel='email',email_attempts=1,terminal_at=clock_timestamp()-interval '25 hours',updated_at=clock_timestamp()-interval '25 hours' WHERE pulse_id=$1 AND kind='reminder'",
+    [f.pulse.id],
+  );
   await f.notifications.remind(owner, f.workspace.id, f.pulse.id, {
     ...body,
     requestId: randomUUID(),

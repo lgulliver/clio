@@ -74,7 +74,7 @@ For local email capture, use `mode: "local_capture"`, a loopback HTTP `publicOri
 
 ## Pulse behavior
 
-The approved defaults are an invitation on opening, a reminder after 48 hours and one further reminder 72 hours later, plus a neutral closure notice. Owners can change first delay/repeat interval to 24–168 hours and cap reminders at 1–3, or disable them. Opening freezes those settings. Manual owner reminders share the same per-member cap and are limited to one batch per pulse per 24 hours.
+The approved defaults are an invitation on opening, a reminder after 48 hours and one further reminder 72 hours later, plus a neutral closure notice. Owners can change first delay/repeat interval to 24–168 hours and cap reminders at 1–3, or disable them. Opening freezes those settings. Manual owner reminders share the same per-member cap and are limited to one batch per pulse per 24 hours. A manual batch skips members with an unexpired pending, leased or retry-scheduled reminder, an older unexpired failed or uncertain invitation/reminder, or a reminder accepted by a provider within the previous 24 hours. The acceptance window starts when the worker records provider acceptance, not when the event was created. Skipped members spend no additional reminder slot; repeating the exact batch request returns its original result.
 
 A late worker catches up only the latest eligible reminder, not a burst of missed messages. Reminder events expire 48 hours after their scheduled time and stop when the pulse closes/cancels. Closure notices expire after seven days. Submitting a response or losing workspace access suppresses pending invitations/reminders; team moves preserve frozen-roster eligibility.
 
@@ -84,10 +84,17 @@ Messages contain neutral text and an exact pulse link, with no answers, averages
 
 - Provider accepted: Slack or SMTP acknowledged submission. This does not mean the recipient read it.
 - Retry scheduled: a known non-acceptance can retry within limits and provider cooldown.
-- Failed or skipped: delivery was refused, expired, disabled, no longer eligible, or lacked an eligible destination.
+- Failed: the latest attempt was not accepted. If an earlier unknown outcome was explicitly retried, that earlier submission may still have arrived.
+- Skipped: the notice expired, was disabled, no longer applied, or lacked an eligible destination.
 - Uncertain: a timeout, interrupted submission or worker crash may have happened after acceptance. Clio does not blindly retry or immediately send email. An owner may explicitly confirm a bounded batch retry after acknowledging duplicate-message risk. Each channel permits at most three actual transport attempts per event, with at most one confirmed uncertain replay.
 
 Email fallback happens only when Slack is unavailable/unlinked, definitely refused the message, or exhausted safe retries for known non-acceptance. Slack acceptance stops fallback. Ambiguous Slack errors do not turn into email spam. [Slack rate-limit responses](https://docs.slack.dev/apis/web-api/rate-limits/) delay retries; pacing is shared across worker instances.
+
+Older failed or uncertain invitations/reminders pause further reminders for that member while the older notice remains unresolved and unexpired. The scheduler records blocked slots as missed; resolving the older notice does not restore those slots. Invitations have no time expiry while the pulse remains open and the member retains access. Reminder blockers expire at their original deadline.
+
+Owners can review the aggregate delivery status and confirm **Retry failed deliveries** for currently eligible events. Unknown outcomes require the separate duplicate-message acknowledgement. Each channel has at most three transport attempts; exhausted limits cannot be reset or requeued by this control. Once email fallback is selected, unused Slack capacity does not make the event retryable. A confirmed unknown-outcome replay stays on its original channel. Fixing provider configuration or linking Slack does not reset attempt limits, recall accepted messages or restore missed slots.
+
+To stop pending reminders, owners can choose **Turn off reminders for this pulse**. To cancel pending notifications across the workspace, choose **Disable notifications**. Pulse closure/cancellation and access removal also end invitation/reminder eligibility. These controls do not recall accepted or in-flight messages; re-enabling does not replay cancelled work. Clio provides no recipient directory or per-member retry control.
 
 Owners see aggregate delivery states and integration health, not named responder/failure lists or private Slack bindings. Members see their own link state and own notification history. Survey result suppression remains unchanged. Small-team reporting remains confidential rather than guaranteed anonymous.
 

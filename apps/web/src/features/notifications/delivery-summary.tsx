@@ -24,7 +24,8 @@ const stateHelp: Record<(typeof notificationStates)[number], string> = {
   retry_scheduled: 'A known-safe failure; Clio will try again.',
   provider_accepted: 'Handed to Slack or the email server. Not proof of delivery or reading.',
   skipped: 'Not sent, for example because the notice stopped applying.',
-  failed: 'Definitely not accepted by any destination.',
+  failed:
+    'Not accepted on the latest attempt; an earlier submission may have arrived if retried after an unknown outcome.',
   uncertain: 'Sent but acceptance could not be confirmed. Another message may arrive on retry.',
 };
 
@@ -229,6 +230,7 @@ export function PulseNotificationControls({
                 type="button"
                 className="space-secondary"
                 aria-expanded={confirming === 'retry'}
+                aria-describedby={`${id}-retry-help`}
                 aria-disabled={scope.busy || unknown !== null}
                 onClick={() => {
                   if (scope.busy || unknown) return;
@@ -240,6 +242,16 @@ export function PulseNotificationControls({
               </button>
             )}
           </div>
+          {retryable > 0 && (
+            <p id={`${id}-retry-help`} className="space-muted">
+              Older failed or unknown invitations and reminders can pause further reminders. Missed
+              reminder slots are not restored. Invitations have no time expiry; they stop applying
+              when the pulse closes or access is lost. Retry only eligible deliveries within the
+              attempt limits. Exhausted attempt limits cannot be retried. You can turn off reminders
+              for this pulse or disable workspace notifications to cancel pending work. Messages
+              already accepted or in flight may still arrive.
+            </p>
+          )}
           {confirming && (
             <fieldset className="space-confirm">
               <legend>{prompts[confirming]}</legend>

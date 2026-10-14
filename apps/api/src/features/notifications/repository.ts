@@ -442,15 +442,24 @@ export function createNotificationRepository(
         );
         if (!allowed.rowCount) throw new IdentityError(409, 'conflict');
         const result = await client.query(
-          `INSERT INTO notification_events(workspace_id,pulse_id,user_id,kind,occurrence_key,reminder_slot,policy_revision,grant_fingerprint,request_id,expires_at)
+          `WITH t AS MATERIALIZED (SELECT clock_timestamp() AS now)
+          INSERT INTO notification_events(workspace_id,pulse_id,user_id,kind,occurrence_key,reminder_slot,policy_revision,grant_fingerprint,request_id,expires_at)
           SELECT f.workspace_id,f.pulse_id,r.user_id,'reminder','manual:'||$3::uuid::text,
             1+COALESCE((SELECT max(e.reminder_slot) FROM notification_events e WHERE e.workspace_id=f.workspace_id AND e.pulse_id=f.pulse_id AND e.user_id=r.user_id),0),
-            f.policy_revision,f.grant_fingerprint,$3::uuid,clock_timestamp()+interval '48 hours'
+            f.policy_revision,f.grant_fingerprint,$3::uuid,t.now+interval '48 hours'
           FROM notification_pulse_policies f JOIN space_roster r ON r.pulse_id=f.pulse_id
-          JOIN workspace_memberships m ON m.workspace_id=f.workspace_id AND m.user_id=r.user_id
+          JOIN workspace_memberships m ON m.workspace_id=f.workspace_id AND m.user_id=r.user_id CROSS JOIN t
           WHERE f.workspace_id=$1 AND f.pulse_id=$2
             AND NOT EXISTS(SELECT 1 FROM space_receipts s WHERE s.pulse_id=f.pulse_id AND s.user_id=r.user_id)
             AND COALESCE((SELECT max(e.reminder_slot) FROM notification_events e WHERE e.workspace_id=f.workspace_id AND e.pulse_id=f.pulse_id AND e.user_id=r.user_id),0)<f.maximum_reminders
+            AND NOT EXISTS(SELECT 1 FROM notification_events e
+              WHERE e.workspace_id=f.workspace_id AND e.pulse_id=f.pulse_id AND e.user_id=r.user_id
+                AND (e.expires_at IS NULL OR e.expires_at>t.now)
+                AND ((e.kind='reminder' AND e.state IN ('pending','leased','retry_scheduled'))
+                  OR (e.kind IN ('invitation','reminder') AND e.state IN ('failed','uncertain'))))
+            AND NOT EXISTS(SELECT 1 FROM notification_events e
+              WHERE e.workspace_id=f.workspace_id AND e.pulse_id=f.pulse_id AND e.user_id=r.user_id
+                AND e.kind='reminder' AND e.state='provider_accepted' AND e.terminal_at>t.now-interval '24 hours')
           ON CONFLICT DO NOTHING RETURNING id`,
           [id, pid, body.requestId],
         );
@@ -505,8 +514,8 @@ export function createNotificationRepository(
             AND ((e.state='uncertain' AND ((e.channel='slack' AND $7::boolean AND e.slack_attempts<3
                 AND EXISTS(SELECT 1 FROM notification_slack_bindings b WHERE b.workspace_id=e.workspace_id AND b.user_id=e.user_id AND b.team_id=$9 AND b.grant_fingerprint=$3 AND b.slack_user_id IS NOT NULL))
               OR (e.channel='email' AND $8::boolean AND e.email_attempts<3 AND EXISTS(SELECT 1 FROM auth_users u WHERE u.id=e.user_id AND u.email_verified AND u.email !~ '[[:cntrl:][:space:]]' AND length(u.email)<=254 AND u.email ~ '^[^@]+@[^@]+\\.[^@]+$'))))
-              OR (e.state='failed' AND (($7::boolean AND e.slack_attempts<3 AND EXISTS(SELECT 1 FROM notification_slack_bindings b WHERE b.workspace_id=e.workspace_id AND b.user_id=e.user_id AND b.team_id=$9 AND b.grant_fingerprint=$3 AND b.slack_user_id IS NOT NULL))
-                OR ($8::boolean AND e.email_attempts<3 AND EXISTS(SELECT 1 FROM auth_users u WHERE u.id=e.user_id AND u.email_verified AND u.email !~ '[[:cntrl:][:space:]]' AND length(u.email)<=254 AND u.email ~ '^[^@]+@[^@]+\\.[^@]+$')))))
+              OR (e.state='failed' AND (((e.channel IS DISTINCT FROM 'email' AND (e.uncertain_replays=0 OR e.channel='slack')) AND $7::boolean AND e.slack_attempts<3 AND EXISTS(SELECT 1 FROM notification_slack_bindings b WHERE b.workspace_id=e.workspace_id AND b.user_id=e.user_id AND b.team_id=$9 AND b.grant_fingerprint=$3 AND b.slack_user_id IS NOT NULL))
+                OR ((e.uncertain_replays=0 OR e.channel='email') AND $8::boolean AND e.email_attempts<3 AND EXISTS(SELECT 1 FROM auth_users u WHERE u.id=e.user_id AND u.email_verified AND u.email !~ '[[:cntrl:][:space:]]' AND length(u.email)<=254 AND u.email ~ '^[^@]+@[^@]+\\.[^@]+$')))))
           RETURNING id`,
           [
             id,

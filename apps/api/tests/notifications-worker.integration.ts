@@ -8,7 +8,11 @@ import { migrate } from '../src/db/migrations.ts';
 import { withTransaction } from '../src/db/pool.ts';
 import { createIdentityRepository } from '../src/features/identity/repository.ts';
 import { type NotificationConfig, smtpPacingKey } from '../src/features/notifications/config.ts';
-import type { DispatchResult, NoticeMessage } from '../src/features/notifications/contract.ts';
+import type {
+  DispatchResult,
+  NoticeMessage,
+  NotificationBatch,
+} from '../src/features/notifications/contract.ts';
 import { capturePulseNotifications } from '../src/features/notifications/events.ts';
 import { createNotificationJobs } from '../src/features/notifications/jobs.ts';
 import { maintainNotifications } from '../src/features/notifications/maintenance.ts';
@@ -539,6 +543,94 @@ it('falls back to verified email after a definitive Slack refusal', async () => 
   ]);
 });
 
+it('does not requeue exhausted email fallback through unused Slack capacity and preserves exact batch replay', async () => {
+  const w = await world({ slack: true });
+  await w.enable();
+  await w.link(member.userId);
+  await w.open();
+  await onlyMember(w);
+  const first = recorder({
+    sendSlack: async () => refused(false),
+    sendEmail: async () => refused(false),
+  });
+  await w.drain(first.provider);
+  expect(first.calls).toEqual(['openDm', 'sendSlack', 'sendEmail']);
+  expect(await w.events()).toMatchObject([
+    { state: 'failed', channel: 'email', slack_attempts: 1, email_attempts: 1 },
+  ]);
+  const retryBody = { requestId: randomUUID(), revision: 0, confirm: true };
+  const committed = await w.notifications.retryBatch(owner, w.wid, w.pulse.id, retryBody);
+  expect(committed.queued).toBe(true);
+  const more = recorder({ sendEmail: async () => refused(true) });
+  await w.unpace();
+  expect(await w.run(more.provider)).toBe(true);
+  expect(await w.events()).toMatchObject([
+    { state: 'retry_scheduled', channel: 'email', slack_attempts: 1, email_attempts: 2 },
+  ]);
+  await pool.query(
+    "UPDATE notification_events SET available_at=clock_timestamp() WHERE workspace_id=$1 AND state='retry_scheduled'",
+    [w.wid],
+  );
+  await w.drain(more.provider);
+  expect(more.calls).toEqual(['sendEmail', 'sendEmail']);
+  const before = await w.events();
+  expect(before).toMatchObject([
+    { state: 'failed', channel: 'email', slack_attempts: 1, email_attempts: 3 },
+  ]);
+  const attemptsBefore = await count('FROM notification_attempts WHERE workspace_id=$1', [w.wid]);
+  expect(attemptsBefore).toBe(4);
+  expect(
+    (
+      await w.notifications.retryBatch(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      })
+    ).queued,
+  ).toBe(false);
+  expect(await w.events()).toEqual(before);
+  const none = recorder();
+  expect(await w.run(none.provider)).toBe(false);
+  expect(none.calls).toEqual([]);
+  expect(await count('FROM notification_attempts WHERE workspace_id=$1', [w.wid])).toBe(
+    attemptsBefore,
+  );
+  // Current eligibility/configuration must not invalidate an already committed exact request.
+  w.rotate(null);
+  expect(await w.notifications.retryBatch(owner, w.wid, w.pulse.id, retryBody)).toEqual(committed);
+  expect(await w.events()).toEqual(before);
+});
+
+it('retries terminal email fallback with remaining email capacity without returning to Slack', async () => {
+  const w = await world({ slack: true });
+  await w.enable();
+  await w.link(member.userId);
+  await w.open();
+  await onlyMember(w);
+  await w.drain(
+    recorder({ sendSlack: async () => refused(false), sendEmail: async () => refused(false) })
+      .provider,
+  );
+  expect(
+    (
+      await w.notifications.retryBatch(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      })
+    ).queued,
+  ).toBe(true);
+  expect(await w.events()).toMatchObject([
+    { state: 'pending', channel: 'email', email_attempts: 1 },
+  ]);
+  const retry = recorder();
+  await w.drain(retry.provider);
+  expect(retry.calls).toEqual(['sendEmail']);
+  expect(await w.events()).toMatchObject([
+    { state: 'provider_accepted', channel: 'email', slack_attempts: 1, email_attempts: 2 },
+  ]);
+});
+
 it('makes at most three known-safe Slack attempts with bounded backoff, then falls back', async () => {
   const w = await world({ slack: true });
   await w.enable();
@@ -945,6 +1037,208 @@ it('shares the per-member reminder cap between manual and scheduled reminders', 
   expect((await w.events("AND kind='reminder' AND state='pending'")).length).toBe(0);
 });
 
+it.each(['pending', 'leased', 'retry_scheduled'] as const)(
+  'coalesces a manual batch with an unexpired %s automatic reminder without spending another ordinal',
+  async (state) => {
+    const w = await world();
+    await w.enable();
+    await w.open();
+    await w.backdate('60 hours');
+    await advanceNotificationSchedule(pool);
+    if (state === 'leased') {
+      await pool.query(
+        `WITH t AS MATERIALIZED (SELECT clock_timestamp() AS now)
+        UPDATE notification_events SET state='leased',lease_token=$2,updated_at=t.now,lease_until=t.now+interval '120 seconds'
+        FROM t WHERE workspace_id=$1 AND kind='reminder'`,
+        [w.wid, randomUUID()],
+      );
+    } else if (state === 'retry_scheduled') {
+      await pool.query(
+        "UPDATE notification_events SET state='retry_scheduled',channel='email',email_attempts=1 WHERE workspace_id=$1 AND kind='reminder'",
+        [w.wid],
+      );
+    }
+    const before = await w.events("AND kind='reminder'");
+    expect(before).toMatchObject([
+      { user_id: member.userId, occurrence_key: 'auto:1', reminder_slot: 1, state },
+      { user_id: owner.userId, occurrence_key: 'auto:1', reminder_slot: 1, state },
+    ]);
+    const body = { requestId: randomUUID(), revision: 0, confirm: true };
+    const batch = await w.notifications.remind(owner, w.wid, w.pulse.id, body);
+    expect(batch.queued).toBe(false);
+    expect(await w.events("AND kind='reminder'")).toEqual(before);
+    await w.notifications.disableReminders(owner, w.wid, w.pulse.id, { revision: 0 });
+    const afterDisable = await w.events("AND kind='reminder'");
+    expect(await w.notifications.remind(owner, w.wid, w.pulse.id, body)).toEqual(batch);
+    expect(await w.events("AND kind='reminder'")).toEqual(afterDisable);
+  },
+);
+
+it.each(['invitation', 'reminder'] as const)(
+  'coalesces manual reminders behind an older failed or uncertain %s',
+  async (kind) => {
+    for (const state of ['failed', 'uncertain'] as const) {
+      const w = await world();
+      await w.enable();
+      await w.open();
+      if (kind === 'reminder') {
+        await w.backdate('60 hours');
+        await advanceNotificationSchedule(pool);
+      }
+      await pool.query(
+        "UPDATE notification_events SET state=$3,channel='email',email_attempts=1,reason=$4,terminal_at=clock_timestamp() WHERE workspace_id=$1 AND kind=$2",
+        [w.wid, kind, state, state === 'uncertain' ? 'acceptance_unknown' : 'provider_unavailable'],
+      );
+      const before = await w.events();
+      expect(
+        (
+          await w.notifications.remind(owner, w.wid, w.pulse.id, {
+            requestId: randomUUID(),
+            revision: 0,
+            confirm: true,
+          })
+        ).queued,
+      ).toBe(false);
+      expect(await w.events()).toEqual(before);
+    }
+  },
+);
+
+it.each(['pending', 'leased', 'retry_scheduled', 'failed', 'uncertain'] as const)(
+  'ignores an expired %s reminder when queuing a manual batch',
+  async (state) => {
+    const w = await world();
+    await w.enable();
+    await w.open();
+    await pool.query(
+      `WITH t AS MATERIALIZED (SELECT clock_timestamp() AS now)
+      INSERT INTO notification_events(workspace_id,pulse_id,user_id,kind,occurrence_key,reminder_slot,policy_revision,grant_fingerprint,
+        state,channel,created_at,updated_at,expires_at,terminal_at,lease_token,lease_until)
+      SELECT f.workspace_id,f.pulse_id,r.user_id,'reminder','auto:1',1,f.policy_revision,f.grant_fingerprint,
+        $3,'email',t.now-interval '49 hours',t.now,t.now-interval '1 second',
+        CASE WHEN $3 IN ('failed','uncertain') THEN t.now END,
+        CASE WHEN $3='leased' THEN $4::uuid END,CASE WHEN $3='leased' THEN t.now+interval '120 seconds' END
+      FROM notification_pulse_policies f JOIN space_roster r ON r.pulse_id=f.pulse_id,t WHERE f.workspace_id=$1 AND f.pulse_id=$2`,
+      [w.wid, w.pulse.id, state, randomUUID()],
+    );
+    expect(
+      (
+        await w.notifications.remind(owner, w.wid, w.pulse.id, {
+          requestId: randomUUID(),
+          revision: 0,
+          confirm: true,
+        })
+      ).queued,
+    ).toBe(true);
+    const rows = await w.events("AND kind='reminder'");
+    for (const userId of [member.userId, owner.userId]) {
+      expect(rows.filter((row) => row.user_id === userId)).toMatchObject([
+        { occurrence_key: 'auto:1', reminder_slot: 1, state },
+        { reminder_slot: 2, state: 'pending' },
+      ]);
+    }
+  },
+);
+
+it.each(['1 hour', '24 hours'] as const)(
+  'uses acceptance settlement, not creation time, for the manual 24-hour guard (%s ago)',
+  async (settledAgo) => {
+    const w = await world();
+    await w.enable();
+    await w.open();
+    await pool.query(
+      `WITH t AS MATERIALIZED (SELECT clock_timestamp() AS now)
+      INSERT INTO notification_events(workspace_id,pulse_id,user_id,kind,occurrence_key,reminder_slot,policy_revision,grant_fingerprint,
+        state,channel,email_attempts,created_at,updated_at,expires_at,terminal_at)
+      SELECT f.workspace_id,f.pulse_id,r.user_id,'reminder','auto:1',1,f.policy_revision,f.grant_fingerprint,
+        'provider_accepted','email',1,t.now-interval '30 hours',t.now-$3::interval,t.now+interval '18 hours',t.now-$3::interval
+      FROM notification_pulse_policies f JOIN space_roster r ON r.pulse_id=f.pulse_id,t WHERE f.workspace_id=$1 AND f.pulse_id=$2`,
+      [w.wid, w.pulse.id, settledAgo],
+    );
+    const before = await w.events("AND kind='reminder'");
+    const body = { requestId: randomUUID(), revision: 0, confirm: true };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    let batch: NotificationBatch;
+    try {
+      vi.setSystemTime(Date.now() + 30 * 86_400_000);
+      batch = await w.notifications.remind(owner, w.wid, w.pulse.id, body);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(batch.queued).toBe(settledAgo === '24 hours');
+    const after = await w.events("AND kind='reminder'");
+    if (settledAgo === '1 hour') expect(after).toEqual(before);
+    else
+      for (const userId of [member.userId, owner.userId]) {
+        expect(after.filter((row) => row.user_id === userId)).toMatchObject([
+          { occurrence_key: 'auto:1', reminder_slot: 1, state: 'provider_accepted' },
+          { reminder_slot: 2, state: 'pending' },
+        ]);
+      }
+    await w.notifications.disableReminders(owner, w.wid, w.pulse.id, { revision: 0 });
+    const disabled = await w.events("AND kind='reminder'");
+    expect(await w.notifications.remind(owner, w.wid, w.pulse.id, body)).toEqual(batch);
+    expect(await w.events("AND kind='reminder'")).toEqual(disabled);
+  },
+);
+
+it('coalesces manual reminders immediately after the worker accepts automatic reminders', async () => {
+  const w = await world();
+  await w.enable();
+  await w.open();
+  await w.backdate('60 hours');
+  await advanceNotificationSchedule(pool);
+  const fake = recorder();
+  await w.drain(fake.provider);
+  expect(await w.events("AND kind='reminder'")).toMatchObject([
+    { user_id: member.userId, state: 'provider_accepted', reminder_slot: 1 },
+    { user_id: owner.userId, state: 'provider_accepted', reminder_slot: 1 },
+  ]);
+  expect(
+    (
+      await w.notifications.remind(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      })
+    ).queued,
+  ).toBe(false);
+  await w.drain(fake.provider);
+  for (const userId of [member.userId, owner.userId])
+    expect(fake.messagesFor(userId)).toHaveLength(2);
+  expect(await w.events("AND kind='reminder'")).toHaveLength(2);
+});
+
+it.each(['automatic', 'manual'] as const)(
+  'keeps exactly one reminder per member when %s insertion owns the workspace lock first',
+  async (first) => {
+    const w = await world();
+    await w.enable();
+    await w.open();
+    await w.backdate('60 hours');
+    const manual = () =>
+      w.notifications.remind(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      });
+    if (first === 'automatic') {
+      await advanceNotificationSchedule(pool);
+      expect((await manual()).queued).toBe(false);
+    } else {
+      expect((await manual()).queued).toBe(true);
+      await advanceNotificationSchedule(pool);
+    }
+    const reminders = await w.events("AND kind='reminder' AND reminder_slot IS NOT NULL");
+    expect(reminders).toHaveLength(2);
+    for (const userId of [member.userId, owner.userId]) {
+      expect(reminders.filter((row) => row.user_id === userId)).toMatchObject([
+        { state: 'pending', reminder_slot: 1 },
+      ]);
+    }
+  },
+);
+
 it('serializes a manual reminder racing the scheduler without exceeding the cap or duplicating', async () => {
   const w = await world();
   await w.enable();
@@ -964,7 +1258,7 @@ it('serializes a manual reminder racing the scheduler without exceeding the cap 
     [w.wid],
   );
   expect(slots.rows.length).toBe(2);
-  for (const row of slots.rows) expect(row.highest).toBeLessThanOrEqual(2);
+  for (const row of slots.rows) expect(row).toMatchObject({ count: 1, highest: 1 });
 });
 
 it('continues bounded 100-recipient traversal across calls with a durable cursor', async () => {
@@ -1220,12 +1514,12 @@ it('never lets a younger reminder bypass an older unresolved notice, but ignores
   const w = await world();
   await w.enable();
   await w.open();
+  const request = () => ({ requestId: randomUUID(), revision: 0, confirm: true }) as const;
+  expect((await w.notifications.remind(owner, w.wid, w.pulse.id, request())).queued).toBe(true);
   await pool.query(
     "UPDATE notification_events SET state='uncertain',channel='email',reason='acceptance_unknown',terminal_at=clock_timestamp() WHERE workspace_id=$1 AND user_id=$2 AND kind='invitation'",
     [w.wid, member.userId],
   );
-  const request = () => ({ requestId: randomUUID(), revision: 0, confirm: true }) as const;
-  expect((await w.notifications.remind(owner, w.wid, w.pulse.id, request())).queued).toBe(true);
   const fake = recorder();
   await w.drain(fake.provider);
   expect(fake.messagesFor(member.userId)).toEqual([]);
@@ -1762,6 +2056,53 @@ it('replays an owner-confirmed uncertainty on its original channel without fallb
       email_attempts: 0,
     },
   ]);
+});
+
+it('keeps a failed confirmed uncertain replay pinned when its original channel budget is exhausted', async () => {
+  const w = await world({ slack: true });
+  await w.enable();
+  await w.link(member.userId);
+  await w.open();
+  await onlyMember(w);
+  await w.drain(recorder({ sendSlack: async () => uncertain }).provider);
+  const confirmed = { requestId: randomUUID(), revision: 0, confirm: true, confirmUncertain: true };
+  expect((await w.notifications.retryBatch(owner, w.wid, w.pulse.id, confirmed)).queued).toBe(true);
+  const refusedReplay = recorder({ sendSlack: async () => refused(false) });
+  await w.drain(refusedReplay.provider);
+  expect(
+    (
+      await w.notifications.retryBatch(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      })
+    ).queued,
+  ).toBe(true);
+  await w.drain(refusedReplay.provider);
+  const before = await w.events();
+  expect(before).toMatchObject([
+    {
+      state: 'failed',
+      channel: 'slack',
+      uncertain_replays: 1,
+      slack_attempts: 3,
+      email_attempts: 0,
+    },
+  ]);
+  expect(refusedReplay.calls).not.toContain('sendEmail');
+  expect(
+    (
+      await w.notifications.retryBatch(owner, w.wid, w.pulse.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        confirm: true,
+      })
+    ).queued,
+  ).toBe(false);
+  expect(await w.events()).toEqual(before);
+  const none = recorder();
+  expect(await w.run(none.provider)).toBe(false);
+  expect(none.calls).toEqual([]);
 });
 
 // ---- Fix round 2: final-lock revalidation, absolute dispatch deadlines, spacing across crashes ----

@@ -723,6 +723,55 @@ describe('owner aggregate delivery controls', () => {
     expect(requestIdOf(1)).not.toBe(requestIdOf(0));
   });
 
+  it('keeps failed help honest after an owner-confirmed uncertain retry is refused', async () => {
+    net.summary = {
+      counts: { ...zeroCounts, uncertain: 1 },
+      remindersEnabled: true,
+      revision: 5,
+    };
+    net.override = (call) => {
+      if (call.method === 'POST' && call.path.endsWith('/retry')) {
+        net.summary = { ...net.summary, counts: { ...zeroCounts, failed: 1 } };
+      }
+      return undefined;
+    };
+    const user = userEvent.setup();
+    await mountPage({ workspaceId, pulseId: pulseId(2) });
+    await user.click(await screen.findByRole('button', { name: 'Retry failed deliveries' }));
+    await user.click(screen.getByRole('checkbox', { name: /outcome is unknown/ }));
+    await user.click(screen.getByRole('button', { name: 'Confirm retry' }));
+    await screen.findByText(/retry batch is queued/);
+    const section = screen.getByRole('region', { name: 'Notification delivery' });
+    await waitFor(() =>
+      expect(within(section).getByText('Could not send').closest('div')).toHaveTextContent('1'),
+    );
+    const failed = within(section).getByText('Could not send').closest('div');
+    expect(failed).toHaveTextContent(/Not accepted on the latest attempt/);
+    expect(failed).toHaveTextContent(/earlier submission may have arrived/);
+    expect(section).not.toHaveTextContent('Definitely not accepted by any destination');
+    expect(section).not.toHaveTextContent(colleagueSlack);
+    expect(section).not.toHaveTextContent(colleagueEmail);
+  });
+
+  it('explains reminder blockers beside bounded retry controls without promising recovery', async () => {
+    net.summary = {
+      counts: { ...zeroCounts, failed: 1 },
+      remindersEnabled: true,
+      revision: 5,
+    };
+    await mountPage({ workspaceId, pulseId: pulseId(2) });
+    const retry = await screen.findByRole('button', { name: 'Retry failed deliveries' });
+    expect(retry).toHaveAccessibleDescription(/Older failed or unknown invitations and reminders/);
+    expect(retry).toHaveAccessibleDescription(/Missed reminder slots are not restored/);
+    expect(retry).toHaveAccessibleDescription(/Invitations have no time expiry/);
+    expect(retry).toHaveAccessibleDescription(/Exhausted attempt limits cannot be retried/);
+    const section = screen.getByRole('region', { name: 'Notification delivery' });
+    expect(section).toHaveTextContent(/turn off reminders for this pulse/);
+    expect(section).not.toHaveTextContent(colleagueSlack);
+    expect(section).not.toHaveTextContent(colleagueEmail);
+    expect(mutations()).toHaveLength(0);
+  });
+
   it('offers no retry when nothing failed and no reminders on a closed pulse', async () => {
     net.pulses = [pulse({ id: pulseId(2), teamName: 'Platform', questions: closedQuestions() })];
     await mountPage({ workspaceId, pulseId: pulseId(2) });
