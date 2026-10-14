@@ -10,6 +10,17 @@ The operator configures private provider credentials and the public Clio origin.
 
 Notification configuration is optional and starts disabled. GitHub login remains Clio's identity provider. Slack linking proves only a notification destination and grants no Clio membership. Existing pulses are not backfilled when notifications are enabled, and disabling cancels pending work rather than pausing it for a later replay.
 
+## Owner wizard and member linking
+
+After the operator configures the workspace grant and starts the worker, open **Developer experience**, select the workspace and find **Pulse notifications**. Owners select **Set up notifications** (or **Change notification settings** when already enabled):
+
+1. **Integration:** check which authorized delivery channels are available. With neither configured, Next stays disabled; the wizard cannot create provider credentials or install an App.
+2. **Messages and timing:** choose opening invitations, closure notices and bounded reminder timing. These choices apply to future pulse openings.
+3. **Preview and test:** review the neutral messages. Optionally select your own Slack or email destination and explicitly confirm **Send a test to me**. A test uses only that channel and does not enable notifications. If the outcome is unknown, check the same request again instead of starting another send.
+4. **Enable:** review settings and explicitly confirm enabling. Existing pulses are not backfilled.
+
+Each member uses **Your Slack account** in the same panel to start linking, then completes Slack consent themselves. Linking adds no Clio membership. **Your notification history** shows only that member's own messages. Owners find aggregate delivery status and confirmed reminder/retry controls in pulse details; those controls never reveal recipient lists.
+
 ## Slack App preparation
 
 Register and install a dedicated Slack App in the exact Slack workspace you want Clio to use. Bot delivery needs `im:write` and `chat:write`, not public-channel posting, history access, impersonation or email-directory lookup. Each message is a one-to-one DM opened for a verified linked Slack user.
@@ -74,7 +85,7 @@ For local email capture, use `mode: "local_capture"`, a loopback HTTP `publicOri
 
 ## Pulse behavior
 
-The approved defaults are an invitation on opening, a reminder after 48 hours and one further reminder 72 hours later, plus a neutral closure notice. Owners can change first delay/repeat interval to 24–168 hours and cap reminders at 1–3, or disable them. Opening freezes those settings. Manual owner reminders share the same per-member cap and are limited to one batch per pulse per 24 hours. A manual batch skips members with an unexpired pending, leased or retry-scheduled reminder, an older unexpired failed or uncertain invitation/reminder, or a reminder accepted by a provider within the previous 24 hours. The acceptance window starts when the worker records provider acceptance, not when the event was created. Skipped members spend no additional reminder slot; repeating the exact batch request returns its original result.
+The approved defaults are an invitation on opening, a reminder after 48 hours and one further reminder 72 hours later, plus a neutral closure notice. Owners can change first delay/repeat interval to 24–168 hours and cap reminders at 1–3, or disable them. Opening freezes those settings. Manual owner reminders share the same per-member cap and are limited to one batch per pulse per 24 hours. A confirmed manual batch uses that allowance even when coalescing or eligibility leaves nothing to queue. A manual batch skips members with an unexpired pending, leased or retry-scheduled reminder, an older unexpired failed or uncertain invitation/reminder, or a reminder accepted by a provider within the previous 24 hours. The acceptance window starts when the worker records provider acceptance, not when the event was created. Skipped members spend no additional reminder slot; repeating the exact batch request returns its original result.
 
 A late worker catches up only the latest eligible reminder, not a burst of missed messages. Reminder events expire 48 hours after their scheduled time and stop when the pulse closes/cancels. Closure notices expire after seven days. Submitting a response or losing workspace access suppresses pending invitations/reminders; team moves preserve frozen-roster eligibility.
 

@@ -626,8 +626,8 @@ function SpaceDashboard({
             <h3 id={`${id}-owner`}>Owner tools</h3>
             <p className="space-muted">
               Pulses open only when you choose. Clio does not schedule, open or close pulses by
-              itself; it messages people only through the pulse notifications an owner enables
-              below.
+              itself; it messages people only through the pulse notifications an owner enables for
+              this workspace.
             </p>
             <button
               ref={wizardTrigger}
