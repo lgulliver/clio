@@ -199,7 +199,7 @@ For native Argo evidence, identify Argo instance, destination cluster and applic
 | Startup rejects auth / protected routes 503 | Fill all five auth values for login, or leave all five unset for health-only use. Restart API after changes. |
 | OAuth callback fails | Check GitHub callback ends `/api/auth/callback/github` on port 3000, `AUTH_BASE_URL` matches API, and browser/`APP_ORIGIN` use localhost:5173. Start login again to obtain fresh state. |
 | Browser requests denied / CORS / 403 | Check exact origin, port and hostname. Stop a stray Vite process; use the strict-port command. Confirm current owner role for writes. |
-| Invitation rejected | Use the invited account with verified matching email; check expiry/cancellation. There is no email delivery service. |
+| Invitation rejected | Use the invited account with verified matching email; check expiry/cancellation. Workspace-access invitation links remain manually shared. |
 | Save, preview or enqueue returns 409 | Reload current mapping; preserve/review draft before saving. For enqueue, wait for active run to finish. Keep request ID/revision unchanged only when replaying the same enqueue. |
 | Run remains pending / no jobs processed | Start `pnpm worker:mock` separately with database configuration and current migrations. `--once` before enqueue handles no future job. Check lease expiry/backoff before retrying. |
 | Run remains running after worker interruption | Restart worker and allow lease expiry/reclaim. Three exhausted attempts produce terminal failure; inspect the redacted status and enqueue a new run after correcting local setup. |

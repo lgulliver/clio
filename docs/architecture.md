@@ -72,6 +72,14 @@ Owners select a successful native basis and received reports in Settings. Select
 
 Saved measurements expose the original basis cutoff and a strictly later database measurement cutoff, reporting window, pinned revision, safe blockers, coverage and exact five metric objects. Private payloads, references, tokens and fingerprints remain server-side. Owners and members browse bounded immutable measurement history in Overview; completed history remains readable after producer revocation while workspace authorization still applies. The [local MVP acceptance scope](agents/feature-completion.md) records final verification separately from implementation.
 
+## SPACE pulse notifications
+
+Notification configuration and delivery live in `apps/api/src/features/notifications`; they do not change OEMS calculations or GitHub login. Operator-only workspace grants separate Slack bot delivery, Slack OpenID identity linking and SMTP credentials. The SPA receives capability flags, its own binding/history and owner-only aggregate delivery state. It never receives provider credentials, recipient directories or another member’s delivery history.
+
+Pulse lifecycle transactions capture eligible frozen-roster events and suppress pending invitations/reminders on accepted responses, cancellation or access revocation. A separate PostgreSQL worker schedules bounded reminders, claims leased events and records transport attempts. Network calls occur outside database transactions. Shared provider pacing and method cooldowns coordinate workers. Private configuration and current eligibility fence attempts; accepted submissions stay accepted, while ambiguous submissions stay uncertain and prevent automatic cross-channel fallback.
+
+Slack linking uses single-use session-bound state and a hashed nonce, signed OpenID proof for the authorized Slack workspace, and post-exchange reauthorization. It grants no Clio membership. SMTP requires implicit TLS and certificate validation in live mode; explicit local capture permits only loopback transport. Provider acceptance means submission was acknowledged, not inbox delivery or reading. See [operator and member setup](notifications-getting-started.md) for configuration, confirmation, retry and retention rules.
+
 ## Current limitations
 
 The UI displays unconnected, empty, pending and failed states without fabricating evidence. GitHub login/logout, workspace/service workflows, manual invitations and owner access controls are connected. Member and invitation lists have independent bounded cursor pages; cancellation and revocation clear affected in-memory invitation tokens. Owner membership remains protected, and current session/membership checks govern private reads and writes.

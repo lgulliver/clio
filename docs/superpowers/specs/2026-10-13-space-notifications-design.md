@@ -1,6 +1,6 @@
 # SPACE pulse notifications: Slack DMs with email fallback
 
-Status: approved by the maintainer on 2026-10-13; implementation plan approved; implementation in progress.
+Status: approved by the maintainer on 2026-10-13; implementation plan approved; local implementation and controlled transport proof complete. Real provider setup and delivery remain operator-dependent.
 Date: 2026-10-13
 Owner: Liam Gulliver
 

@@ -172,6 +172,34 @@ describe('real PostgreSQL foundation', () => {
     await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
   });
 
+  it('requires notification fences, cursor state and shared budgets for readiness', async () => {
+    await migrate(pool, migrations);
+    for (const [table, column] of [
+      ['notification_policies', 'grant_fingerprint'],
+      ['notification_pulse_policies', 'scheduler_recipient_cursor'],
+      ['notification_batches', 'channel'],
+      ['notification_events', 'uncertain_replays'],
+      ['notification_attempts', 'credential_fingerprint'],
+      ['notification_slack_bindings', 'grant_fingerprint'],
+      ['notification_oauth_states', 'nonce_hash'],
+      ['notification_slack_budgets', 'next_send_at'],
+      ['notification_slack_cooldowns', 'blocked_until'],
+      ['notification_smtp_budgets', 'used'],
+    ]) {
+      await pool.query(
+        `ALTER TABLE ${table} RENAME COLUMN ${column} TO notification_readiness_probe`,
+      );
+      try {
+        await expect(checkReadiness(pool, migrations)).rejects.toThrow();
+      } finally {
+        await pool.query(
+          `ALTER TABLE ${table} RENAME COLUMN notification_readiness_probe TO ${column}`,
+        );
+      }
+    }
+    await expect(checkReadiness(pool, migrations)).resolves.toBeUndefined();
+  });
+
   it('requires archive tables, pins and authority columns for readiness', async () => {
     for (const [table, column] of [
       ['argo_archive_journals', 'last_sequence'],

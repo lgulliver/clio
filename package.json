@@ -30,7 +30,8 @@
     "argo:journal": "node infra/argocd/journal/cli.ts",
     "argo:capture": "node infra/argocd/capture/cli.ts",
     "worker:measurement": "pnpm --filter @clio/api worker:measurement",
-    "worker:space-github": "pnpm --filter @clio/api worker:space-github"
+    "worker:space-github": "pnpm --filter @clio/api worker:space-github",
+    "worker:notifications": "pnpm --filter @clio/api worker:notifications"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

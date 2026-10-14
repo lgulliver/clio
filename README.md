@@ -14,6 +14,8 @@ Use [SPACE team pulses](docs/space-getting-started.md) to assign members to prim
 
 Use [GitHub SPACE setup](docs/providers/connect-space-github.md) for repository activity, PR review time (open to merge) and time to first human review. A separate PR-only App and durable worker supply bounded provisional observations. Guided setup selects one owning team; saved history and qualified trend points retain original source/team context. Read the [HTTP contract](docs/space-github-api.md).
 
+Use [pulse notification setup](docs/notifications-getting-started.md) to configure server-side Slack and SMTP grants, then follow the owner wizard in Developer experience. Members link their own Slack account. Pulse messages use Slack DMs first, with verified-email fallback after definite non-acceptance; uncertain submissions require explicit owner review. Surveys remain owner-controlled and answers stay in Clio.
+
 Read [getting started and connecting data sources](docs/getting-started.md) for the full database, login, mock collection and source setup workflow. Use [real-source preparation and access checks](docs/providers/real-sources.md) for GitHub App registration and scoped Argo access; use [local live GitHub connection](docs/providers/connect-github.md) to configure private operator grants and collect GitHub Deployments. Use [connecting Argo CD](docs/providers/connect-argocd.md) for explicit Application scope, operation info, notification authentication and immutable results. Use [independent measurement evidence](docs/providers/connect-measurement-evidence.md) to configure private producer capabilities and save evidence-backed measurements. An [optional Argo CD sandbox](docs/providers/local-argocd.md) uses Kubernetes in Docker through Kind; it remains separate from Clio's mock mode.
 
 Use Node 24 LTS (24.21.0 is pinned in .node-version) and pnpm 12.10.1:
@@ -49,6 +51,8 @@ Vite prints the local development URL, normally http://localhost:5173. The suppo
 | pnpm worker:github | Process eligible live GitHub collection jobs (private operator configuration required) |
 | pnpm worker:measurement | Process queued independent measurements against saved native collections |
 | pnpm worker:measurement --once | Process at most one eligible measurement job, then exit |
+| pnpm worker:notifications | Schedule and deliver configured SPACE pulse notifications |
+| pnpm worker:notifications --once | Run bounded notification maintenance/scheduling and at most one event |
 | pnpm demo:providers | Run configurable fictional GitHub/Argo CD evidence through OEMS |
 
 ## Repository layout

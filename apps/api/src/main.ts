@@ -6,6 +6,7 @@ import { readGitHubConfig } from './features/github-collection/config.ts';
 import { createAuth } from './features/identity/auth.ts';
 import { readAuthConfig } from './features/identity/config.ts';
 import { readMeasurementConfig } from './features/measurements/config.ts';
+import { readNotificationConfig } from './features/notifications/config.ts';
 import { readSpaceGitHubConfig } from './features/space-github/config.ts';
 import { createServer } from './server.ts';
 
@@ -16,7 +17,14 @@ async function main() {
   const spaceGithub = await readSpaceGitHubConfig(process.env, github?.appId ?? null);
   const argo = await readArgoConfig(process.env);
   const measurement = await readMeasurementConfig(process.env);
-  if ((github || argo || measurement || spaceGithub) && !authConfig)
+  async function notificationsNow() {
+    const notifications = await readNotificationConfig(process.env);
+    if (notifications && (!authConfig || notifications.publicOrigin !== authConfig.appOrigin))
+      throw new Error('Notification configuration requires matching identity origin');
+    return notifications;
+  }
+  const notifications = await notificationsNow();
+  if ((github || argo || measurement || spaceGithub || notifications) && !authConfig)
     throw new Error('Live connections require identity configuration');
   const migrations = await loadMigrations();
   const pool = createPool(config.databaseUrl);
@@ -34,6 +42,8 @@ async function main() {
           argo,
           measurement,
           spaceGithub,
+          notifications,
+          notificationsConfigNow: notificationsNow,
         }
       : undefined,
   );

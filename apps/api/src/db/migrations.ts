@@ -149,6 +149,32 @@ export async function checkReadiness(pool: Pool, migrations: Migration[]) {
   await pool.query(
     'SELECT run_id,workspace_id,service_id,connection_revision,connection_input,service_name,evidence,snapshot,metrics,oems_revision,public_result,digest FROM github_collection_snapshots LIMIT 0',
   );
+  await pool.query(
+    'SELECT workspace_id,revision,enabled,invitations,closures,reminders,first_reminder_hours,repeat_hours,maximum_reminders,grant_fingerprint,slack_team_id,updated_at FROM notification_policies LIMIT 0',
+  );
+  await pool.query(
+    'SELECT workspace_id,pulse_id,policy_revision,enabled,invitations,closures,reminders,first_reminder_hours,repeat_hours,maximum_reminders,grant_fingerprint,opened_at,reminders_enabled,reminder_revision,scheduler_slot,scheduler_active_slot,scheduler_recipient_cursor,last_manual_at,cancelled_at FROM notification_pulse_policies LIMIT 0',
+  );
+  await pool.query(
+    'SELECT workspace_id,request_id,pulse_id,created_by,kind,channel,input,queued,created_at FROM notification_batches LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,pulse_id,user_id,kind,occurrence_key,reminder_slot,policy_revision,grant_fingerprint,request_id,test_request_id,state,channel,available_at,expires_at,created_at,updated_at,terminal_at,lease_token,lease_until,slack_attempts,email_attempts,uncertain_replays,reason FROM notification_events LIMIT 0',
+  );
+  await pool.query(
+    'SELECT id,workspace_id,event_id,lease_token,channel,attempt_number,grant_fingerprint,credential_fingerprint,binding_revision,slack_team_id,slack_user_id,email,started_at,completed_at,outcome,reason,retryable,retry_after_ms FROM notification_attempts LIMIT 0',
+  );
+  await pool.query(
+    'SELECT workspace_id,user_id,revision,team_id,slack_user_id,grant_fingerprint,linked_at,updated_at FROM notification_slack_bindings LIMIT 0',
+  );
+  await pool.query(
+    'SELECT state_hash,nonce_hash,workspace_id,user_id,session_id,team_id,grant_fingerprint,credential_fingerprint,binding_revision,created_at,expires_at,consumed_at FROM notification_oauth_states LIMIT 0',
+  );
+  await pool.query('SELECT team_id,next_send_at FROM notification_slack_budgets LIMIT 0');
+  await pool.query('SELECT team_id,method,blocked_until FROM notification_slack_cooldowns LIMIT 0');
+  await pool.query(
+    'SELECT pacing_key,window_start,used,next_send_at FROM notification_smtp_budgets LIMIT 0',
+  );
   await pool.query('SELECT workspace_id, minimum_respondents FROM space_preferences LIMIT 0');
   await pool.query('SELECT workspace_id, user_id, team_id FROM space_assignments LIMIT 0');
   await pool.query(

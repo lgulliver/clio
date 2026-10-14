@@ -8,7 +8,7 @@ Clio's first SPACE slice runs short, owner-controlled team pulse surveys and rep
 - The SPACE database migration has been applied explicitly to your development database. Startup never migrates.
 - You belong to a workspace. Owners need at least one team, created in **Workspace → Organize teams and products**.
 
-Nothing in this workflow sends invitations, reminders, email or chat messages, and Clio never creates or opens a pulse automatically. Test fixtures are fictional and stay in tests.
+Optional [pulse notifications](notifications-getting-started.md) use Slack DMs first and verified-email fallback. Delivery starts disabled and requires operator configuration and owner enablement before a pulse opens. Clio never creates or opens a pulse automatically. Test fixtures stay in tests.
 
 ## Owner setup
 

@@ -15,7 +15,8 @@
     "worker:github": "node --env-file-if-exists=.env src/worker-github.ts",
     "worker:argo": "node --env-file-if-exists=.env src/worker-argo.ts",
     "worker:measurement": "node --env-file-if-exists=.env src/worker-measurement.ts",
-    "worker:space-github": "node --env-file-if-exists=.env src/worker-space-github.ts"
+    "worker:space-github": "node --env-file-if-exists=.env src/worker-space-github.ts",
+    "worker:notifications": "node --env-file-if-exists=.env src/worker-notifications.ts"
   },
   "dependencies": {
     "@clio/adapters": "workspace:*",
