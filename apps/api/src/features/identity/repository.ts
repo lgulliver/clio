@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../db/pool.ts';
+import { suppressMemberNotifications } from '../notifications/events.ts';
 import { createRepository } from '../workspaces/repository.ts';
 import { email, IdentityError, invitationToken, name, opaqueId, uuid } from './input.ts';
 
@@ -293,6 +294,8 @@ export function createIdentityRepository(pool: Pool) {
                  (SELECT count(*) > 100 FROM cancelled) AS has_more`,
           [workspaceId, userId],
         );
+        // Same transaction as the deletion: pending notices, link and link states are invalidated.
+        await suppressMemberNotifications(client, workspaceId, userId);
         await client.query(
           'DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2',
           [workspaceId, userId],

@@ -762,6 +762,11 @@ it('failed retry remains bounded by transport ceilings, expiry and verified curr
     "UPDATE space_pulses SET closed_at=clock_timestamp()-interval '8 days' WHERE id=$1",
     [f2.pulse.id],
   );
+  // The real transition now creates closure events at close time (Task 4 wiring). Remove them so
+  // this case still proves the hook itself refuses events once the seven-day window has elapsed.
+  await pool.query("DELETE FROM notification_events WHERE pulse_id=$1 AND kind='closure'", [
+    f2.pulse.id,
+  ]);
   await withTransaction(pool, (client) =>
     closePulseNotifications(client, f2.workspace.id, f2.pulse.id),
   );

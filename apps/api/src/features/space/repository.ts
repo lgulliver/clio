@@ -3,6 +3,12 @@ import type { Pool, PoolClient } from 'pg';
 import { IdentityError, object, opaqueId, uuid } from '../identity/input.ts';
 import { type Actor, authorizedWorkspaceTransaction } from '../identity/repository.ts';
 import {
+  cancelPulseNotifications,
+  capturePulseNotifications,
+  closePulseNotifications,
+  suppressMemberNotifications,
+} from '../notifications/events.ts';
+import {
   aggregateResponses,
   instrument,
   type Pulse,
@@ -380,6 +386,8 @@ export function createSpaceRepository(pool: Pool) {
             'INSERT INTO space_roster(pulse_id,user_id) SELECT $1,unnest($2::text[])',
             [row.id, roster.rows.map((r) => r.user_id)],
           );
+          // Same transaction: pulse opening and its frozen notification policy/invitations commit together.
+          await capturePulseNotifications(client, workspaceId, row.id);
         } else if (action === 'close') {
           if (row.state !== 'open' || row.minimum_respondents === null)
             throw new IdentityError(409, 'conflict');
@@ -396,6 +404,7 @@ export function createSpaceRepository(pool: Pool) {
             [workspaceId, row.id, JSON.stringify(questions)],
           );
           await client.query('DELETE FROM space_answers WHERE pulse_id=$1', [row.id]);
+          await closePulseNotifications(client, workspaceId, row.id);
         } else {
           if (row.state !== 'draft' && row.state !== 'open')
             throw new IdentityError(409, 'conflict');
@@ -405,6 +414,7 @@ export function createSpaceRepository(pool: Pool) {
             [workspaceId, row.id, preview.teamName, preview.minimumRespondents, preview.rosterSize],
           );
           await client.query('DELETE FROM space_answers WHERE pulse_id=$1', [row.id]);
+          await cancelPulseNotifications(client, workspaceId, row.id);
         }
         return safePulse(client, actor, await stored(client, workspaceId, row.id), true);
       });
@@ -434,6 +444,9 @@ export function createSpaceRepository(pool: Pool) {
             [randomUUID(), row.id, JSON.stringify(answers)],
           );
         }
+        // Accepted and replayed responses both stop pending invitations/reminders for this member.
+        // Only the receipt fact is used; notifications never join respondents to answers.
+        await suppressMemberNotifications(client, workspaceId, actor.userId, row.id);
         return { workspaceId, pulseId: row.id, submitted: true as const };
       });
     },
